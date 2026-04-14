@@ -1,0 +1,681 @@
+---
+spec: TS 29.571 v18.2.0 / TS 29.526 v18.7.0
+section: §5.4.4.60-61, §7
+interface: Internal
+service: Internal
+operation: N/A (data model)
+---
+
+# NSSAAF Data Model & Persistence Design
+
+## 1. Overview
+
+Tài liệu này thiết kế data model cho NSSAAF — bao gồm PostgreSQL schema cho persistent state, Redis cache structure, và serialization format cho EAP session state. Tất cả thiết kế tuân thủ 3GPP TS 29.571 (data types), TS 29.526 (session resources), và TS 28.541 (NRM).
+
+---
+
+## 2. Core Entities
+
+### 2.1 Entity Relationship Diagram
+
+```
+┌─────────────────────┐       ┌──────────────────────────────┐
+│   aaa_server_config │       │    slice_auth_session        │
+│─────────────────────│       │──────────────────────────────│
+│ PK id: UUID        │───┐   │ PK auth_ctx_id: VARCHAR(64) │
+│    snssai_sst      │   │   │    gpsi: VARCHAR(32)        │
+│    snssai_sd       │   └──▶│ FK aaa_config_id: UUID     │
+│    protocol        │       │    snssai_sst: INTEGER      │
+│    aaa_server_host │       │    snssai_sd: VARCHAR(8)    │
+│    aaa_server_port │       │    amf_instance_id          │
+│    shared_secret   │       │    reauth_notif_uri         │
+│    priority        │       │    revoc_notif_uri          │
+│    enabled         │       │    eap_session_state: BYTEA │
+│    ...             │       │    eap_rounds: INTEGER      │
+└─────────────────────┘       │    nssaa_status: ENUM       │
+                               │    auth_result: ENUM        │
+                               │    created_at               │
+                               │    expires_at               │
+                               │    completed_at             │
+                               └──────────────────────────────┘
+                                        │
+                                        ▼
+                               ┌──────────────────────────────┐
+                               │     nssaa_audit_log          │
+                               │──────────────────────────────│
+                               │ PK id: BIGSERIAL             │
+                               │    auth_ctx_id              │
+                               │    gpsi_hash: VARCHAR(64)   │ ← hashed for privacy
+                               │    snssai_sst/sd            │
+                               │    action: VARCHAR(30)       │
+                               │    nssaa_status             │
+                               │    created_at               │
+                               └──────────────────────────────┘
+```
+
+### 2.2 NssaaStatus Enum (Source: TS 29.571 §5.4.4.60)
+
+```sql
+CREATE TYPE nssaa_status AS ENUM (
+    'NOT_EXECUTED',   -- NSSAA chưa chạy cho S-NSSAI này
+    'PENDING',        -- NSSAA đang chạy, chờ kết quả cuối
+    'EAP_SUCCESS',    -- EAP authentication thành công
+    'EAP_FAILURE'     -- EAP authentication thất bại
+);
+
+COMMENT ON TYPE nssaa_status IS
+    'TS 29.571 §5.4.4.60: NssaaStatus — status of NSSAA for a specific S-NSSAI';
+```
+
+---
+
+## 3. PostgreSQL Schema
+
+### 3.1 AAA Server Configuration Table
+
+```sql
+-- Static configuration: loaded at startup, rarely updated
+CREATE TABLE aaa_server_configs (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    -- Slice identification (composite key)
+    snssai_sst      INTEGER NOT NULL,
+    snssai_sd       VARCHAR(8),   -- NULL = wildcard (match any SD for this SST)
+
+    -- Protocol
+    protocol        VARCHAR(10) NOT NULL CHECK (protocol IN ('RADIUS', 'DIAMETER')),
+
+    -- Primary AAA server
+    aaa_server_host VARCHAR(255) NOT NULL,
+    aaa_server_port INTEGER NOT NULL CHECK (aaa_server_port BETWEEN 1 AND 65535),
+
+    -- AAA Proxy (optional, for third-party AAA-S)
+    aaa_proxy_host  VARCHAR(255),
+    aaa_proxy_port  INTEGER CHECK (aaa_proxy_port BETWEEN 1 AND 65535),
+
+    -- Security: encrypted at application layer
+    shared_secret   TEXT NOT NULL,
+
+    -- AAA-S authorization check config
+    allow_reauth    BOOLEAN NOT NULL DEFAULT TRUE,
+    allow_revoke    BOOLEAN NOT NULL DEFAULT TRUE,
+
+    -- Load balancing
+    priority        INTEGER NOT NULL DEFAULT 100,  -- Lower = higher priority
+    weight          INTEGER NOT NULL DEFAULT 1,
+
+    -- Operational
+    enabled         BOOLEAN NOT NULL DEFAULT TRUE,
+    description     TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    -- Constraints
+    UNIQUE (snssai_sst, snssai_sd)
+);
+
+CREATE INDEX idx_aaa_config_snssai
+    ON aaa_server_configs(snssai_sst, snssai_sd, enabled)
+    WHERE enabled = TRUE;
+
+CREATE INDEX idx_aaa_config_priority
+    ON aaa_server_configs(priority, weight)
+    WHERE enabled = TRUE;
+
+-- Function: lookup AAA config with 3-level fallback
+CREATE OR REPLACE FUNCTION get_aaa_config(
+    p_sst INTEGER,
+    p_sd VARCHAR(8)
+) RETURNS aaa_server_configs AS $$
+DECLARE
+    v_config aaa_server_configs%ROWTYPE;
+BEGIN
+    -- Level 1: Exact match (SST + SD)
+    SELECT * INTO v_config
+    FROM aaa_server_configs
+    WHERE snssai_sst = p_sst
+      AND snssai_sd = p_sd
+      AND enabled = TRUE
+    ORDER BY priority ASC, weight DESC
+    LIMIT 1;
+
+    IF v_config.id IS NOT NULL THEN
+        RETURN v_config;
+    END IF;
+
+    -- Level 2: SST match only (SD wildcard)
+    SELECT * INTO v_config
+    FROM aaa_server_configs
+    WHERE snssai_sst = p_sst
+      AND snssai_sd IS NULL
+      AND enabled = TRUE
+    ORDER BY priority ASC, weight DESC
+    LIMIT 1;
+
+    IF v_config.id IS NOT NULL THEN
+        RETURN v_config;
+    END IF;
+
+    -- Level 3: Default (all wildcards)
+    SELECT * INTO v_config
+    FROM aaa_server_configs
+    WHERE snssai_sst IS NULL
+      AND snssai_sd IS NULL
+      AND enabled = TRUE
+    ORDER BY priority ASC, weight DESC
+    LIMIT 1;
+
+    RETURN v_config;
+END;
+$$ LANGUAGE plpgsql STABLE;
+```
+
+### 3.2 Slice Authentication Session Table
+
+```sql
+-- Session table: high-volume, partitioned by month
+CREATE TABLE slice_auth_sessions (
+    auth_ctx_id        VARCHAR(64) NOT NULL,
+
+    -- Subscriber identification (TS 29.571)
+    gpsi               VARCHAR(32) NOT NULL,  -- GPSI pattern: ^5[0-9]{8,14}$
+    supi               VARCHAR(32),           -- May be resolved later
+
+    -- Slice identification (TS 29.571 Snssai)
+    snssai_sst         INTEGER NOT NULL CHECK (snssai_sst BETWEEN 0 AND 255),
+    snssai_sd          VARCHAR(8),           -- 6 hex chars, nullable
+
+    -- AMF identification
+    amf_instance_id    VARCHAR(64),
+    amf_ip             INET,
+    amf_region         VARCHAR(16),           -- From AMF instance ID
+
+    -- Callback URIs (TS 29.526)
+    reauth_notif_uri   TEXT,
+    revoc_notif_uri    TEXT,
+
+    -- AAA configuration reference
+    aaa_config_id      UUID NOT NULL REFERENCES aaa_server_configs(id),
+
+    -- EAP session state (serialized binary blob)
+    -- Format: proto-tlv encoded
+    eap_session_state  BYTEA NOT NULL,
+
+    -- Session counters
+    eap_rounds         INTEGER NOT NULL DEFAULT 0,
+    max_eap_rounds     INTEGER NOT NULL DEFAULT 20,
+    eap_last_nonce     VARCHAR(64),           -- For duplicate detection
+
+    -- Auth result (TS 29.571 NssaaStatus)
+    nssaa_status       nssaa_status NOT NULL DEFAULT 'NOT_EXECUTED',
+    auth_result        nssaa_status,          -- Final result (EAP_SUCCESS/FAILURE)
+
+    -- Failure tracking
+    failure_reason     TEXT,
+    failure_cause      VARCHAR(50),
+
+    -- Audit
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at         TIMESTAMPTZ NOT NULL,
+    completed_at       TIMESTAMPTZ,
+    terminated_at      TIMESTAMPTZ,
+
+    -- Constraint
+    PRIMARY KEY (auth_ctx_id)
+) PARTITION BY RANGE (created_at);
+
+-- Indexes
+CREATE INDEX idx_sessions_gpsi_snssai
+    ON slice_auth_sessions(gpsi, snssai_sst, snssai_sd);
+
+CREATE INDEX idx_sessions_nssaa_status
+    ON slice_auth_sessions(nssaa_status)
+    WHERE nssaa_status IN ('PENDING', 'NOT_EXECUTED');
+
+CREATE INDEX idx_sessions_expires
+    ON slice_auth_sessions(expires_at)
+    WHERE completed_at IS NULL;
+
+CREATE INDEX idx_sessions_created
+    ON slice_auth_sessions(created_at DESC);
+
+-- Partition management function
+CREATE OR REPLACE FUNCTION create_monthly_partition()
+RETURNS void AS $$
+DECLARE
+    v_partition_name TEXT;
+    v_start_date DATE;
+    v_end_date DATE;
+BEGIN
+    v_start_date := DATE_TRUNC('month', NOW() + INTERVAL '1 month');
+    v_end_date := v_start_date + INTERVAL '1 month';
+    v_partition_name := 'slice_auth_sessions_' || TO_CHAR(v_start_date, 'YYYY_MM');
+
+    EXECUTE format(
+        'CREATE TABLE IF NOT EXISTS %I PARTITION OF slice_auth_sessions
+         FOR VALUES FROM (%L) TO (%L)',
+        v_partition_name,
+        v_start_date,
+        v_end_date
+    );
+END;
+$$ LANGUAGE plpgsql;
+
+-- Create partitions for next 12 months
+SELECT create_monthly_partition()
+FROM generate_series(0, 11);
+```
+
+### 3.3 Audit Log Table
+
+```sql
+-- Immutable append-only audit log
+CREATE TABLE nssaa_audit_log (
+    id              BIGSERIAL PRIMARY KEY,
+
+    -- Session context
+    auth_ctx_id     VARCHAR(64),
+
+    -- GPSI hashed for GDPR/privacy compliance (SHA-256, first 16 bytes hex)
+    gpsi_hash       VARCHAR(64) NOT NULL,
+
+    -- Slice
+    snssai_sst      INTEGER,
+    snssai_sd       VARCHAR(8),
+
+    -- Actor
+    amf_instance_id VARCHAR(64),
+    amf_ip          INET,
+
+    -- Action
+    action          VARCHAR(30) NOT NULL CHECK (
+        action IN (
+            'SESSION_CREATED',
+            'EAP_ROUND_ADVANCED',
+            'EAP_SUCCESS',
+            'EAP_FAILURE',
+            'SESSION_EXPIRED',
+            'SESSION_TERMINATED',
+            'NOTIF_REAUTH_SENT',
+            'NOTIF_REAUTH_ACK',
+            'NOTIF_REAUTH_FAILED',
+            'NOTIF_REVOC_SENT',
+            'NOTIF_REVOC_ACK',
+            'NOTIF_REVOC_FAILED',
+            'AAA_CONNECTED',
+            'AAA_FAILED'
+        )
+    ),
+
+    -- Result
+    nssaa_status    VARCHAR(20),
+    error_code      INTEGER,
+    error_message   TEXT,
+
+    -- Meta
+    request_id      VARCHAR(64),
+    correlation_id  VARCHAR(64),
+    client_ip       INET,
+    user_agent      TEXT,
+
+    -- Timestamp
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Partition by month (audit logs grow large)
+CREATE TABLE nssaa_audit_log_2025 PARTITION OF nssaa_audit_log
+    FOR VALUES FROM ('2025-01-01') TO ('2026-01-01');
+
+CREATE INDEX idx_audit_gpsi_created
+    ON nssaa_audit_log(gpsi_hash, created_at DESC);
+
+CREATE INDEX idx_audit_ctx_created
+    ON nssaa_audit_log(auth_ctx_id, created_at DESC);
+
+CREATE INDEX idx_audit_action_created
+    ON nssaa_audit_log(action, created_at DESC);
+
+-- Prevent updates/deletes (immutable)
+CREATE OR REPLACE FUNCTION prevent_audit_modification()
+RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION 'Audit log entries cannot be modified or deleted';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER audit_immutable
+    BEFORE UPDATE OR DELETE ON nssaa_audit_log
+    FOR EACH ROW EXECUTE FUNCTION prevent_audit_modification();
+```
+
+### 3.4 Supi Ranges Table (NRM)
+
+```sql
+-- Per TS 28.541 §5.3.146: NssaafInfo.supiRanges
+CREATE TABLE supi_ranges (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    range_name      VARCHAR(64) NOT NULL,
+
+    -- Range boundaries
+    start_supi      VARCHAR(32) NOT NULL,
+    end_supi        VARCHAR(32) NOT NULL,
+
+    -- PLMN binding
+    plmn_mcc        VARCHAR(3),
+    plmn_mnc        VARCHAR(3),
+
+    -- Operational
+    enabled         BOOLEAN DEFAULT TRUE,
+    description     TEXT,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ DEFAULT NOW(),
+
+    CONSTRAINT supi_range_valid CHECK (start_supi <= end_supi)
+);
+
+CREATE INDEX idx_supi_ranges_supi
+    ON supi_ranges(start_supi, end_supi)
+    WHERE enabled = TRUE;
+```
+
+---
+
+## 4. EAP Session State Serialization
+
+### 4.1 State Structure
+
+```go
+// EAP Session State — serialized as Protocol Buffers (proto3)
+message EapSessionState {
+    // Session identification
+    string auth_ctx_id = 1;
+
+    // EAP method
+    string method = 2;  // "EAP-TLS", "EAP-TTLS", "EAP-AKA_PRIME"
+
+    // Method-specific state
+    oneof method_state {
+        EapTlsState tls_state = 10;
+        EapTtlsState ttls_state = 11;
+        EapAkaPrimeState akap_state = 12;
+    }
+
+    // Current position in EAP exchange
+    EapRound current_round = 3;
+    EapMessage last_received = 4;
+    EapMessage last_sent = 5;
+
+    // TLS session resumption
+    bytes tls_session_id = 6;
+    bytes tls_master_secret = 7;  // encrypted at rest
+
+    // Round tracking
+    int32 round_count = 8;
+    google.protobuf.Timestamp last_activity = 9;
+}
+
+message EapTlsState {
+    // TLS handshake state
+    uint32 tls_version = 1;       // 0x0303 = TLS 1.2, 0x0304 = TLS 1.3
+    bytes client_random = 2;
+    bytes server_random = 3;
+    bytes server_certificate = 4;
+    bytes client_certificate = 5;  // encrypted
+
+    // TLS flags
+    bool certificate_requested = 6;
+    bool certificate_authorities_received = 7;
+    repeated bytes trusted_ca = 8;
+
+    // Keying material
+    bytes pre_master_secret = 9;  // encrypted
+    bytes master_secret = 10;     // encrypted
+    bytes msk = 11;               // Master Session Key (RFC 5216) — encrypted
+}
+
+message EapRound {
+    int32 number = 1;
+    string direction = 2;  // "INBOUND" (from UE) or "OUTBOUND" (to UE)
+    string source = 3;     // "AMF", "AAA_SERVER", "INTERNAL"
+    string eap_code = 4;   // "REQUEST", "RESPONSE", "SUCCESS", "FAILURE"
+    bytes payload = 5;     // Raw EAP packet
+    google.protobuf.Timestamp timestamp = 6;
+}
+```
+
+### 4.2 Serialization Strategy
+
+```go
+// Encode: EAP session state → binary → encrypt → store
+func (s *EapSessionState) Serialize() ([]byte, error) {
+    // 1. Serialize to protobuf binary
+    raw, err := proto.Marshal(s)
+    if err != nil {
+        return nil, err
+    }
+
+    // 2. Encrypt with AES-256-GCM using per-session KEK
+    kek := deriveKEK(s.AuthCtxId, masterKey)
+    return encryptAEAD(kek, raw)
+}
+
+// Decrypt + deserialize
+func DeserializeSession(data []byte, authCtxId string) (*EapSessionState, error) {
+    kek := deriveKEK(authCtxId, masterKey)
+    raw, err := decryptAEAD(kek, data)
+    if err != nil {
+        return nil, err
+    }
+
+    state := &EapSessionState{}
+    if err := proto.Unmarshal(raw, state); err != nil {
+        return nil, err
+    }
+    return state, nil
+}
+```
+
+---
+
+## 5. Redis Cache Architecture
+
+### 5.1 Key Schema
+
+```
+Namespace: nssaa:{environment}
+
+{nssaa}:session:{authCtxId}
+  Type: Hash
+  TTL: 300s (5 min)
+  Fields:
+    - gpsi: string
+    - snssai: "{sst}:{sd}"
+    - status: "PENDING|EAP_SUCCESS|EAP_FAILURE"
+    - aaaConfigId: UUID
+    - eapRounds: int
+    - updatedAt: timestamp
+  Purpose: Hot cache for active sessions
+
+{nssaa}:idempotency:{authCtxId}:{msgHash}
+  Type: String (JSON)
+  TTL: 3600s (1 hour)
+  Value: Cached response body
+  Purpose: PUT idempotency
+
+{nssaa}:aaa:health:{configId}
+  Type: String
+  TTL: 30s
+  Value: "UP|DOWN|DEGRADED"
+  Purpose: Circuit breaker state
+
+{nssaa}:aaa:circuit:{configId}
+  Type: Hash
+  TTL: none (persistent)
+  Fields:
+    - state: CLOSED|OPEN|HALF_OPEN
+    - failures: int
+    - lastFailure: timestamp
+  Purpose: Per-AAA-server circuit breaker
+
+{nssaa}:ratelimit:amf:{amfInstanceId}
+  Type: String (counter)
+  TTL: 5s
+  Purpose: Per-AMF rate limiting (sliding window)
+
+{nssaa}:ratelimit:gpsi:{gpsiHash}
+  Type: String (counter)
+  TTL: 60s
+  Purpose: Per-GPSI rate limiting
+
+{nssaa}:ratelimit:global
+  Type: String (counter)
+  TTL: 1s
+  Purpose: Global rate limiting
+```
+
+### 5.2 Cache-Aside Pattern
+
+```go
+// Read-through cache with write-through
+func GetSession(ctx context.Context, authCtxId string) (*Session, error) {
+    // 1. Try Redis first
+    cached, err := redis.Get(ctx, "nssaa:session:"+authCtxId)
+    if err == nil && cached != nil {
+        return deserializeSession(cached)
+    }
+
+    // 2. Fallback to PostgreSQL
+    session, err := pg.GetSession(ctx, authCtxId)
+    if err != nil {
+        return nil, err
+    }
+
+    // 3. Populate cache (async, non-blocking)
+    go func() {
+        redis.Set(ctx, "nssaa:session:"+authCtxId, serializeSession(session), 5*time.Minute)
+    }()
+
+    return session, nil
+}
+
+// Write-through: update both PG and Redis
+func UpdateSession(ctx context.Context, session *Session) error {
+    // 1. Write to PostgreSQL (primary)
+    if err := pg.UpdateSession(ctx, session); err != nil {
+        return err
+    }
+
+    // 2. Update Redis cache (async)
+    go func() {
+        redis.Set(ctx, "nssaa:session:"+session.AuthCtxId, serializeSession(session), 5*time.Minute)
+    }()
+
+    return nil
+}
+```
+
+---
+
+## 6. Data Retention & Privacy
+
+### 6.1 Retention Policy
+
+| Table | Retention | Action |
+|-------|-----------|--------|
+| `slice_auth_sessions` | 90 days | DELETE (PG partition drop) |
+| `nssaa_audit_log` | 2 years | DELETE (PG partition drop) |
+| `eap_session_state` (in-memory) | Until session complete | Encrypted, no persistence |
+| Redis cache | 5 min TTL | Auto-eviction |
+| EAP payload (audit) | 24 hours | Encrypted blob |
+
+### 6.2 GPSI Privacy
+
+GPSI không bao giờ được lưu plaintext trong audit log hoặc logs. Luôn hash trước khi lưu:
+
+```go
+// GPSI hashed with SHA-256, truncated to first 16 bytes
+func HashGpsi(gpsi string) string {
+    h := sha256.Sum256([]byte(gpsi))
+    return hex.EncodeToString(h[:16])
+}
+```
+
+### 6.3 Encryption at Rest
+
+```go
+// All sensitive fields encrypted with AES-256-GCM
+type EncryptedField struct {
+    Ciphertext   []byte   // encrypted data
+    IV           []byte   // 12-byte nonce
+    AuthTag     []byte   // 16-byte auth tag
+    Version     uint32   // key version for rotation
+}
+
+// Fields requiring encryption:
+// - eap_session_state (contains MSK, keys)
+// - shared_secret (AAA credentials)
+// - eap payloads in audit log
+```
+
+---
+
+## 7. Connection Pool Configuration
+
+### 7.1 PostgreSQL (PgBouncer)
+
+```ini
+[databases]
+nssAAF = host=pg-primary port=5432 dbname=nssAAF
+
+[nssAAF]
+pool_mode = transaction
+max_client_conn = 5000
+default_pool_size = 100
+min_pool_size = 20
+reserve_pool_size = 20
+reserve_pool_timeout = 5
+max_db_connections = 500
+server_lifetime = 3600
+server_idle_timeout = 600
+query_timeout = 5
+```
+
+### 7.2 Redis
+
+```yaml
+redis_cluster:
+  nodes:
+    - host: 10.0.1.10:6379   # AZ1 primary
+    - host: 10.0.1.11:6379   # AZ1 replica
+    - host: 10.0.2.10:6379   # AZ2 primary
+    - host: 10.0.2.11:6379   # AZ2 replica
+    - host: 10.0.3.10:6379   # AZ3 primary
+    - host: 10.0.3.11:6379   # AZ3 replica
+
+  shards: 3
+  replicas_per_shard: 2
+  write_consistency: ONE
+  read_consistency: ONE
+
+  pool:
+    max_connections: 200
+    connect_timeout: 5s
+    read_timeout: 1s
+    write_timeout: 1s
+```
+
+---
+
+## 8. Acceptance Criteria
+
+| # | Criteria | Implementation |
+|---|----------|----------------|
+| AC1 | Session stored partitioned by month | PG range partition on created_at |
+| AC2 | GPSI hashed in audit log | SHA-256 truncation, never plaintext |
+| AC3 | EAP state encrypted at rest | AES-256-GCM, KEK per session |
+| AC4 | AAA config 3-level fallback lookup | Exact → SST-only → Default |
+| AC5 | Redis cache TTL 5 min | nssaa:session:{id} with 300s TTL |
+| AC6 | Idempotency key = authCtxId + msgHash | 1h TTL in Redis |
+| AC7 | Connection pool: 100 PG connections per instance | PgBouncer transaction mode |
+| AC8 | Partition auto-creation for next 12 months | create_monthly_partition() function |

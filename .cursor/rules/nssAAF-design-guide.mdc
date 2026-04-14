@@ -1,0 +1,100 @@
+---
+description: NSSAAF design methodology - which 3GPP docs to read and how
+alwaysApply: true
+---
+
+# NSSAAF Design Guide
+
+This project implements the 3GPP NSSAAF (Network Slice-Specific Authentication and Authorization Function) for 5G. All design decisions MUST trace back to 3GPP specifications.
+
+## Reading Strategy: Never Load All Docs at Once
+
+The 3GPP documentation for NSSAAF is split across 8 spec files. **NEVER** ask Cursor to read all files in a single prompt. Instead, use the chunked structure in `docs/3gppfilter/`.
+
+### Decision Tree: Which File to Read
+
+```
+What are you designing?
+│
+├─ API endpoint / service operation?
+│   └─ Read docs/3gppfilter/01_api_specs/NSSAA_API_operations.md
+│
+├─ Database schema / data model?
+│   └─ Read docs/3gppfilter/01_api_specs/NSSAA_schemas.md
+│
+├─ AMF-triggered NSSAA procedure flow?
+│   └─ Read docs/3gppfilter/02_procedures/NSSAA_flow_AMF.md
+│
+├─ AAA-S triggered re-authentication?
+│   └─ Read docs/3gppfilter/02_procedures/Reauth_flow_AAA.md
+│
+├─ AAA-S triggered revocation?
+│   └─ Read docs/3gppfilter/02_procedures/Revocation_flow.md
+│
+├─ Security requirements / EAP methods?
+│   └─ Read docs/3gppfilter/03_security/NSSAAF_services.md
+│   └─ Read docs/3gppfilter/03_security/NSSAA_EAP_requirements.md
+│
+├─ RADIUS protocol integration?
+│   └─ Read docs/3gppfilter/04_protocols/RADIUS_interworking.md
+│
+├─ Diameter protocol integration?
+│   └─ Read docs/3gppfilter/04_protocols/Diameter_interworking.md
+│
+├─ Management / OAM interface?
+│   └─ Read docs/3gppfilter/05_data_management/NSSAAF_NRM.md
+│
+└─ Data types (NssaaStatus, Snssai, GPSI)?
+    └─ Read docs/3gppfilter/05_data_management/NSSAAF_DataTypes.md
+```
+
+### Reference Only: TS29571_CommonData.yaml
+
+`TS29571_CommonData.yaml` (6740 lines) is the shared OpenAPI schema library. Do NOT read it directly. Instead, reference schemas by name in design docs (e.g., `Snssai`, `Gpsi`, `ProblemDetails`). They are already defined in `05_data_management/NSSAAF_DataTypes.md`.
+
+## Design Document Must-Haves
+
+Every design document for NSSAAF MUST include:
+
+1. **Spec Trace**: Which TS section numbers back up this design
+2. **Service Operation**: Which Nnssaaf_NSSAA or Nnssaaf_AIW operation this implements
+3. **Interface**: Which 3GPP interface (N58, N60, N59) is involved
+4. **State Machine**: NssaaStatus state transitions (NOT_EXECUTED → PENDING → EAP_SUCCESS/EAP_FAILURE)
+5. **EAP Method**: Which EAP method is used (EAP-TLS, EAP-AKA', etc.)
+6. **AAA Protocol**: RADIUS or Diameter
+7. **Error Handling**: Which 3GPP error codes apply (400, 403, 404, 502, 503, 504)
+8. **Acceptance Criteria**: Traceable to specific spec paragraphs
+
+## NSSAAF Architecture Summary
+
+```
+UE ←─────── NAS (EAP) ────────→ AMF (EAP Authenticator)
+                                     │
+                                     │ Nnssaaf_NSSAA_Authenticate (SBI HTTP/2)
+                                     │ N58 Interface
+                                     ▼
+                                  NSSAAF
+                              ┌─────┴─────┐
+                              │           │
+               Nudm_UECM_Get │           │ AAA Protocol
+                   (N59)      │           │
+                              ▼           ▼
+                           UDM      NSS-AAA Server
+                                    (RADIUS/Diameter)
+```
+
+## Key State Values
+
+- **NssaaStatus.authResult**: `NOT_EXECUTED | EAP_SUCCESS | EAP_FAILURE | PENDING`
+- **NotificationType**: `SLICE_RE_AUTH | SLICE_REVOCATION`
+- **AuthCtxId**: Opaque string ID for slice authentication context resource
+
+## Validation Checklist
+
+Before finalizing any NSSAAF design:
+- [ ] All API fields validated against TS29526 schema definitions
+- [ ] Procedure flow steps validated against TS23502 §4.2.9
+- [ ] Security requirements validated against TS33501 §16.3-16.5
+- [ ] AAA protocol mapping validated against TS29561 Ch.16/17
+- [ ] Data types validated against TS29571 §5.4.4.60-61
+- [ ] NRM attributes validated against TS28541 §5.3.145-148
