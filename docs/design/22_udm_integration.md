@@ -107,7 +107,58 @@ GET /nnrf-disc/v1/nf-instances?target-nf-type=UDM&service-names=nudm-uem
 | 504 | UDM timeout | Stop procedure, ACK to AAA-S |
 | 401 | Token invalid | Retry with fresh token |
 
-### 3.1 AMF Not Registered Case
+### 3.1 Timeout Configuration
+
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| UDM request timeout | 5s | Config: udm.request_timeout_seconds |
+| Max retry attempts | 3 | Config: udm.max_retries |
+| Retry backoff | Exponential (1s, 2s, 4s) | Max 4s between retries |
+| Circuit breaker | Per-UDM instance | Open after 5 failures, half-open after 30s |
+
+### 3.2 Retry Logic
+
+```go
+func (c *UDMClient) GetAMFRegistration(ctx context.Context, gpsI string) (*AMFInfoList, error) {
+    const maxRetries = 3
+    const baseBackoff = 1 * time.Second
+
+    for attempt := 0; attempt < maxRetries; attempt++ {
+        resp, err := c.nudmClient.GetAMFRegistration(ctx, gpsI)
+        if err == nil && resp.StatusCode == 200 {
+            return parseResponse(resp)
+        }
+
+        if !isRetryable(resp, err) {
+            return nil, err
+        }
+
+        if attempt < maxRetries-1 {
+            backoff := baseBackoff * time.Duration(1<<attempt)
+            if backoff > 4*time.Second {
+                backoff = 4 * time.Second
+            }
+            select {
+            case <-ctx.Done():
+                return nil, ctx.Err()
+            case <-time.After(backoff):
+            }
+        }
+    }
+
+    return nil, ErrUDMUnavailable
+}
+
+func isRetryable(resp *http.Response, err error) bool {
+    if err != nil {
+        return true
+    }
+    return resp.StatusCode == 503 || resp.StatusCode == 504 ||
+           (resp.StatusCode >= 500 && resp.StatusCode < 600)
+}
+```
+
+### 3.3 AMF Not Registered Case
 
 ```go
 // When AMF is not registered in UDM for this GPSI:
@@ -122,6 +173,8 @@ if len(amfInfo) == 0 {
 ---
 
 ## 4. Multi-AMF Handling
+
+## 5. Configuration Reference
 
 ```go
 // When two AMF addresses are returned (multi-registration case)

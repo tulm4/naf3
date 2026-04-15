@@ -1,0 +1,105 @@
+# golangci-lint configuration for NSSAAF.
+# golangci-lint v1 compatible.
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - bodyclose
+    - contextcheck
+    - durationcheck
+    - errorlint
+    - goconst
+    - gocyclo
+    - gofmt
+    - goimports
+    - misspell
+    - nakedret
+    - noctx
+    - prealloc
+    - revive
+    - unconvert
+    - unparam
+
+linters-settings:
+  revive:
+    rules:
+      - name: var-naming
+        severity: warning
+        params:
+          allow: [ID,API,HTTP,JSON,SQL,URL,UUID,XML]
+      - name: package-comments
+        severity: warning
+      - name: exported
+        severity: warning
+      - name: dot-imports
+        severity: error
+      - name: error-return
+        severity: warning
+      - name: error-strings
+        severity: warning
+      - name: receiver-naming
+        severity: warning
+      - name: time-naming
+        severity: warning
+  govet:
+    disable-all: true
+    enable:
+      - asmdecl
+      - assign
+      - atomic
+      - bools
+      - buildtag
+      - cgocall
+      - composites
+      - copylocks
+      - errorsas
+      - framepointer
+      - httpresponse
+      - ifaceassert
+      - loopclosure
+      - lostcancel
+      - nilfunc
+      - printf
+      - shift
+      - sigchanyzer
+      - staticfmt
+      - structtag
+      - unreachable
+      - unsafeptr
+      - unusedresult
+  errorlint:
+    errorf: true
+    wrapping: true
+  gocyclo:
+    min-complexity: 15
+  goconst:
+    min-len: 3
+    min-occurrences: 3
+  misspell:
+    locale: US
+  nakedret:
+    max-func-lines: 30
+
+issues:
+  exclude-rules:
+    - path: '_test\.go'
+      linters:
+        - gocyclo
+        - errcheck
+        - dupl
+        - gosec
+    - path: 'cmd/'
+      linters:
+        - gosec
+    - path: 'internal/api/common/'
+      linters:
+        - noctx
+        - gocyclo
+
+run:
+  timeout: 5m
+  tests: true

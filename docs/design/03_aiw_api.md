@@ -306,70 +306,16 @@ CREATE INDEX idx_aiw_audit_supi ON aiw_audit_log(supi_hash, created_at DESC);
 
 ## 7. AUSF Integration Flow
 
-### 7.1 SNPN Access with Credentials Holder
+> **Detailed AUSF integration flow available in:** `23_ausf_integration.md`
 
-```
-UE              AUSF              NSSAAF            AAA-S
- │                │                 │                 │
- │ 1. Auth Req   │                 │                 │
- │ (EAP Start)   │                 │                 │
- │───────────────►│                 │                 │
- │                │                 │                 │
- │ 2. AUSF        │                 │                 │
- │    determines  │                 │                 │
- │    needs AAA   │                 │                 │
- │                │                 │                 │
- │                │ 3. POST /aiw   │                 │
- │                │    (supi,      │                 │
- │                │     eapIdRsp)  │                 │
- │                │───────────────►│                 │
- │                │                │                 │
- │                │                │ 4. RADIUS/DIA  │
- │                │                │    Access-Req   │
- │                │                │───────────────►│
- │                │                │                │
- │                │                │◄───────────────│
- │                │                │ 5. RADIUS/DIA  │
- │                │                │    Access-Chal │
- │                │                │                │
- │                │ 6. 201 Created │                 │
- │                │    (eapMsg)    │                 │
- │                │◄───────────────│                 │
- │                │                │                 │
- │ 7. EAP         │                │                 │
- │    Challenge    │                │                 │
- │◄───────────────│                │                 │
- │                │                │                 │
- │ 8. EAP         │                │                 │
- │    Response    │                │                 │
- │───────────────►│                │                 │
- │                │                │                 │
- │                │ 9. PUT /aiw   │                 │
- │                │    (eapMsg)   │                 │
- │                │───────────────►│                 │
- │                │                │                 │
- │                │                │ 10. Final      │
- │                │                │    RADIUS/DIA   │
- │                │                │───────────────►│
- │                │                │                │
- │                │                │◄───────────────│
- │                │                │ 11. Final Resp │
- │                │                │    (EAP result,│
- │                │                │     MSK, pvs) │
- │                │                │                │
- │                │ 12. 200 OK     │                 │
- │                │    (eapMsg,    │                 │
- │                │     authResult,│                 │
- │                │     msk, pvs) │                 │
- │                │◄───────────────│                 │
- │                │                │                 │
- │ 13. Auth Result│                │                 │
- │◄───────────────│                │                 │
- │                │                │                 │
- │                │ 14. AUSF derive│                 │
- │                │    NAS keys    │                 │
- │                │    from MSK    │                 │
-```
+For complete AUSF integration details including:
+- MSK handling and key derivation (TS 33.501)
+- PVS Info data structures
+- OAuth2 scope and mTLS security
+- AUSF error recovery flows
+- AIW session database schema
+
+See: `docs/design/23_ausf_integration.md`
 
 ---
 

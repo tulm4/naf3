@@ -1,0 +1,239 @@
+---
+description: NSSAAF implementation methodology - how to write code from design docs
+alwaysApply: true
+---
+
+# NSSAAF Implementation Methodology
+
+## Golden Rule: Always Start with Roadmap
+
+When implementing any NSSAAF code:
+
+```
+1. ALWAYS read: docs/quickref.md (50 lines) ← Start here
+2. THEN read: docs/roadmap/README.md (100 lines)
+3. THEN read: docs/roadmap/PHASE_*.md (relevant phase)
+4. THEN read: docs/design/XX_*.md (relevant design doc)
+5. THEN write code
+```
+
+## Never Overflow Strategy
+
+### Problem
+NSSAAF has 20 design docs (~11,000 lines). Loading all at once overflows context.
+
+### Solution: Progressive Disclosure
+
+**Never load more than 200 lines at once.**
+
+| What you need | Read this | Lines |
+|---|---|---|
+| Any context | `docs/quickref.md` | 50 |
+| Phase overview | `docs/roadmap/PHASE_*.md` | 150 |
+| Design detail | `docs/design/02_nssaa_api.md` | 574 |
+| Quick lookup | `docs/roadmap/module_index.md` | 50 |
+
+## Module → Design Doc Mapping
+
+| Module | Read first | Then read |
+|--------|-----------|-----------|
+| `internal/types/` | `docs/quickref.md` | `docs/design/04_data_model.md` |
+| `internal/api/nssaa/` | `docs/quickref.md` | `docs/design/02_nssaa_api.md` |
+| `internal/api/aiw/` | `docs/quickref.md` | `docs/design/03_aiw_api.md` |
+| `internal/eap/` | `docs/quickref.md` | `docs/design/06_eap_engine.md` |
+| `internal/radius/` | `docs/quickref.md` | `docs/design/07_radius_client.md` |
+| `internal/diameter/` | `docs/quickref.md` | `docs/design/08_diameter_client.md` |
+| `internal/storage/` | `docs/quickref.md` | `docs/design/11_database_ha.md` |
+| `internal/cache/` | `docs/quickref.md` | `docs/design/12_redis_ha.md` |
+
+## Implementation Order
+
+### Phase 1: Foundation (Start Here)
+
+```
+1. internal/types/           ← MUST DO FIRST
+   - snssai.go: GPSI, SUPI, Snssai validation
+   - nssaa_status.go: NssaaStatus enum
+
+2. internal/api/nssaa/
+   - handler.go: POST/PUT endpoints
+   - request.go, response.go types
+
+3. internal/api/aiw/
+   - Same pattern as nssaa/
+
+4. cmd/nssAAF/main.go
+   - Wire everything together
+```
+
+## Code Template
+
+### API Handler Template
+
+```go
+// [Package description]
+// Spec: [TS section]
+package [module]
+
+// [Type description]
+// Source: TS XX.XXX §Y.Z
+type [Type] struct {
+    // Field documentation
+}
+
+// Validate checks if the type is valid.
+// Spec: TS XX.XXX §Y.Z
+func (t *[Type]) Validate() error {
+    // Validation logic
+}
+
+// Handler for [operation].
+// Spec: TS 29.526 §7.2.X
+func (h *Handler) [Method](w http.ResponseWriter, r *http.Request) {
+    // 1. Parse request
+    // 2. Validate
+    // 3. [Business logic]
+    // 4. Return response
+}
+```
+
+## Validation Checklist (Per Module)
+
+### Types
+- [ ] GPSI regex: `^5[0-9]{8,14}$`
+- [ ] SUPI regex: `^imu-[0-9]{15}$`
+- [ ] Snssai SST: 0-255
+- [ ] Snssai SD: 6 hex chars
+
+### API Handlers
+- [ ] Request validation before processing
+- [ ] Error response: ProblemDetails (RFC 7807)
+- [ ] HTTP status: 201, 200, 400, 403, 404, 409, 410, 502, 503, 504
+- [ ] Location header on 201
+- [ ] X-Request-ID correlation
+
+### Storage
+- [ ] GPSI hashed in audit log
+- [ ] Session state encrypted
+- [ ] Monthly partitions
+- [ ] Redis TTL
+
+### Tests
+- [ ] Unit test for each public function
+- [ ] Validate error cases
+- [ ] Mock external dependencies
+
+## Critical Spec References
+
+| Need | Spec | Section |
+|------|------|---------|
+| API structure | TS 29.526 | §7.2, §7.3 |
+| Procedure flows | TS 23.502 | §4.2.9 |
+| Security | TS 33.501 | §5.13, §16.3-16.5 |
+| RADIUS | TS 29.561 | Ch.16 |
+| Diameter | TS 29.561 | Ch.17 |
+| Data types | TS 29.571 | §5.4.4.60-61 |
+
+## Key Validation Rules
+
+```go
+// GPSI (required for NSSAA)
+gpsiRegex := regexp.MustCompile(`^5[0-9]{8,14}$`)
+
+// SUPI (used in AIW)
+supiRegex := regexp.MustCompile(`^imu-[0-9]{15}$`)
+
+// Snssai
+// SST: 0-255
+// SD: 6 hex chars, optional
+
+// NssaaStatus
+// NOT_EXECUTED → PENDING → EAP_SUCCESS | EAP_FAILURE
+
+// Error codes
+// 400: Bad Request (invalid input)
+// 403: Forbidden (AAA rejects)
+// 404: Not Found (no AAA config)
+// 502: Bad Gateway (AAA unreachable)
+// 503: Service Unavailable (AAA overloaded)
+// 504: Gateway Timeout (AAA timeout)
+```
+
+## Anti-Patterns to Avoid
+
+1. **Don't hardcode values** — Use constants from `internal/types/`
+2. **Don't skip validation** — Always validate GPSI, Snssai, etc.
+3. **Don't use magic numbers** — Use constants from design docs
+4. **Don't ignore errors** — Return proper ProblemDetails
+5. **Don't forget correlation ID** — Use X-Request-ID header
+
+## Roadmap Status Tracking (MANDATORY)
+
+Sau khi implement code xong, **BẮT BUỘC** cập nhật roadmap. Không được implement mà không cập nhật.
+
+### File cần cập nhật
+
+#### 1. `docs/roadmap/module_index.md` — Bảng Module → Design Doc
+
+Khi hoàn thành một module, cập nhật cột **Status** từ `TBD` → `IN_PROGRESS` → `READY`:
+
+```markdown
+| `internal/api/nssaa/` | `docs/design/02_nssaa_api.md` | 1 | READY |  ← đổi TBD → READY
+```
+
+#### 2. `docs/roadmap/README.md` — Bảng Phase Status
+
+Khi hoàn thành một phase, cập nhật icon trạng thái:
+
+```markdown
+| Phase 1: Foundation | ✅ DONE | internal/api/nssaa/, internal/api/aiw/, internal/types/ |
+```
+
+Trạng thái icons:
+- `⏳ PENDING` — Chưa bắt đầu
+- `🔄 IN_PROGRESS` — Đang implement
+- `✅ DONE` — Hoàn thành
+- `🚫 BLOCKED` — Bị chặn (dependency chưa xong)
+
+#### 3. `docs/roadmap/PHASE_*.md` — Phase detail file
+
+Trong mỗi phase file, checklist cần check off khi hoàn thành:
+
+```markdown
+## Validation Checklist
+
+- [x] `go build ./...` compiles without errors     ← check khi xong
+- [x] `go test ./...` passes                       ← check khi xong
+- [ ] `golangci-lint run ./...` passes             ← chưa xong
+```
+
+### Quy trình cập nhật
+
+Mỗi khi implement xong một module/phase:
+
+```
+1. ✓ Code compile: go build ./...
+2. ✓ Tests pass: go test ./...
+3. ✓ Lint clean: golangci-lint run ./...
+4. ✓ Cập nhật module_index.md → Status = READY
+5. ✓ Cập nhật README.md → Phase Status
+6. ✓ Cập nhật PHASE_*.md → Checklist
+7. ✓ Commit với message format: "feat(module): <module> — <mô tả>"
+```
+
+### Tracking Checklist
+
+Trước khi commit code, đảm bảo đã cập nhật:
+
+- [ ] `docs/roadmap/module_index.md` — Module Status updated
+- [ ] `docs/roadmap/README.md` — Phase Status updated (nếu phase hoàn tất)
+- [ ] `docs/roadmap/PHASE_*.md` — Deliverable checklist checked off
+- [ ] Commit message có prefix đúng: `feat/`, `fix/`, `refactor/`, `docs/`
+
+### Anti-Patterns về Roadmap
+
+1. **Không bao giờ** để `TBD` nếu module đã có code
+2. **Không bao giờ** commit code mà không cập nhật roadmap
+3. **Không bao giờ** để Phase `⏳ PENDING` nếu đã có module `READY` trong phase đó
+4. **Không bao giờ** xóa checklist items — chỉ check `[x]` hoặc `[ ]`
+5. **Không bao giờ** bỏ qua bước lint/test trước khi đánh dấu READY

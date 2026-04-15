@@ -742,6 +742,7 @@ Nội dung:
 ### Phase 6: Integration ✅ HOÀN THÀNH
 - [x] `design/21_amf_integration.md` — N58 AMF interface (135 dòng)
 - [x] `design/22_udm_integration.md` — N59 UDM interface (146 dòng)
+- [x] `design/23_ausf_integration.md` — N60 AUSF interface, MSK handling (380 dòng)
 
 ### Phase 7: Kubernetes ✅ HOÀN THÀNH
 - [x] `design/25_kubeadm_setup.md` — Cluster design, networking, Helm chart (496 dòng)
@@ -757,8 +758,8 @@ Nội dung:
 | Phase 3: HA/Resilience | 3/3 | ✅ Hoàn thành | 1,678 |
 | Phase 4: Security | 2/2 | ✅ Hoàn thành | 973 |
 | Phase 5: Operations | 3/3 | ✅ Hoàn thành | 1,238 |
-| Phase 6: Integration | 2/2 | ✅ Hoàn thành | 281 |
+| Phase 6: Integration | 3/3 | ✅ Hoàn thành | 661 |
 | Phase 7: Kubernetes | 1/1 | ✅ Hoàn thành | 496 |
-| **Tổng** | **20/20** | **100% ✅** | **9,244 lines** |
+| **Tổng** | **21/21** | **100% ✅** | **9,624 lines** |
 
 > **Tổng cộng: 20 design documents + 2 Cursor rules + 5 chunk docs = ~10,000+ dòng tài liệu**
