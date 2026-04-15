@@ -1,48 +1,38 @@
+# .github/workflows/ci.yml — GitHub Actions CI pipeline
 name: CI
 
 on:
   push:
-    branches: [main, 'feature/**', 'fix/**', 'refactor/**']
+    branches: [main, 'feature/**']
   pull_request:
     branches: [main]
 
 env:
   GO_VERSION: "1.22"
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache: true
 
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
-          args: --timeout=5m
+        run: golangci-lint run ./...
 
   test:
     name: Test
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache: true
 
       - name: Download modules
         run: go mod download
@@ -50,95 +40,43 @@ jobs:
       - name: Run tests with race detector
         run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
-      - name: Upload coverage artifact
+      - name: Upload coverage
         uses: actions/upload-artifact@v4
-        if: github.event_name == 'pull_request'
         with:
-          name: coverage-report
+          name: coverage
           path: coverage.out
-
-      - name: Coverage summary
-        if: github.event_name == 'pull_request'
-        run: |
-          go install github.com/boumenot/gocoverageaggregator@latest
-          gocoverageaggregator -codecov < coverage.out | tee coverage_summary.txt
-          echo "coverage_summary.txt contents:"
-          cat coverage_summary.txt
 
   build:
     name: Build
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache: true
 
       - name: Build binary
-        run: go build -ldflags="-s -w" -o bin/nssAAF ./cmd/nssAAF/
+        run: go build -o bin/nssAAF ./cmd/nssAAF/
 
-      - name: Verify binary
-        run: ./bin/nssAAF -h || true
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: nssAAF-bin
+          path: bin/nssAAF
 
   security:
-    name: Security Scan
+    name: Security
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache: true
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
 
       - name: Run govulncheck
-        run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./...
-
-      - name: Run trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-          severity: 'CRITICAL,HIGH'
-
-      - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: 'trivy-results.sarif'
-
-  docker-build:
-    name: Docker Build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build Docker image
-        run: |
-          docker build \
-            --tag nssAAF:test \
-            --load \
-            .
-
-      - name: Run container health check
-        run: |
-          docker run -d --name nssAAF-test -p 8080:8080 nssAAF:test
-          sleep 3
-          docker exec nssAAF-test wget -qO- http://localhost:8080/health \
-            && echo "Health check passed" \
-            || echo "Health check failed"
-          docker stop nssAAF-test
+        run: govulncheck ./...

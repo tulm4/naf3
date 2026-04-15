@@ -10,7 +10,7 @@ Phase 5 thêm security layer: TLS, OAuth2, và encryption.
 
 **Priority:** P0
 **Dependencies:** `internal/types/`
-**Design Doc:** `docs/design/15_sbi_security.md`
+**Design Doc:** `docs/design/15_sbi_security.md`, `docs/design/16_aaa_security.md`
 
 **Deliverables:**
 - [ ] `token.go` — JWT token validation (NRF)

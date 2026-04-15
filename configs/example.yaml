@@ -1,0 +1,93 @@
+# configs/example.yaml — Annotated configuration reference for nssAAF
+# All fields are required unless marked optional.
+#
+# Copy this file to development.yaml, staging.yaml, or production.yaml
+# and fill in the appropriate values.
+#
+# Spec: TS 29.526, TS 29.500, TS 33.501
+
+server:
+  # TCP address to listen on (":8080" means all interfaces on port 8080)
+  addr: ":8080"
+  # Maximum time to read a complete request (including body)
+  readTimeout: 10s
+  # Maximum time to write the response
+  writeTimeout: 30s
+  # Maximum time to keep idle connections open
+  idleTimeout: 120s
+
+database:
+  # PostgreSQL connection settings
+  host: "localhost"
+  port: 5432
+  name: "nssAAF"
+  user: "nssAAF_app"
+  # Load from environment variable NSSAAF_DB_PASSWORD in production
+  password: "${NSSAAF_DB_PASSWORD}"
+  maxConns: 100
+  minConns: 20
+  # Maximum lifetime of a database connection before it is replaced
+  connMaxLifetime: 30m
+  # SSL mode: "disable", "allow", "prefer", "require", "verify-ca", "verify-full"
+  sslMode: "require"
+
+redis:
+  # Redis cluster addresses (comma-separated)
+  addrs:
+    - "redis-cluster-0:6379"
+    - "redis-cluster-1:6379"
+    - "redis-cluster-2:6379"
+  # Redis AUTH password (optional)
+  password: "${NSSAAF_REDIS_PASSWORD}"
+  db: 0
+  poolSize: 50
+
+eap:
+  # Maximum number of EAP round-trips before aborting
+  maxRounds: 20
+  # Timeout waiting for EAP payload from AAA-S
+  roundTimeout: 30s
+  # TTL for EAP session state stored in Redis
+  sessionTtl: 5m
+
+aaa:
+  # Timeout waiting for AAA-S to respond
+  responseTimeout: 10s
+  # Number of retries on AAA-S timeout/failure
+  maxRetries: 3
+  # Number of consecutive failures before circuit opens
+  failureThreshold: 5
+  # Time to wait before attempting AAA-S again after circuit opens
+  recoveryTimeout: 30s
+
+rateLimit:
+  # Maximum authenticate requests per GPSI per minute
+  perGpsiPerMin: 10
+  # Maximum requests per AMF per second (per AMF NF ID)
+  perAmfPerSec: 1000
+  # Global maximum requests per second across all clients
+  globalPerSec: 100000
+
+logging:
+  # Log level: "debug", "info", "warn", "error"
+  level: "info"
+  # Log format: "json" (production) or "text" (development)
+  format: "json"
+
+metrics:
+  # Enable Prometheus metrics endpoint
+  enabled: true
+  # HTTP path for Prometheus scrape endpoint
+  path: "/metrics"
+
+nrf:
+  # Base URL of the Network Repository Function
+  baseURL: "https://nrf.operator.com"
+  # Timeout for NRF service discovery
+  discoverTimeout: 10s
+
+udm:
+  # Base URL of the Unified Data Management function
+  baseURL: "https://udm.operator.com"
+  # Timeout for UDM API calls
+  timeout: 10s

@@ -1,5 +1,5 @@
-# EditorConfig is awesome: https://EditorConfig.org
-
+# .editorconfig — EditorConfig for consistent coding style
+# https://editorconfig.org
 root = true
 
 [*]
@@ -12,14 +12,12 @@ trim_trailing_whitespace = true
 indent_style = tab
 indent_size = 4
 
-[*.{yaml,yml,json}]
+[*.{yaml,json,yml}]
 indent_style = space
 indent_size = 2
 
 [*.md]
 trim_trailing_whitespace = false
-indent_style = space
-indent_size = 2
 
 [Makefile]
 indent_style = tab
@@ -27,7 +25,3 @@ indent_style = tab
 [*.sh]
 indent_style = space
 indent_size = 2
-
-[Dockerfile]
-indent_style = space
-indent_size = 4

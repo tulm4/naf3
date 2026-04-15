@@ -1,0 +1,29 @@
+---
+description: Project language and agent chat is English only
+alwaysApply: true
+---
+
+# Project Language: English Only
+
+All text written in this project — including code, comments, docstrings, commit messages, documentation, variable names, function names, class names, and any user-facing content — must be in **English only**.
+
+**Always respond in English. Do not use any other language.** This applies to all agent chat output, including explanations, summaries, feedback, and questions directed at the user.
+
+## Enforcement
+
+- Variable names, function names, class names, struct names, interface names, and enum values: use English identifiers (e.g., `authContext`, `sliceAuthentication`, not `contextoDeAutenticacao` or `切片认证`).
+- Comments and inline documentation: English only.
+- Strings and user-facing messages: English only.
+- Log messages: English only.
+- Error messages and problem details: English only.
+- Configuration file values (keys, descriptions): English only.
+- Agent chat: English only. Always respond in English. Do not use any other language.
+
+## Rationale
+
+Consistent use of English across the entire codebase ensures readability for international contributors, compatibility with tooling (spell checkers, linters, static analysis), and a uniform developer experience.
+
+## Exceptions
+
+- Literal values that must match external specifications (e.g., 3GPP XML/YAML tags, ASN.1 OIDs, API field names from standards bodies) are exempt.
+- Test fixtures and seed data that represent real subscriber data in a localized context are exempt, provided they are clearly labeled.

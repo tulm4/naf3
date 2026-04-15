@@ -42,6 +42,40 @@ Phase 6 tích hợp với các NF khác: NRF, UDM, AMF.
 - [x] `notifier.go` — Re-Auth/Revocation notifier (via AMF client)
 - [ ] `client_test.go` — Unit tests
 
+### 4. AUSF Integration — N60 Interface
+
+**Priority:** P1
+**Dependencies:** `internal/types/`, `internal/eap/`
+**Design Doc:** `docs/design/23_ausf_integration.md`
+
+**Deliverables:**
+- [ ] N60 client for AUSF → NSSAAF callout during SNPN authentication
+- [ ] Support for Credentials Holder authentication flow
+- [ ] MSK forwarding to AUSF for NAS key derivation
+- [ ] AUSF integration test suite
+- [ ] `ausf_integration_test.go` — Unit tests
+
+**N60 Flow Overview:**
+```
+AUSF                      NSSAAF                    AAA-S
+  │                          │                        │
+  │──EAP-Request/Identity───►│                        │
+  │                          │──RADIUS DER────────────►│
+  │                          │◄──RADIUS DEA────────────│
+  │◄──EAP-Request/TLS───────│                        │
+  │                          │                         │
+  │     (... EAP-TLS exchange ...)                     │
+  │                          │                         │
+  │──EAP-Response/TLS──────►│                        │
+  │                          │──RADIUS DER────────────►│
+  │                          │◄──RADIUS DEA (MSK)────│
+  │◄──EAP-Success───────────│                        │
+  │                          │ (forward MSK)           │
+  │──NAK (MSK derived)──────►│                        │
+  │                          │                         │
+  (AUSF derives NAS keys from MSK)
+```
+
 ## Validation Checklist
 
 - [x] NRF: NF registration on startup
@@ -50,4 +84,6 @@ Phase 6 tích hợp với các NF khác: NRF, UDM, AMF.
 - [x] UDM: Nudm_UECM_Get for AMF ID lookup
 - [x] AMF: Re-Auth notification
 - [x] AMF: Revocation notification
+- [ ] AUSF: N60 client for SNPN authentication callout
+- [ ] AUSF: MSK forwarding for NAS key derivation
 - [ ] Unit test coverage >80%

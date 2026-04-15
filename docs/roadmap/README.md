@@ -19,7 +19,7 @@
 | Phase | Name | Module | Priority | Est. Time |
 |-------|------|--------|----------|-----------|
 | 0 | Project Setup | `cmd/nssAAF/` | P0 | 1 week |
-| 1 | Foundation | `internal/api/`, `internal/types/` | P0 | 2 weeks |
+| 1 | Foundation | `internal/types/`, `internal/api/nssaa/`, `internal/api/aiw/`, `internal/api/common/`, `internal/config/` | P0 | 2 weeks |
 | 2 | Protocol | `internal/eap/`, `internal/radius/`, `internal/diameter/` | P0 | 2 weeks |
 | 3 | Data & Storage | `internal/storage/`, `internal/cache/` | P0 | 1 week |
 | 4 | HA | `internal/resilience/` | P1 | 1 week |
@@ -46,12 +46,12 @@
 | Phase | Status | Completed Modules |
 |-------|--------|-----------------|
 | Phase 0: Setup | ✅ DONE | `cmd/nssAAF/` |
-| Phase 1: Foundation | ✅ DONE | `internal/api/`, `internal/types/` |
-| Phase 2: Protocol | ✅ DONE | `internal/eap/`, `internal/radius/`, `internal/diameter/`, `internal/aaa/` |
-| Phase 3: Data & Storage | ✅ DONE | `internal/storage/`, `internal/cache/` |
-| Phase 4: HA | ✅ DONE | `internal/resilience/` |
-| Phase 5: Security | ✅ DONE | `internal/auth/`, `internal/crypto/` |
-| Phase 6: Integration | ✅ DONE | `internal/nrf/`, `internal/udm/`, `internal/amf/` |
+| Phase 1: Foundation | ✅ DONE | `internal/types/`, `internal/api/nssaa/`, `internal/api/aiw/`, `internal/api/common/`, `internal/config/` |
+| Phase 2: Protocol | ⏳ PENDING | `internal/eap/`, `internal/radius/`, `internal/diameter/`, `internal/aaa/` |
+| Phase 3: Data & Storage | ⏳ PENDING | `internal/storage/`, `internal/cache/` |
+| Phase 4: HA | ⏳ PENDING | `internal/resilience/` |
+| Phase 5: Security | ⏳ PENDING | `internal/auth/`, `internal/crypto/` |
+| Phase 6: Integration | ⏳ PENDING | `internal/nrf/`, `internal/udm/`, `internal/amf/` |
 | Phase 7: Kubernetes | ⏳ PENDING | — |
 
 ---

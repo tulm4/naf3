@@ -1,0 +1,48 @@
+# Binaries
+bin/
+nssAAF
+nssAAF.exe
+*.exe
+
+# Coverage
+coverage.out
+coverage.html
+*.cover
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*.swn
+.DS_Store
+
+# OS
+Thumbs.db
+
+# Build
+dist/
+
+# Logs
+*.log
+
+# Environment and secrets (never commit these)
+.env
+.env.*
+.env_local
+secrets.yaml
+*.pem
+*.key
+*.crt
+*.csr
+
+# Kubernetes secrets
+**/secrets.yaml
+
+# Test fixtures with secrets
+test/fixtures/secrets*
+
+# Temp files
+tmp/
+temp/
+*.tmp

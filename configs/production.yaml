@@ -1,0 +1,53 @@
+server:
+  addr: ":8080"
+  readTimeout: 10s
+  writeTimeout: 30s
+  idleTimeout: 120s
+
+database:
+  host: "nssAAF-pg-lb.operator.com"
+  port: 5432
+  name: "nssAAF"
+  maxConns: 100
+  minConns: 20
+  connMaxLifetime: 30m
+  sslMode: "require"
+
+redis:
+  addrs:
+    - "redis-cluster-0:6379"
+    - "redis-cluster-1:6379"
+    - "redis-cluster-2:6379"
+  poolSize: 50
+
+eap:
+  maxRounds: 20
+  roundTimeout: 30s
+  sessionTtl: 5m
+
+aaa:
+  responseTimeout: 10s
+  maxRetries: 3
+  failureThreshold: 5
+  recoveryTimeout: 30s
+
+rateLimit:
+  perGpsiPerMin: 10
+  perAmfPerSec: 1000
+  globalPerSec: 100000
+
+logging:
+  level: "info"
+  format: "json"
+
+metrics:
+  enabled: true
+  path: "/metrics"
+
+nrf:
+  baseURL: "https://nrf.operator.com"
+  discoverTimeout: 10s
+
+udm:
+  baseURL: "https://udm.operator.com"
+  timeout: 10s

@@ -1,0 +1,56 @@
+server:
+  addr: ":8080"
+  readTimeout: 5s
+  writeTimeout: 15s
+  idleTimeout: 60s
+
+database:
+  host: "localhost"
+  port: 5432
+  name: "nssAAF"
+  user: "nssAAF_dev"
+  # Load from environment variable NSSAAF_DB_PASSWORD
+  password: "${NSSAAF_DB_PASSWORD}"
+  maxConns: 10
+  minConns: 2
+  connMaxLifetime: 30m
+  sslMode: "disable"
+
+redis:
+  addrs:
+    - "localhost:6379"
+  password: ""
+  db: 0
+  poolSize: 5
+
+eap:
+  maxRounds: 10
+  roundTimeout: 10s
+  sessionTtl: 2m
+
+aaa:
+  responseTimeout: 5s
+  maxRetries: 2
+  failureThreshold: 3
+  recoveryTimeout: 15s
+
+rateLimit:
+  perGpsiPerMin: 100
+  perAmfPerSec: 100
+  globalPerSec: 10000
+
+logging:
+  level: "debug"
+  format: "text"
+
+metrics:
+  enabled: false
+  path: "/metrics"
+
+nrf:
+  baseURL: "http://localhost:8081"
+  discoverTimeout: 5s
+
+udm:
+  baseURL: "http://localhost:8082"
+  timeout: 5s

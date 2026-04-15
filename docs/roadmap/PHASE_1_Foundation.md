@@ -13,12 +13,12 @@ Phase 1 xây dựng nền tảng API layer và data types cho NSSAAF. Không có
 **Design Doc:** `docs/design/04_data_model.md`
 
 **Deliverables:**
-- [ ] `snssai.go` — S-NSSAI type with validation
-- [ ] `gpsi.go` — GPSI type with validation
-- [ ] `supi.go` — SUPI type with validation
-- [ ] `eap.go` — EAP message types
-- [ ] `nssaa_status.go` — NssaaStatus enum
-- [ ] `error.go` — Error types and ProblemDetails
+- [x] `snssai.go` — S-NSSAI type with validation
+- [x] `gpsi.go` — GPSI type with validation
+- [x] `supi.go` — SUPI type with validation
+- [x] `eap.go` — EAP message types
+- [x] `nssaa_status.go` — NssaaStatus enum
+- [x] `error.go` — Error types and ProblemDetails
 
 **Validation Rules:**
 ```go
@@ -53,12 +53,12 @@ type Snssai struct {
 **Design Doc:** `docs/design/02_nssaa_api.md`
 
 **Deliverables:**
-- [ ] `handler.go` — HTTP handler for Nnssaaf_NSSAA
-- [ ] `request.go` — SliceAuthInfo, SliceAuthConfirmationData
-- [ ] `response.go` — SliceAuthContext, SliceAuthConfirmationResponse
-- [ ] `router.go` — HTTP routing
-- [ ] `middleware.go` — Auth middleware, logging
-- [ ] `handler_test.go` — Unit tests
+- [x] `handler.go` — HTTP handler for Nnssaaf_NSSAA
+- [x] `request.go` — SliceAuthInfo, SliceAuthConfirmationData
+- [x] `response.go` — SliceAuthContext, SliceAuthConfirmationResponse
+- [x] `router.go` — HTTP routing
+- [x] `middleware.go` — Auth middleware, logging
+- [x] `handler_test.go` — Unit tests
 
 **API Surface:**
 ```go
@@ -82,11 +82,11 @@ type Snssai struct {
 **Design Doc:** `docs/design/03_aiw_api.md`
 
 **Deliverables:**
-- [ ] `handler.go` — HTTP handler for Nnssaaf_AIW
-- [ ] `request.go` — AuthInfo, AuthConfirmationData
-- [ ] `response.go` — AuthContext, AuthConfirmationResponse
-- [ ] `router.go` — HTTP routing
-- [ ] `handler_test.go` — Unit tests
+- [x] `handler.go` — HTTP handler for Nnssaaf_AIW
+- [x] `request.go` — AuthInfo, AuthConfirmationData
+- [x] `response.go` — AuthContext, AuthConfirmationResponse
+- [x] `router.go` — HTTP routing
+- [x] `handler_test.go` — Unit tests
 
 **Key Differences from NSSAA:**
 ```go
@@ -109,9 +109,9 @@ type AuthConfirmationResponse struct {
 **Dependencies:** `internal/types/`
 
 **Deliverables:**
-- [ ] `problem.go` — ProblemDetails type (RFC 7807)
-- [ ] `validator.go` — Common validation utilities
-- [ ] `headers.go` — HTTP header constants
+- [x] `problem.go` — ProblemDetails type (RFC 7807)
+- [x] `validator.go` — Common validation utilities
+- [x] `headers.go` — HTTP header constants
 
 ### 5. `cmd/nssAAF/main.go` — Entry Point
 
@@ -119,9 +119,9 @@ type AuthConfirmationResponse struct {
 **Dependencies:** All internal packages
 
 **Deliverables:**
-- [ ] `main.go` — Server bootstrap
-- [ ] `config.go` — Configuration loading
-- [ ] `wire.go` — Dependency injection setup
+- [x] `main.go` — Server bootstrap
+- [x] `config.go` — Configuration loading
+- [x] `wire.go` — Dependency injection setup
 
 ## Implementation Order
 
@@ -135,15 +135,15 @@ type AuthConfirmationResponse struct {
 
 ## Validation Checklist
 
-- [ ] GPSI regex validation: `^5[0-9]{8,14}$`
-- [ ] SUPI regex validation: `^imu-[0-9]{15}$`
-- [ ] Snssai SST range: 0-255
-- [ ] Snssai SD format: 6 hex chars
-- [ ] Error response format: ProblemDetails (RFC 7807)
-- [ ] HTTP status codes: 201, 200, 400, 403, 404, 409, 410, 502, 503, 504
-- [ ] Location header on 201
-- [ ] X-Request-ID correlation
-- [ ] Unit test coverage >80%
+- [x] GPSI regex validation: `^5[0-9]{8,14}$`
+- [x] SUPI regex validation: `^imu-[0-9]{15}$`
+- [x] Snssai SST range: 0-255
+- [x] Snssai SD format: 6 hex chars
+- [x] Error response format: ProblemDetails (RFC 7807)
+- [x] HTTP status codes: 201, 200, 400, 403, 404, 409, 410, 502, 503, 504
+- [x] Location header on 201
+- [x] X-Request-ID correlation
+- [x] Unit test coverage >80%
 
 ## Spec References
 

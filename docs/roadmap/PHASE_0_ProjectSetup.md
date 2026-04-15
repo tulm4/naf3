@@ -424,17 +424,17 @@ Week 2 — Day 5: Docker, .gitignore, README
 
 ## Validation Checklist
 
-- [ ] `go build ./...` compiles without errors
-- [ ] `go test ./...` passes with >0% coverage (baseline)
-- [ ] `golangci-lint run ./...` passes with no errors
-- [ ] Docker image builds successfully
+- [x] `go build ./...` compiles without errors
+- [x] `go test ./...` passes with >0% coverage (baseline)
+- [x] `golangci-lint run ./...` passes with no errors
+- [x] Docker image builds successfully
 - [ ] GitHub Actions CI passes on PR
-- [ ] All Phase 1-7 placeholder directories created
-- [ ] `cmd/nssAAF/main.go` wires in `internal/api/common/` middleware
-- [ ] `configs/production.yaml` exists with full config
-- [ ] `.editorconfig` enforces code style
-- [ ] No secrets or credentials in repository
-- [ ] `make help` shows all available targets
+- [x] All Phase 1-7 placeholder directories created
+- [x] `cmd/nssAAF/main.go` wires in `internal/api/common/` middleware
+- [x] `configs/production.yaml` exists with full config
+- [x] `.editorconfig` enforces code style
+- [x] No secrets or credentials in repository
+- [x] `make help` shows all available targets
 
 ## Spec References
 

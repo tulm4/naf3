@@ -1,0 +1,41 @@
+# Docker build context
+# Prevent copying unnecessary files into the Docker image
+
+# Git
+.git
+.gitignore
+
+# Documentation (keep docs/ for reference builds if needed)
+docs/
+*.md
+
+# IDE
+.vscode/
+.idea/
+
+# Coverage and test artifacts
+coverage.out
+coverage.html
+*.cover
+*.test
+
+# Local development
+.env
+.env.*
+.env_local
+
+# Build artifacts
+bin/
+dist/
+
+# Logs
+*.log
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Editor backup files
+*.swp
+*.swo
+*.swn

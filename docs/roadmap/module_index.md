@@ -4,11 +4,12 @@
 
 | Module | Design Doc | Phase | Status |
 |--------|-----------|-------|--------|
+| `cmd/nssAAF/` | `docs/design/01_service_model.md` | 0 | READY |
 | `internal/api/common/` | `docs/design/02_nssaa_api.md` | 1 | READY |
 | `internal/types/` | `docs/design/04_data_model.md` | 1 | READY |
 | `internal/api/nssaa/` | `docs/design/02_nssaa_api.md` | 1 | READY |
 | `internal/api/aiw/` | `docs/design/03_aiw_api.md` | 1 | READY |
-| `cmd/nssAAF/` | `docs/design/01_service_model.md` | 0 | READY |
+| `internal/config/` | `docs/design/04_data_model.md` | 1 | READY |
 | `internal/eap/` | `docs/design/06_eap_engine.md` | 2 | READY |
 | `internal/radius/` | `docs/design/07_radius_client.md` | 2 | READY |
 | `internal/diameter/` | `docs/design/08_diameter_client.md` | 2 | READY |
@@ -16,14 +17,16 @@
 | `internal/storage/postgres/` | `docs/design/11_database_ha.md` | 3 | READY |
 | `internal/cache/redis/` | `docs/design/12_redis_ha.md` | 3 | READY |
 | `internal/resilience/` | `docs/design/10_ha_architecture.md` | 4 | READY |
-| `internal/auth/` | `docs/design/15_sbi_security.md` | 5 | READY |
-| `internal/crypto/` | `docs/design/17_crypto.md` | 5 | READY |
+| `internal/auth/` | `docs/design/15_sbi_security.md`, `docs/design/16_aaa_security.md` | 5 | READY |
+| `internal/crypto/` | `docs/design/17_crypto.md`, `docs/design/16_aaa_security.md` | 5 | READY |
 | `internal/nrf/` | `docs/design/05_nf_profile.md` | 6 | READY |
 | `internal/udm/` | `docs/design/22_udm_integration.md` | 6 | READY |
 | `internal/amf/` | `docs/design/21_amf_integration.md` | 6 | READY |
-| *(cross-cutting)* | `docs/design/19_observability.md` | ALL | TBD |
-| *(cross-cutting)* | `docs/design/24_test_strategy.md` | ALL | TBD |
 | *(external NF)* | `docs/design/23_ausf_integration.md` | 6 | TBD |
+| `internal/nrm/` | `docs/design/18_nrm_fcaps.md` | 7 | TBD |
+| *(cross-cutting)* | `docs/design/19_observability.md` | ALL | TBD |
+| *(cross-cutting)* | `docs/design/20_config_management.md` | ALL | TBD |
+| *(cross-cutting)* | `docs/design/24_test_strategy.md` | ALL | TBD |
 | `deployments/helm/` | `docs/design/25_kubeadm_setup.md` | 7 | READY |
 
 ## Dependency Graph
