@@ -4,9 +4,19 @@ section: Ch.16
 interface: N/A (NSSAAF ↔ AAA-S internal)
 service: RADIUS Client
 operation: N/A (internal)
+implementation: Custom (no external library)
 ---
 
 # NSSAAF RADIUS Client Design
+
+## 0. Implementation Decision: Custom Implementation
+
+**Không dùng `layeh/radius`.** Lý do:
+
+- `layeh/radius` không hỗ trợ DTLS (RFC 4818) — transport security phải implement riêng bất kể
+- UDP transport + HMAC-MD5 + 3GPP VSA custom = phần lớn code vẫn tự viết
+- Dùng library base protocol cho RADIUS không tiết kiệm nhiều effort
+- Custom implementation dễ debug production issues hơn (không có "black box")
 
 ## 1. Overview
 

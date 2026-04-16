@@ -90,4 +90,6 @@ const (
 	AuthResultSuccess AuthResult = "EAP_SUCCESS"
 	// AuthResultFailure indicates failed slice authentication.
 	AuthResultFailure AuthResult = "EAP_FAILURE"
+	// AuthResultPending indicates EAP exchange is still in progress.
+	AuthResultPending AuthResult = "PENDING"
 )

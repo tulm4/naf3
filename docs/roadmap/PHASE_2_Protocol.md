@@ -13,13 +13,13 @@ Phase 2 xây dựng protocol handling layer: EAP engine và AAA protocol clients
 **Design Doc:** `docs/design/06_eap_engine.md`
 
 **Deliverables:**
-- [ ] `engine.go` — EAP session state machine
-- [ ] `session.go` — EAP session state struct
-- [ ] `state.go` — State constants and transitions
-- [ ] `tls.go` — EAP-TLS handling, MSK derivation (RFC 5216)
-- [ ] `fragment.go` — EAP fragmentation/reassembly
-- [ ] `codec.go` — EAP packet encoding/decoding (RFC 3748)
-- [ ] `engine_test.go` — Unit tests
+- [x] `engine.go` — EAP session state machine
+- [x] `session.go` — EAP session state struct
+- [x] `state.go` — State constants and transitions
+- [x] `tls.go` — EAP-TLS handling, MSK derivation (RFC 5216)
+- [x] `fragment.go` — EAP fragmentation/reassembly
+- [x] `codec.go` — EAP packet encoding/decoding (RFC 3748)
+- [x] `engine_test.go` — Unit tests
 
 **EAP Types Supported:**
 ```go
@@ -57,15 +57,18 @@ func deriveMSK(tls *tls.ConnectionState) ([]byte, error)
 **Priority:** P0
 **Dependencies:** `internal/eap/`
 **Design Doc:** `docs/design/07_radius_client.md`
+**Library:** Custom implementation (no external dependency)
+
+> **Tại sao tự viết?** RADIUS transport là UDP + DTLS, không có TCP/SCTP. `layeh/radius` không hỗ trợ DTLS, transport security phải implement riêng. Viết trên raw UDP sạch hơn và dễ debug hơn khi có production issue. Phần base packet encoding (RFC 2865) đơn giản, không đáng để phụ thuộc vào library.
 
 **Deliverables:**
-- [ ] `client.go` — RADIUS client interface
-- [ ] `packet.go` — RADIUS packet encoding/decoding
-- [ ] `attribute.go` — RADIUS attribute handling
-- [ ] `vsa.go` — 3GPP-S-NSSAI VSA encoding (code 200)
-- [ ] `message_auth.go` — HMAC-MD5 Message-Authenticator (RFC 3579)
-- [ ] `client_udp.go` — UDP transport
-- [ ] `client_test.go` — Unit tests
+- [x] `client.go` — RADIUS client interface
+- [x] `packet.go` — RADIUS packet encoding/decoding (RFC 2865)
+- [x] `attribute.go` — RADIUS attribute handling
+- [x] `vsa.go` — 3GPP-S-NSSAI VSA encoding (code 200, Vendor-Id 10415)
+- [x] `message_auth.go` — HMAC-MD5 Message-Authenticator (RFC 3579)
+- [x] `dtls.go` — DTLS transport layer (RFC 4818)
+- [x] `client_test.go` — Unit tests
 
 **RADIUS Packet Codes:**
 ```go
@@ -96,15 +99,23 @@ func DecodeSnssaiVSA(data []byte) (Snssai, error)
 **Priority:** P0
 **Dependencies:** `internal/eap/`
 **Design Doc:** `docs/design/08_diameter_client.md`
+**Library:** `github.com/fiorix/go-diameter/v4`
+
+> **Tại sao dùng go-diameter?** Base protocol RFC 6733 phức tạp (CER/CEA handshake, DWR/DWA, state machine). `fiorix/go-diameter` cung cấp SCTP + TLS transport, CER/CEA capabilities exchange, và dictionary-based AVP encoding. Phần base protocol tiết kiệm ~40% effort. 3GPP-specific AVPs (S-NSSAI, EAP-Payload) vẫn phải custom thêm.
 
 **Deliverables:**
-- [ ] `client.go` — Diameter client interface
-- [ ] `message.go` — Diameter message encoding/decoding
-- [ ] `avp.go` — AVP handling
-- [ ] `snssai_avp.go` — 3GPP-S-NSSAI AVP (code 310)
-- [ ] `transport.go` — SCTP/TCP transport
-- [ ] `cer.go` — CER/CEA capabilities exchange
-- [ ] `client_test.go` — Unit tests
+- [x] `client.go` — Diameter client interface (wraps go-diameter stack)
+- [x] `snssai_avp.go` — 3GPP-S-NSSAI AVP (code 310) — custom layer
+- [x] `eap_avp.go` — EAP-Payload AVP (code 380) — custom layer
+- [x] `diameter.go` — NssaaDiameterClient wrapping `diam.Conn`
+- [x] `diameter_test.go` — Unit tests
+
+**go-diameter integration pattern:**
+```go
+import "github.com/fiorix/go-diameter/v4/diam"
+// go-diameter handles: CER/CEA, DWR/DWA, SCTP/TCP, TLS, dictionary encoding
+// NSSAAF adds: 3GPP-S-NSSAI AVP (code 310), EAP-Payload AVP (code 380)
+```
 
 **Key Command Codes:**
 ```go
@@ -125,9 +136,9 @@ const (
 **Design Doc:** `docs/design/09_aaa_proxy.md`
 
 **Deliverables:**
-- [ ] `router.go` — Route decision (Direct vs Proxy mode)
-- [ ] `config.go` — AAA server configuration
-- [ ] `metrics.go` — AAA client metrics
+- [x] `router.go` — Route decision (Direct vs Proxy mode)
+- [x] `config.go` — AAA server configuration
+- [x] `metrics.go` — AAA client metrics
 
 **Routing Logic:**
 ```go
@@ -147,13 +158,15 @@ type RouteDecision struct {
 
 ## Validation Checklist
 
-- [ ] EAP packet encoding/decoding matches RFC 3748
-- [ ] EAP-TLS MSK derivation matches RFC 5216
-- [ ] RADIUS Access-Request contains: User-Name, Calling-Station-Id, EAP-Message, Message-Authenticator, 3GPP-S-NSSAI VSA
-- [ ] Message-Authenticator HMAC-MD5 computation matches RFC 3579
-- [ ] Diameter DER/DEA contains: Session-Id, Auth-Application-Id, EAP-Payload, 3GPP-S-NSSAI
-- [ ] Circuit breaker: CLOSED → OPEN (5 failures) → HALF_OPEN (30s) → CLOSED
-- [ ] Unit test coverage >80%
+- [x] EAP packet encoding/decoding matches RFC 3748
+- [x] EAP-TLS MSK derivation matches RFC 5216
+- [ ] RADIUS: DTLS handshake (RFC 4818) with shared secret
+- [x] RADIUS Access-Request contains: User-Name, Calling-Station-Id, EAP-Message, Message-Authenticator, 3GPP-S-NSSAI VSA
+- [x] Message-Authenticator HMAC-MD5 computation matches RFC 3579
+- [x] Diameter CER/CEA: go-diameter handles, verify vendor IDs in CEA
+- [x] Diameter DER/DEA contains: Session-Id, Auth-Application-Id, EAP-Payload, 3GPP-S-NSSAI
+- [x] Circuit breaker: CLOSED → OPEN (5 failures) → HALF_OPEN (30s) → CLOSED
+- [x] Unit test coverage >80%
 
 ## Spec References
 

@@ -4,9 +4,24 @@ section: Ch.17
 interface: N/A (NSSAAF ↔ AAA-S internal)
 service: Diameter Client
 operation: N/A (internal)
+implementation: github.com/fiorix/go-diameter/v4 (base stack) + custom 3GPP AVPs
 ---
 
 # NSSAAF Diameter Client Design
+
+## 0. Library Decision: `fiorix/go-diameter/v4`
+
+**Dùng `github.com/fiorix/go-diameter/v4` làm base stack.** Lý do:
+
+- Diameter RFC 6733 base protocol phức tạp: CER/CEA handshake, DWR/DWA state machine, hop-by-hop/end-to-end IDs
+- go-diameter cung cấp SCTP + TLS transport, CER/CEA capabilities exchange, dictionary-based AVP encoding
+- Tiết kiệm ~40% effort cho base protocol
+- 3GPP-specific AVPs (S-NSSAI, EAP-Payload) vẫn phải custom thêm
+
+**Điều không có sẵn trong go-diameter:**
+- 3GPP-S-NSSAI AVP (code 310) — tự viết
+- EAP-Payload AVP (code 209) — tự viết
+- Transport security (DTLS/IPSec) — tự viết
 
 ## 1. Overview
 

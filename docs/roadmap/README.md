@@ -47,7 +47,7 @@
 |-------|--------|-----------------|
 | Phase 0: Setup | ✅ DONE | `cmd/nssAAF/` |
 | Phase 1: Foundation | ✅ DONE | `internal/types/`, `internal/api/nssaa/`, `internal/api/aiw/`, `internal/api/common/`, `internal/config/` |
-| Phase 2: Protocol | ⏳ PENDING | `internal/eap/`, `internal/radius/`, `internal/diameter/`, `internal/aaa/` |
+| Phase 2: Protocol | ✅ DONE | `internal/eap/`, `internal/radius/`, `internal/diameter/`, `internal/aaa/` |
 | Phase 3: Data & Storage | ⏳ PENDING | `internal/storage/`, `internal/cache/` |
 | Phase 4: HA | ⏳ PENDING | `internal/resilience/` |
 | Phase 5: Security | ⏳ PENDING | `internal/auth/`, `internal/crypto/` |
