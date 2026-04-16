@@ -78,19 +78,68 @@ POST /nnssaaf-aiw/v1/authentications
 #### Processing Logic
 
 ```
-1. Validate OAuth2 token (scope: nnssaaf-aiw)
+1. Validate OAuth2 token (NRF-issued, scope: nnssaaf-aiw)
+   - Reject if token expired or missing scope
 2. Parse AuthInfo JSON
-3. Validate supi (required)
-4. Resolve AAA server config:
-   a. Lookup AAA_CONFIG by SUPI range or default
-   b. If not found → 404 AaaServerNotConfigured
-5. Create authCtxId: UUIDv7
-6. Create session record:
+3. Validate all required fields:
+   - supi: regex ^imu-[0-9]{15}$
+   - eapIdRsp: if present, valid Base64, decodes to valid EAP Response packet
+   - ttlsInnerMethodContainer: if present, valid Base64
+   - supportedFeatures: if present, non-empty string
+4. Check circuit breaker for AAA target:
+   - If OPEN → 503 Service Unavailable immediately
+   - If HALF_OPEN → allow 1 probe request
+5. Check rate limit (per-SUPI: 10 req/min, per-AUSF: 1000 req/sec)
+   - If exceeded → 429 Too Many Requests
+6. Resolve AAA server config:
+   a. Lookup AAA_CONFIG by SUPI range (operator-configured mapping)
+   b. If not found by range → use default AAA_CONFIG
+   c. If no default configured → 404 AaaServerNotConfigured
+7. Create authCtxId: UUIDv7 (time-sortable, monotonic within node)
+8. Create session record in PostgreSQL:
    - authCtxId, supi, nssaaStatus=PENDING
-   - eapIdRsp present → start EAP exchange
-   - eapIdRsp absent → return 201 with initial EAP request
-7. Encode to AAA protocol (same as NSSAA)
-8. Return 201 Created with AuthContext
+   - aaaServerConfigId, eapSessionState (serialized JSON)
+   - createdAt, expiresAt (now + sessionTimeout)
+   - supportedFeatures (echoed back in response)
+9. Determine whether initial EAP-Request or EAP exchange is needed:
+   a. If eapIdRsp is null: build EAP Identity Request internally
+      → return 201 with eapMessage = Base64(EAP-Identity-Request)
+   b. If eapIdRsp is present: encode to AAA protocol and send to AAA-S
+10. Encode to AAA protocol (RADIUS or Diameter):
+    a. If AAA protocol = RADIUS:
+       - Build Access-Request (Code=1)
+       - User-Name: supi
+       - Message-Authenticator: HMAC-MD5(secret, packet) — RFC 3579 §3.2
+       - EAP-Message: eapIdRsp bytes
+       - (3GPP-S-NSSAI AVP: not used for AIW; per-SUPI not per-slice)
+    b. If AAA protocol = Diameter:
+       - Build DER (Command-Code=268, Application-Id=5)
+       - Session-Id, Auth-Application-Id, Auth-Request-Type
+       - User-Name: supi
+       - EAP-Payload AVP
+11. Send to AAA-S:
+    - Apply retry with exponential backoff: 0ms, 100ms, 200ms
+    - After 3 retries exhausted → 504 AAA_TIMEOUT
+12. Decode AAA response:
+    a. RADIUS Access-Challenge → extract EAP-Message → return eapMessage
+    b. RADIUS Access-Accept → EAP-Success
+       - Extract MSK from MSK VSA (Vendor-Id=VSA, Vendor-Type=TBD)
+       - Extract pvsInfo if present
+    c. RADIUS Access-Reject → EAP-Failure
+    d. Diameter DEA result-code=2001 → EAP_SUCCESS (extract KeyingMaterial AVP = MSK)
+    e. Diameter DEA result-code=4001 → EAP_FAILURE
+13. On terminal result (Success/Failure):
+    - Update PostgreSQL: nssaaStatus = EAP_SUCCESS | EAP_FAILURE
+    - Delete from Redis (no active session)
+    - If Success: return msk, pvsInfo in response
+14. On continue (EAP Challenge):
+    - Store EAP session state in PostgreSQL + Redis (TTL = sessionTTL)
+    - Set nssaaStatus = PENDING
+15. Return 201 Created with AuthContext:
+    - authResult: null (multi-round in progress)
+    - eapMessage: Base64(EAP-Request from AAA-S) if Challenge
+    - ttlsInnerMethodContainer: echoed from request if present
+    - supportedFeatures: echoed from request
 ```
 
 #### Response 201 Created
@@ -131,12 +180,48 @@ PUT /nnssaaf-aiw/v1/authentications/01fr5xg2e3p4q5r6s7t8u9v0w2
 #### Processing Logic
 
 ```
-1. Load session by authCtxId
-2. Validate supi matches
-3. Check session not expired
-4. Check not already completed
-5. Forward EAP message to AAA-S
-6. Return AuthConfirmationResponse
+1. Validate authCtxId format (UUIDv7 regex)
+2. Load session from Redis cache first:
+   - If found in Redis → use cached state
+   - If not found → load from PostgreSQL → populate Redis (TTL = sessionTTL)
+3. If session not found in either → 404 AuthContextNotFound
+4. If session expired (now > expiresAt) → 410 AuthContextExpired
+5. If session status = EAP_SUCCESS or EAP_FAILURE → 409 AuthAlreadyCompleted
+6. Validate supi matches session.supi field
+7. Validate eapMessage: non-empty, valid Base64, decodes to valid EAP Response packet
+8. Check circuit breaker for AAA target → if OPEN → 503 Service Unavailable
+9. Idempotent retry detection:
+   - Compute sha256(eapMsgPayload)
+   - If hash == session.LastNonce AND session.CachedResponse != nil:
+     → Return cached response immediately (no AAA call)
+10. Encode EAP message to AAA protocol (same as POST step 10)
+11. Send to AAA-S:
+    - Update session.ExpectedId = eapMsg.Id + 1
+    - Update session.Rounds++
+12. Decode AAA response:
+    a. RADIUS Access-Challenge → extract EAP-Message → return eapMessage, authResult=null
+    b. RADIUS Access-Accept → EAP-Success
+       - Extract MSK from MSK VSA
+       - Extract pvsInfo array if present
+    c. RADIUS Access-Reject → EAP-Failure
+    d. Diameter DEA result-code=2001 → EAP_SUCCESS (extract KeyingMaterial AVP = MSK)
+    e. Diameter DEA result-code=4001 → EAP_FAILURE
+13. Update session state:
+    - LastActivity = now
+    - LastNonce = sha256(eapMsgPayload)
+    - CachedResponse = AAA response bytes
+14. On terminal result (Success/Failure):
+    - Transition state: SessionStateEapExchange → SessionStateDone | SessionStateFailed
+    - Update PostgreSQL: nssaaStatus = EAP_SUCCESS | EAP_FAILURE
+    - Delete from Redis
+    - Return authResult set, eapMessage=null, msk/pvsInfo populated on Success
+15. On continue (EAP Challenge):
+    - Transition state: SessionStateEapExchange → SessionStateCompleting
+    - Update PostgreSQL + Redis
+    - Return authResult=null, eapMessage=Base64(EAP-Request from AAA-S)
+16. On timeout (no AAA response within roundTimeout):
+    - Transition state → SessionStateTimeout
+    - Return 504 Gateway Timeout
 ```
 
 #### Response 200 OK

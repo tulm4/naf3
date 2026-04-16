@@ -76,43 +76,68 @@ POST /nnssaaf-nssaa/v1/slice-authentications
 
 ```
 1. Validate OAuth2 token (NRF-issued, scope: nnssaaf-nssaa)
+   - Reject if token expired or missing scope
 2. Parse SliceAuthInfo JSON
-3. Validate all required fields
-4. Extract AMF identity (from cert CN or amfInstanceId)
-5. Resolve AAA server config:
+3. Validate all required fields:
+   - gpsi: regex ^5[0-9]{8,14}$
+   - snssai.sst: 0-255
+   - snssai.sd: 6 hex chars or omitted
+   - eapIdRsp: non-empty, valid Base64, decodes to valid EAP Response packet
+   - reauthNotifUri / revocNotifUri: valid https:// URI if present, null if absent
+4. Extract AMF identity (from client cert CN or amfInstanceId header)
+5. Check circuit breaker for AAA target:
+   - If OPEN → 503 Service Unavailable immediately
+   - If HALF_OPEN → allow 1 probe request
+6. Check rate limit (per-GPSI: 10 req/min, per-AMF: 1000 req/sec)
+   - If exceeded → 429 Too Many Requests
+7. Resolve AAA server config:
    a. Lookup AAA_CONFIG by (snssai.sst, snssai.sd) from config store
    b. If not found by exact match, match by (snssai.sst, sd=*)
    c. If still not found, match by (sst=*, sd=*) as default
    d. If no config found → 404 AaaServerNotConfigured
-6. Create authCtxId: UUIDv7 (time-sortable)
-7. Create session record in PostgreSQL:
+8. Create authCtxId: UUIDv7 (time-sortable, monotonic within node)
+9. Create session record in PostgreSQL:
    - authCtxId, gpsi, snssai, nssaaStatus=PENDING
-   - amfInstanceId, amfNotifUri{reauth,revoc}
-   - aaaServerConfigId, eapSessionState (serialized)
+   - amfInstanceId, amfNotifUri{reauth,revoc} (may be null)
+   - aaaServerConfigId, eapSessionState (serialized JSON)
    - createdAt, expiresAt (now + sessionTimeout)
-8. Encode EAP Identity Response into AAA protocol:
-   a. If AAA protocol = RADIUS:
-      - Build Access-Request
-      - User-Name: gpsi
-      - Calling-Station-Id: gpsi
-      - 3GPP-S-NSSAI (VSA #200): sst + sd
-      - EAP-Message: eapIdRsp
-      - Message-Authenticator
-   b. If AAA protocol = Diameter:
-      - Build DER
-      - User-Name: gpsi
-      - Calling-Station-Id: gpsi
-      - 3GPP-S-NSSAI AVP
-      - EAP-Message AVP
-9. Send to AAA-S (direct or via AAA-P)
-10. Wait for AAA response (timeout: aaaTimeout)
-    - Access-Challenge / DEA → extract EAP message → return
-    - Access-Accept → EAP-Success → return
-    - Access-Reject → EAP-Failure → return
-    - Timeout → 504 AAA_TIMEOUT
-    - Error → 502 AAA_UNREACHABLE
-11. Store EAP session state in PostgreSQL + Redis
-12. Return 201 Created with SliceAuthContext
+10. Encode EAP Identity Response into AAA protocol:
+    a. If AAA protocol = RADIUS:
+       - Build Access-Request (Code=1)
+       - Message-Authenticator: zeroed initially, computed after all attrs
+       - User-Name: gpsi
+       - Calling-Station-Id: gpsi
+       - 3GPP-S-NSSAI (VSA #26, Vendor-Id 10415, Vendor-Type 200): sst + sd
+       - EAP-Message: eapIdRsp (raw EAP Response bytes)
+       - NAS-IP-Address, NAS-Port-Type: filled from config
+       - Message-Authenticator: HMAC-MD5(secret, packet) — RFC 3579 §3.2
+    b. If AAA protocol = Diameter:
+       - Build DER (Command-Code=268, Application-Id=5)
+       - Session-Id AVP
+       - Auth-Application-Id: 5 (Diameter EAP)
+       - Auth-Request-Type: 1 (AUTHORIZE_AUTHENTICATE)
+       - User-Name: gpsi
+       - 3GPP-S-NSSAI AVP (code 310): sst + sd
+       - EAP-Payload AVP (code 380): eapIdRsp bytes
+11. Send to AAA-S (direct or via AAA-P proxy):
+    - Apply retry with exponential backoff: 0ms, 100ms, 200ms
+    - After 3 retries exhausted → 504 AAA_TIMEOUT
+12. Decode AAA response:
+    a. RADIUS Access-Challenge → extract first EAP-Message attr → return eapMessage
+    b. RADIUS Access-Accept → nssaaStatus=EAP_SUCCESS, no eapMessage
+    c. RADIUS Access-Reject → nssaaStatus=EAP_FAILURE, no eapMessage
+    d. Diameter DEA result-code=2001 → EAP_SUCCESS
+    e. Diameter DEA result-code=4001 → EAP_FAILURE
+    f. Any AAA error / timeout → circuit breaker record failure
+13. On terminal result (Success/Failure):
+    - Update PostgreSQL: nssaaStatus = EAP_SUCCESS | EAP_FAILURE
+    - Delete from Redis (no active session)
+14. On continue (EAP Challenge):
+    - Store EAP session state in PostgreSQL + Redis (TTL = sessionTTL)
+    - Set nssaaStatus = PENDING
+15. Return 201 Created with SliceAuthContext:
+    - authResult: null (multi-round in progress)
+    - eapMessage: Base64(EAP-Request from AAA-S) if Challenge
 ```
 
 #### Response 201 Created
@@ -220,17 +245,42 @@ PUT /nnssaaf-nssaa/v1/slice-authentications/01fr5xg2e3p4q5r6s7t8u9v0w1
 #### Processing Logic
 
 ```
-1. Validate authCtxId format
-2. Load session from PostgreSQL (or Redis cache):
-   - If not found → 404 Not Found
-   - If expired (now > expiresAt) → 410 Gone
-   - If status = EAP_SUCCESS or EAP_FAILURE → 409 Conflict (already completed)
-3. Validate gpsi, snssai match session
-4. Increment eapRound counter:
-   - If eapRound >= maxEapRounds (20) → 400 MaxEapRoundsExceeded
-5. Forward EAP message to AAA-S (same as POST step 8-10)
-6. Update session state in PostgreSQL + Redis
-7. Return SliceAuthConfirmationResponse
+1. Validate authCtxId format (UUIDv7 regex)
+2. Load session from Redis cache first:
+   - If found in Redis → use cached state
+   - If not found → load from PostgreSQL → populate Redis (TTL = sessionTTL)
+3. If session not found in either → 404 Not Found
+4. If session expired (now > expiresAt) → 410 Gone
+5. If session status = EAP_SUCCESS or EAP_FAILURE → 409 Conflict
+6. Validate gpsi and snssai match session fields
+7. Check circuit breaker for AAA target → if OPEN → 503 Service Unavailable
+8. Idempotent retry detection:
+   - Compute sha256(eapMsgPayload)
+   - If hash == session.LastNonce AND session.CachedResponse != nil:
+     → Return cached response immediately (no AAA call)
+9. Validate EAP payload (same rules as POST step 3)
+10. Increment eapRound counter:
+    - If eapRound >= maxEapRounds (20) → 400 MaxEapRoundsExceeded
+11. Forward EAP message to AAA-S (same encoding as POST step 10):
+    - Update session.ExpectedId = eapMsg.Id + 1
+    - Update session.Rounds++
+12. Decode AAA response (same as POST step 12)
+13. Update session state:
+    - LastActivity = now
+    - LastNonce = sha256(eapMsgPayload)
+    - CachedResponse = AAA response bytes
+14. On terminal result (Success/Failure):
+    - Transition state: SessionStateEapExchange → SessionStateDone | SessionStateFailed
+    - Update PostgreSQL: nssaaStatus = EAP_SUCCESS | EAP_FAILURE
+    - Delete from Redis
+    - Return authResult set, eapMessage null
+15. On continue (EAP Challenge):
+    - Transition state: SessionStateEapExchange → SessionStateCompleting
+    - Update PostgreSQL + Redis
+    - Return authResult = null, eapMessage = Base64(EAP-Request from AAA-S)
+16. On timeout (no AAA response within roundTimeout):
+    - Transition state → SessionStateTimeout
+    - Return 504 Gateway Timeout
 ```
 
 #### Response 200 OK
@@ -367,6 +417,24 @@ Headers:
 
 **AMF expected action:** Trigger NSSAA procedure (§4.2.9.2) cho UE + S-NSSAI này.
 
+**Processing Logic:**
+```
+1. NSSAAF receives Disconnect-Request (RADIUS CoA) or ASR (Diameter) from AAA-S
+2. Validate message authenticator / signature
+3. Look up active slice-auth session by (gpsi, snssai) in Redis
+4. If session found:
+   a. Transition NssaaStatus from EAP_SUCCESS → PENDING
+   b. POST to reauthNotifUri (from SliceAuthContext)
+   c. AMF acknowledges with 204, then triggers new NSSAA via POST /slice-authentications
+   d. NSSAAF processes new EAP exchange, resolves to SUCCESS or FAILURE
+   e. Update NssaaStatus in DB: PENDING → EAP_SUCCESS | EAP_FAILURE
+5. If no active session found:
+   a. Log warning: "reauth for inactive session"
+   b. Return 204 (idempotent — AMF may have already cleaned up)
+6. Retry up to 3 times on 5xx, backoff 1s/2s/4s
+7. On persistent failure: log error, emit metric nssaa.notification.reauth.failed
+```
+
 #### RevocationNotification
 
 NSSAAF POST đến `revocNotifUri` khi AAA-S revoke authorization (TS 33.501 §16.5):
@@ -391,6 +459,26 @@ POST https://amf1.operator.com:8080/namf-comm/v1/subscriptions
 - Remove S-NSSAI from Allowed NSSAI
 - If no S-NSSAI left → UE Deregistration
 - PDU Session Release cho S-NSSAI bị revoke
+
+**Processing Logic:**
+```
+1. NSSAAF receives Revocation-Request (RADIUS DM) or STR (Diameter) from AAA-S
+2. Validate message authenticator / signature
+3. Look up all active slice-auth sessions for (gpsi, snssai) in Redis/DB
+4. For each matching session:
+   a. Transition NssaaStatus from EAP_SUCCESS → EAP_FAILURE
+   b. POST to revocNotifUri (from SliceAuthContext)
+   c. AMF acknowledges with 204, removes S-NSSAI from Allowed NSSAI
+   d. Delete session from Redis; mark EAP_SUCCESS → revoked in DB
+5. If no active sessions found:
+   a. Log info: "revocation for already-cleaned session"
+   b. Return 204 (idempotent)
+6. Retry up to 3 times on 5xx, backoff 1s/2s/4s
+7. On persistent failure:
+   a. Log error: "revocation notification failed after retries"
+   b. Emit metric nssaa.notification.revocation.failed
+   c. Store in dead-letter queue (DLQ) for manual intervention
+```
 
 ### 2.8 Timeout & Retry Configuration
 

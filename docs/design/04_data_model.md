@@ -12,6 +12,10 @@ operation: N/A (data model)
 
 Tài liệu này thiết kế data model cho NSSAAF — bao gồm PostgreSQL schema cho persistent state, Redis cache structure, và serialization format cho EAP session state. Tất cả thiết kế tuân thủ 3GPP TS 29.571 (data types), TS 29.526 (session resources), và TS 28.541 (NRM).
 
+Phạm vi data model bao gồm 2 service contexts:
+- **NSSAA** (`Nnssaaf_NSSAA`): Slice authentication per GPSI + S-NSSAI, AMF-triggered.
+- **AIW** (`Nnssaaf_AIW`): SNPN primary authentication per SUPI, AUSF-triggered. Khác biệt chính: không có S-NSSAI, có MSK output và pvsInfo.
+
 ---
 
 ## 2. Core Entities
@@ -19,38 +23,60 @@ Tài liệu này thiết kế data model cho NSSAAF — bao gồm PostgreSQL sch
 ### 2.1 Entity Relationship Diagram
 
 ```
-┌─────────────────────┐       ┌──────────────────────────────┐
-│   aaa_server_config │       │    slice_auth_session        │
-│─────────────────────│       │──────────────────────────────│
-│ PK id: UUID        │───┐   │ PK auth_ctx_id: VARCHAR(64) │
-│    snssai_sst      │   │   │    gpsi: VARCHAR(32)        │
-│    snssai_sd       │   └──▶│ FK aaa_config_id: UUID     │
-│    protocol        │       │    snssai_sst: INTEGER      │
-│    aaa_server_host │       │    snssai_sd: VARCHAR(8)    │
-│    aaa_server_port │       │    amf_instance_id          │
-│    shared_secret   │       │    reauth_notif_uri         │
-│    priority        │       │    revoc_notif_uri          │
-│    enabled         │       │    eap_session_state: BYTEA │
-│    ...             │       │    eap_rounds: INTEGER      │
-└─────────────────────┘       │    nssaa_status: ENUM       │
-                               │    auth_result: ENUM        │
-                               │    created_at               │
-                               │    expires_at               │
-                               │    completed_at             │
-                               └──────────────────────────────┘
-                                        │
-                                        ▼
-                               ┌──────────────────────────────┐
-                               │     nssaa_audit_log          │
-                               │──────────────────────────────│
-                               │ PK id: BIGSERIAL             │
-                               │    auth_ctx_id              │
-                               │    gpsi_hash: VARCHAR(64)   │ ← hashed for privacy
-                               │    snssai_sst/sd            │
-                               │    action: VARCHAR(30)       │
-                               │    nssaa_status             │
-                               │    created_at               │
-                               └──────────────────────────────┘
+┌─────────────────────────┐       ┌──────────────────────────────┐
+│   aaa_server_configs   │       │    slice_auth_sessions       │
+│─────────────────────────│       │──────────────────────────────│
+│ PK id: UUID           │───┐   │ PK auth_ctx_id: VARCHAR(64)│
+│    snssai_sst/sd      │   │   │ FK aaa_config_id: UUID    │◀─┐
+│    protocol           │   │   │    gpsi: VARCHAR(32)      │  │
+│    aaa_server_host    │   └──▶│    snssai_sst: INTEGER    │  │
+│    aaa_server_port    │       │    snssai_sd: VARCHAR(8)  │  │
+│    shared_secret      │       │    amf_instance_id        │  │
+│    priority           │       │    eap_session_state: BYTEA│  │
+│    enabled            │       │    eap_rounds: INTEGER    │  │
+│    supi_range_start   │       │    nssaa_status: ENUM     │  │
+│    supi_range_end     │       │    created_at             │  │
+└─────────────────────────┘       │    expires_at             │  │
+                                  │    completed_at           │  │
+                                  └──────────────────────────┘  │
+                                                                   │
+                                  ┌──────────────────────────────┐  │
+                                  │    aiw_auth_sessions        │──┘
+                                  │──────────────────────────────│
+                                  │ PK auth_ctx_id: VARCHAR(64)│
+                                  │ FK aaa_config_id: UUID    │◀─┐
+                                  │    supi: VARCHAR(32)      │  │
+                                  │    msk: BYTEA             │  │
+                                  │    pvs_info: JSONB        │  │
+                                  │    eap_session_state:BYTEA│  │
+                                  │    eap_rounds: INTEGER    │  │
+                                  │    nssaa_status: ENUM    │  │
+                                  │    created_at            │  │
+                                  │    expires_at            │  │
+                                  │    completed_at          │  │
+                                  └──────────────────────────┘  │
+                                                                   │
+                                  ┌──────────────────────────────┐  │
+                                  │     nssaa_audit_log          │  │
+                                  │──────────────────────────────│  │
+                                  │ PK id: BIGSERIAL           │  │
+                                  │    auth_ctx_id             │  │
+                                  │    gpsi_hash: VARCHAR(64)  │  │
+                                  │    supi_hash: VARCHAR(64)  │  │
+                                  │    snssai_sst/sd          │  │
+                                  │    action: VARCHAR(30)     │  │
+                                  │    nssaa_status           │  │
+                                  │    created_at             │  │
+                                  └──────────────────────────────┘  │
+                                                                   │
+                                  ┌──────────────────────────────┐  │
+                                  │      supi_ranges (NRM)       │  │
+                                  │──────────────────────────────│  │
+                                  │ PK id: UUID                 │  │
+                                  │    start_supi / end_supi   │  │
+                                  │    aaa_config_id           │  │
+                                  │    enabled                 │  │
+                                  └──────────────────────────────┘  │
 ```
 
 ### 2.2 NssaaStatus Enum (Source: TS 29.571 §5.4.4.60)
@@ -379,6 +405,148 @@ CREATE INDEX idx_supi_ranges_supi
     WHERE enabled = TRUE;
 ```
 
+### 3.5 AIW AAA Server Configuration (Nnssaaf_AIW)
+
+AIW uses the same `aaa_server_configs` table as NSSAA, but with a different lookup key. Where NSSAA resolves by `(snssai_sst, snssai_sd)`, AIW resolves by SUPI range. The `supi_ranges` table (NRM, §3.4) provides the mapping from SUPI to `aaa_config_id`.
+
+```sql
+-- AIW AAA config lookup: SUPI → supi_ranges → aaa_server_configs
+-- Resolution order:
+--   1. Exact SUPI range match (most specific)
+--   2. Default entry (supi_range_start = NULL, supi_range_end = NULL)
+
+CREATE OR REPLACE FUNCTION get_aaa_config_for_aiw(p_supi VARCHAR(32))
+RETURNS aaa_server_configs AS $$
+DECLARE
+    v_range supi_ranges%ROWTYPE;
+    v_config aaa_server_configs%ROWTYPE;
+BEGIN
+    -- Step 1: Find matching SUPI range (longest prefix match)
+    SELECT * INTO v_range
+    FROM supi_ranges
+    WHERE enabled = TRUE
+      AND start_supi <= p_supi
+      AND end_supi >= p_supi
+    ORDER BY length(start_supi) DESC  -- Most specific range first
+    LIMIT 1;
+
+    IF v_range.id IS NOT NULL THEN
+        SELECT * INTO v_config
+        FROM aaa_server_configs
+        WHERE id = v_range.aaa_config_id AND enabled = TRUE;
+        IF v_config.id IS NOT NULL THEN
+            RETURN v_config;
+        END IF;
+    END IF;
+
+    -- Step 2: Fall back to default AIW AAA config
+    SELECT * INTO v_config
+    FROM aaa_server_configs
+    WHERE snssai_sst IS NULL
+      AND snssai_sd IS NULL
+      AND enabled = TRUE
+    ORDER BY priority ASC, weight DESC
+    LIMIT 1;
+
+    RETURN v_config;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+-- Index: supi_ranges supports both NSSAA (SUPI-based) and AIW lookups
+CREATE INDEX idx_supi_ranges_aiw
+    ON supi_ranges(start_supi, end_supi DESC, aaa_config_id)
+    WHERE enabled = TRUE;
+```
+
+### 3.6 AIW Authentication Session Table
+
+```sql
+-- AIW session: per-SUPI SNPN authentication (Nnssaaf_AIW, TS 29.526 §7.3)
+-- Key differences from slice_auth_sessions:
+--   - No S-NSSAI (AIW is per-user, not per-slice)
+--   - No AMF callbacks (no reauth/revocation for AIW)
+--   - MSK and pvsInfo stored on success
+--   - Partitioned by month (same as slice_auth_sessions)
+
+CREATE TABLE aiw_auth_sessions (
+    auth_ctx_id        VARCHAR(64) NOT NULL,
+
+    -- Subscriber identification (TS 29.571 — SUPI, imu-scheme)
+    supi               VARCHAR(32) NOT NULL,  -- pattern: ^imu-[0-9]{15}$
+
+    -- AAA configuration reference
+    aaa_config_id      UUID NOT NULL REFERENCES aaa_server_configs(id),
+
+    -- EAP session state (serialized binary blob)
+    eap_session_state  BYTEA NOT NULL,
+
+    -- Session counters
+    eap_rounds         INTEGER NOT NULL DEFAULT 0,
+    max_eap_rounds     INTEGER NOT NULL DEFAULT 20,
+    eap_last_nonce     VARCHAR(64),           -- sha256(eap_payload) for retry detection
+
+    -- Auth result
+    nssaa_status       nssaa_status NOT NULL DEFAULT 'PENDING',
+    auth_result        nssaa_status,          -- Final result
+
+    -- MSK: derived from EAP-TLS on Success (RFC 5216 §2.1.4)
+    -- Stored encrypted at application layer; NULL if not EAP-TLS or on Failure
+    msk                BYTEA,
+
+    -- pvsInfo: Privacy-Violating Servers info from AAA-S (TS 29.526 §7.3.3)
+    -- JSON array: [{"serverType":"PROSE","serverId":"pvs-001"},...]
+    pvs_info           JSONB,
+
+    -- EAP-TTLS inner method container (optional)
+    ttls_inner_container BYTEA,
+
+    -- Supported features echo (from request)
+    supported_features VARCHAR(64),
+
+    -- Audit
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at         TIMESTAMPTZ NOT NULL,
+    completed_at       TIMESTAMPTZ,
+
+    PRIMARY KEY (auth_ctx_id)
+) PARTITION BY RANGE (created_at);
+
+-- Indexes
+CREATE INDEX idx_aiw_sessions_supi
+    ON aiw_auth_sessions(supi);
+
+CREATE INDEX idx_aiw_sessions_status
+    ON aiw_auth_sessions(nssaa_status)
+    WHERE nssaa_status = 'PENDING';
+
+CREATE INDEX idx_aiw_sessions_expires
+    ON aiw_auth_sessions(expires_at)
+    WHERE completed_at IS NULL;
+
+-- Partition management: reuse same function as slice_auth_sessions
+-- but applied to aiw_auth_sessions partition root
+SELECT create_monthly_partition();  -- creates aiw_auth_sessions_YYYY_MM partitions
+```
+
+### 3.7 Audit Log Extensions for AIW
+
+```sql
+-- Extend nssaa_audit_log with AIW-specific action types
+-- (add via ALTER TYPE in migration; enum values cannot be added to existing rows)
+
+ALTER TYPE audit_action ADD VALUE IF NOT EXISTS 'AIW_SESSION_CREATED';
+ALTER TYPE audit_action ADD VALUE IF NOT EXISTS 'AIW_SESSION_COMPLETED';
+ALTER TYPE audit_action ADD VALUE IF NOT EXISTS 'AIW_MSK_GENERATED';
+ALTER TYPE audit_action ADD VALUE IF NOT EXISTS 'AIW_SESSION_EXPIRED';
+
+-- Note: AIW audit log uses supi_hash (not gpsi_hash)
+-- supi_hash: SHA-256(first 16 bytes of supi), hex encoded
+-- For AIW rows: supi_hash populated, gpsi_hash = NULL
+-- For NSSAA rows: gpsi_hash populated, supi_hash = NULL
+-- (enforced via partial triggers if needed)
+```
+
 ---
 
 ## 4. EAP Session State Serialization
@@ -497,6 +665,19 @@ Namespace: nssaa:{environment}
     - updatedAt: timestamp
   Purpose: Hot cache for active sessions
 
+{nssaa}:aiw:session:{authCtxId}
+  Type: Hash
+  TTL: 300s (5 min)
+  Fields:
+    - supi: string
+    - status: "PENDING|EAP_SUCCESS|EAP_FAILURE"
+    - aaaConfigId: UUID
+    - eapRounds: int
+    - mskSet: bool           -- true when MSK is present
+    - pvsInfoSize: int        -- number of pvsInfo entries
+    - updatedAt: timestamp
+  Purpose: Hot cache for active AIW sessions
+
 {nssaa}:idempotency:{authCtxId}:{msgHash}
   Type: String (JSON)
   TTL: 3600s (1 hour)
@@ -527,6 +708,16 @@ Namespace: nssaa:{environment}
   Type: String (counter)
   TTL: 60s
   Purpose: Per-GPSI rate limiting
+
+{nssaa}:ratelimit:aiw:supi:{supiHash}
+  Type: String (counter)
+  TTL: 60s
+  Purpose: Per-SUPI rate limiting for AIW
+
+{nssaa}:ratelimit:aiw:ausf:{ausfId}
+  Type: String (counter)
+  TTL: 5s
+  Purpose: Per-AUSF rate limiting for AIW
 
 {nssaa}:ratelimit:global
   Type: String (counter)
@@ -573,6 +764,28 @@ func UpdateSession(ctx context.Context, session *Session) error {
 
     return nil
 }
+
+// AIW session: same cache-aside pattern, different key prefix
+func GetAIWSession(ctx context.Context, authCtxId string) (*AIWSession, error) {
+    // 1. Try Redis first
+    cached, err := redis.Get(ctx, "nssaa:aiw:session:"+authCtxId)
+    if err == nil && cached != nil {
+        return deserializeAIWSession(cached)
+    }
+
+    // 2. Fallback to PostgreSQL
+    session, err := pg.GetAIWSession(ctx, authCtxId)
+    if err != nil {
+        return nil, err
+    }
+
+    // 3. Populate cache (async, non-blocking)
+    go func() {
+        redis.Set(ctx, "nssaa:aiw:session:"+authCtxId, serializeAIWSession(session), 5*time.Minute)
+    }()
+
+    return session, nil
+}
 ```
 
 ---
@@ -584,7 +797,9 @@ func UpdateSession(ctx context.Context, session *Session) error {
 | Table | Retention | Action |
 |-------|-----------|--------|
 | `slice_auth_sessions` | 90 days | DELETE (PG partition drop) |
+| `aiw_auth_sessions` | 90 days | DELETE (PG partition drop) |
 | `nssaa_audit_log` | 2 years | DELETE (PG partition drop) |
+| MSK (in `aiw_auth_sessions`) | 24 hours after success | Encrypted, auto-purge |
 | `eap_session_state` (in-memory) | Until session complete | Encrypted, no persistence |
 | Redis cache | 5 min TTL | Auto-eviction |
 | EAP payload (audit) | 24 hours | Encrypted blob |
@@ -601,7 +816,24 @@ func HashGpsi(gpsi string) string {
 }
 ```
 
-### 6.3 Encryption at Rest
+### 6.3 SUPI Privacy
+
+SUPI (imu-scheme) cũng không bao giờ được lưu plaintext trong audit log hoặc logs. Sử dụng cùng hash scheme như GPSI:
+
+```go
+// SUPI hashed with SHA-256, truncated to first 16 bytes
+// Used for AIW audit logs and rate limiting
+func HashSupi(supi string) string {
+    h := sha256.Sum256([]byte(supi))
+    return hex.EncodeToString(h[:16])
+}
+```
+
+### 6.4 MSK Handling
+
+MSK (Master Session Key) từ EAP-TLS được lưu encrypted trong `aiw_auth_sessions.msk` sau khi authentication thành công. MSK bị xóa sau 24h hoặc khi session hết hạn. MSK KHÔNG bao giờ được log hoặc gửi qua API trong plaintext.
+
+### 6.5 Encryption at Rest
 
 ```go
 // All sensitive fields encrypted with AES-256-GCM

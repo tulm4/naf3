@@ -10,6 +10,7 @@
 | "How does AMF trigger NSSAA?" | 02_procedures/NSSAA_flow_AMF.md |
 | "How does AAA-S trigger reauth?" | 02_procedures/NSSAA_flow_AMF.md |
 | "How does AAA-S revoke authorization?" | 02_procedures/NSSAA_flow_AMF.md |
+| "How does AUSF trigger AIW auth?" | 02_procedures/NSSAA_flow_AIW.md |
 | "What services does NSSAAF provide?" | 03_security/NSSAAF_services.md |
 | "What are the EAP method requirements?" | 03_security/NSSAAF_services.md |
 | "How does NSSAAF talk to RADIUS/Diameter?" | 04_protocols/AAA_interworking.md |
@@ -27,6 +28,7 @@
 | NSSAA Flow (AMF-triggered) | TS 23.502 §4.2.9.2 | TS 33.501 §16.3 |
 | Reauth Flow (AAA-S-triggered) | TS 23.502 §4.2.9.3 | TS 33.501 §16.4 |
 | Revocation Flow | TS 23.502 §4.2.9.4 | TS 33.501 §16.5 |
+| AIW Authentication Flow | TS 29.526 §7.3 | TS 33.501 §I.2.2.2 |
 | Nnssaaf_NSSAA Service | TS 29.526 §7.2 | TS 33.501 §14.4.1, TS 23.502 §5.2.20 |
 | Nnssaaf_AIW Service | TS 29.526 §7.3 | TS 33.501 §14.4.2 |
 | NssaaStatus Type | TS 29.571 §5.4.4.60 | TS 29.526 (UE Context) |
@@ -126,7 +128,8 @@ docs/3gppfilter/
 ├── 01_api_specs/
 │   └── NSSAA_API_operations.md                 ← TS 29.526 API operations
 ├── 02_procedures/
-│   └── NSSAA_flow_AMF.md                       ← TS 23.502 §4.2.9 all flows
+│   ├── NSSAA_flow_AMF.md              ← TS 23.502 §4.2.9.2/3/4 (AMF-triggered)
+│   └── NSSAA_flow_AIW.md              ← TS 29.526 §7.3 (AUSF-triggered)
 ├── 03_security/
 │   └── NSSAAF_services.md                      ← TS 33.501 §5.13, §14.4, §16.3-5
 ├── 04_protocols/

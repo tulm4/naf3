@@ -11,10 +11,11 @@ docs/3gppfilter/
 ├── SOURCE_MAPPING.md                      # Ánh xạ source → filtered files
 │
 ├── 01_api_specs/
-│   └── NSSAA_API_operations.md           # TS 29.526 — API operations & schemas
+│   └── NSSAA_API_operations.md           # TS 29.526 — NSSAA + AIW API operations
 │
 ├── 02_procedures/
-│   └── NSSAA_flow_AMF.md                 # TS 23.502 — Tất cả NSSAA flows
+│   ├── NSSAA_flow_AMF.md                 # TS 23.502 §4.2.9.2/3/4 — AMF-triggered
+│   └── NSSAA_flow_AIW.md                 # TS 29.526 §7.3 — AUSF-triggered (SNPN)
 │
 ├── 03_security/
 │   └── NSSAAF_services.md                # TS 33.501 — Security & services
@@ -47,13 +48,14 @@ docs/3gppfilter/
 ### Decision Tree nhanh
 
 ```
-API endpoint / Schema?          → 01_api_specs/NSSAA_API_operations.md
+API endpoint / Schema?          → 01_api_specs/NSSAA_API_operations.md (NSSAA + AIW)
 AMF-triggered NSSAA flow?      → 02_procedures/NSSAA_flow_AMF.md
-AAA-S triggered reauth?         → 02_procedures/NSSAA_flow_AMF.md
-AAA-S triggered revocation?     → 02_procedures/NSSAA_flow_AMF.md
-Security requirements / EAP?    → 03_security/NSSAAF_services.md
+AAA-S triggered reauth?        → 02_procedures/NSSAA_flow_AMF.md
+AAA-S triggered revocation?    → 02_procedures/NSSAA_flow_AMF.md
+AUSF-triggered AIW auth?      → 02_procedures/NSSAA_flow_AIW.md
+Security requirements / EAP?   → 03_security/NSSAAF_services.md
 RADIUS / Diameter protocol?    → 04_protocols/AAA_interworking.md
-Data types (NssaaStatus)?       → 05_data_management/NSSAAF_DataTypes_NRM.md
+Data types (NssaaStatus)?      → 05_data_management/NSSAAF_DataTypes_NRM.md
 NRM / Management?              → 05_data_management/NSSAAF_DataTypes_NRM.md
 ```
 
