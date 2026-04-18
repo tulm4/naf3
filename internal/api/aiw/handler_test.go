@@ -1,617 +1,356 @@
-// handler_test.go — Unit tests for AIW API handlers
-// Spec: TS 29.526 §7.3
 package aiw
 
 import (
-	"bytes"
 	"encoding/json"
-	"io"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/operator/nssAAF/internal/api/common"
-	"github.com/operator/nssAAF/internal/types"
+	aiwnats "github.com/operator/nssAAF/oapi-gen/gen/aiw"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestParseAuthInfo(t *testing.T) {
-	// ParseAuthInfo only validates JSON structure, not business rules.
-	// It returns an error only if the JSON is malformed.
-	tests := []struct {
-		name     string
-		json     string
-		wantSupi string
-		wantErr  bool
-	}{
-		{
-			name:     "valid with all fields",
-			json:     `{"supi":"imu-208046000000001","eapIdRsp":"dXNlcgBleGFtcGxlLmNvbQ==","supportedFeatures":"3GPP-R18-AIW"}`,
-			wantSupi: "imu-208046000000001",
-			wantErr: false,
-		},
-		{
-			name:     "valid with only required fields",
-			json:     `{"supi":"imu-208046000000001"}`,
-			wantSupi: "imu-208046000000001",
-			wantErr: false,
-		},
-		{
-			name:    "invalid JSON syntax",
-			json:    `{`,
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			info, err := ParseAuthInfo([]byte(tt.json))
-			if tt.wantErr {
-				assert.Error(t, err)
-				return
-			}
-			require.NoError(t, err)
-			assert.Equal(t, tt.wantSupi, info.Supi)
-		})
-	}
+type mockStore struct {
+	data      map[string]*AuthContext
+	loadErr   error
+	saveErr   error
+	deleteErr error
 }
 
-func TestAuthInfoValidate(t *testing.T) {
-	tests := []struct {
-		name    string
-		info    AuthInfo
-		wantErr bool
-	}{
-		{
-			name: "valid",
-			info: AuthInfo{
-				Supi:              "imu-208046000000001",
-				EapIdRsp:          "dXNlcgBleGFtcGxlLmNvbQ==",
-				SupportedFeatures: "3GPP-R18-AIW",
-			},
-			wantErr: false,
-		},
-		{
-			name: "valid without EAP message",
-			info: AuthInfo{
-				Supi: "imu-208046000000001",
-			},
-			wantErr: false,
-		},
-		{
-			name: "missing SUPI",
-			info: AuthInfo{
-				EapIdRsp: "dXNlcgBleGFtcGxlLmNvbQ==",
-			},
-			wantErr: true,
-		},
-		{
-			name: "invalid SUPI",
-			info: AuthInfo{
-				Supi: "invalid-format",
-			},
-			wantErr: true,
-		},
-		{
-			name: "invalid EAP Base64",
-			info: AuthInfo{
-				Supi:    "imu-208046000000001",
-				EapIdRsp: "!!!",
-			},
-			wantErr: true,
-		},
-		{
-			name: "invalid TTLS container Base64",
-			info: AuthInfo{
-				Supi:                    "imu-208046000000001",
-				TtlsInnerMethodContainer: "!!!",
-			},
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			errs := tt.info.Validate()
-			if tt.wantErr {
-				assert.NotEmpty(t, errs)
-			} else {
-				assert.Empty(t, errs)
-			}
-		})
-	}
+func newMockStore() *mockStore {
+	return &mockStore{data: make(map[string]*AuthContext)}
 }
 
-func TestParseConfirmAuthData(t *testing.T) {
-	// ParseConfirmAuthData only validates JSON structure, not business rules.
-	tests := []struct {
-		name     string
-		json     string
-		wantSupi string
-		wantErr  bool
-	}{
-		{
-			name:     "valid",
-			json:     `{"supi":"imu-208046000000001","eapMessage":"dXNlcgBleGFtcGxlLmNvbQ=="}`,
-			wantSupi: "imu-208046000000001",
-			wantErr:  false,
-		},
-		{
-			name:    "invalid JSON syntax",
-			json:    `{`,
-			wantErr: true,
-		},
+func (m *mockStore) Load(id string) (*AuthContext, error) {
+	if m.loadErr != nil {
+		return nil, m.loadErr
+	}
+	if ctx, ok := m.data[id]; ok {
+		return ctx, nil
+	}
+	return nil, ErrNotFound
+}
+
+func (m *mockStore) Save(ctx *AuthContext) error {
+	if m.saveErr != nil {
+		return m.saveErr
+	}
+	m.data[ctx.AuthCtxID] = ctx
+	return nil
+}
+
+func (m *mockStore) Delete(id string) error {
+	if m.deleteErr != nil {
+		return m.deleteErr
+	}
+	delete(m.data, id)
+	return nil
+}
+
+func (m *mockStore) Close() error {
+	return nil
+}
+
+func makeRouter(handler *Handler) http.Handler {
+	r := chi.NewRouter()
+	r.Use(common.RequestIDMiddleware)
+	return aiwnats.HandlerFromMuxWithBaseURL(handler, r, "/nnssaaf-aiw/v1")
+}
+
+func doRequest(handler *Handler, method, path string, body interface{}) *httptest.ResponseRecorder {
+	var bodyReader *strings.Reader
+	if body != nil {
+		bs, _ := json.Marshal(body)
+		bodyReader = strings.NewReader(string(bs))
+	} else {
+		bodyReader = strings.NewReader("")
+	}
+	req := httptest.NewRequest(method, path, bodyReader)
+	req.Header.Set(common.HeaderXRequestID, "test-req-id")
+	req.Header.Set(common.HeaderContentType, common.MediaTypeJSONVersion)
+	rec := httptest.NewRecorder()
+	makeRouter(handler).ServeHTTP(rec, req)
+	return rec
+}
+
+// ─── CreateAuthenticationContext tests ────────────────────────────────────────
+
+func TestCreateAuthenticationContext_OK(t *testing.T) {
+	store := newMockStore()
+	h := NewHandler(store, WithAPIRoot("https://nssAAF.example.com"))
+
+	body := map[string]interface{}{
+		"supi":     "imu-208046000000001",
+		"eapIdRsp": "dXNlcgBleGFtcGxlLmNvbQ==",
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			data, err := ParseConfirmAuthData([]byte(tt.json))
-			if tt.wantErr {
-				assert.Error(t, err)
-				return
-			}
-			require.NoError(t, err)
-			assert.Equal(t, tt.wantSupi, data.Supi)
-		})
-	}
+	rec := doRequest(h, http.MethodPost, "/nnssaaf-aiw/v1/authentications", body)
+
+	assert.Equal(t, http.StatusCreated, rec.Code)
+	assert.NotEmpty(t, rec.Header().Get(common.HeaderLocation))
+	assert.Contains(t, rec.Header().Get(common.HeaderLocation), "/authentications/")
+	assert.Equal(t, "test-req-id", rec.Header().Get(common.HeaderXRequestID))
+
+	var resp aiwnats.AuthContext
+	err := json.Unmarshal(rec.Body.Bytes(), &resp)
+	require.NoError(t, err)
+	assert.Equal(t, "imu-208046000000001", string(resp.Supi))
+	assert.NotEmpty(t, resp.AuthCtxId)
 }
 
-func TestHandleCreateAuthentication(t *testing.T) {
-	handler := NewHandler(&Config{BaseURL: "https://nssAAF.operator.com"})
+func TestCreateAuthenticationContext_WithOptionalFields(t *testing.T) {
+	store := newMockStore()
+	h := NewHandler(store, WithAPIRoot("https://nssAAF.example.com"))
 
-	tests := []struct {
-		name         string
-		body         string
-		wantStatus   int
-		wantErrCause string
-	}{
-		{
-			name:         "invalid JSON",
-			body:         `{`,
-			wantStatus:   400,
-			wantErrCause: "INVALID_PAYLOAD",
-		},
-		{
-			name:         "missing SUPI",
-			body:         `{"eapIdRsp":"dXNlcgBleGFtcGxlLmNvbQ=="}`,
-			wantStatus:   400,
-			wantErrCause: "VALIDATION_ERROR",
-		},
-		{
-			name:         "invalid SUPI",
-			body:         `{"supi":"123","eapIdRsp":"dXNlcgBleGFtcGxlLmNvbQ=="}`,
-			wantStatus:   400,
-			wantErrCause: "VALIDATION_ERROR",
-		},
-		{
-			name:         "invalid EAP Base64",
-			body:         `{"supi":"imu-208046000000001","eapIdRsp":"!!!"}`,
-			wantStatus:   400,
-			wantErrCause: "VALIDATION_ERROR",
-		},
-		{
-			name:         "AAA not configured (phase1 stub)",
-			body:         `{"supi":"imu-208046000000001"}`,
-			wantStatus:   404,
-			wantErrCause: "NOT_FOUND", // ErrAaaServerNotConfigured.ToProblemDetails() returns NotFoundProblem
-		},
+	body := map[string]interface{}{
+		"supi":                     "imu-208046000000001",
+		"eapIdRsp":                 "dXNlcgBleGFtcGxlLmNvbQ==",
+		"ttlsInnerMethodContainer": "aGVsbG8=", // base64 "hello"
+		"supportedFeatures":        "a1b2c3",
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost,
-				"/nnssaaf-aiw/v1/authentications",
-				bytes.NewBufferString(tt.body))
-			req.Header.Set(common.HeaderXRequestID, "test-req-id")
-			req.Header.Set(common.HeaderContentType, common.MediaTypeJSON)
-			rec := httptest.NewRecorder()
+	rec := doRequest(h, http.MethodPost, "/nnssaaf-aiw/v1/authentications", body)
 
-			handler.HandleCreateAuthentication(rec, req)
+	assert.Equal(t, http.StatusCreated, rec.Code)
 
-			assert.Equal(t, tt.wantStatus, rec.Code)
-			assert.Equal(t, common.MediaTypeProblemJSON, rec.Header().Get(common.HeaderContentType))
-
-			var problem common.ProblemDetails
-			err := json.Unmarshal(rec.Body.Bytes(), &problem)
-			require.NoError(t, err)
-			assert.Contains(t, problem.Cause, tt.wantErrCause)
-		})
-	}
+	var resp aiwnats.AuthContext
+	err := json.Unmarshal(rec.Body.Bytes(), &resp)
+	require.NoError(t, err)
+	assert.NotNil(t, resp.EapMessage)
 }
 
-func TestHandleConfirmAuthentication_InvalidAuthCtxId(t *testing.T) {
-	handler := NewHandler(&Config{BaseURL: "https://nssAAF.operator.com"})
+func TestCreateAuthenticationContext_InvalidSupi(t *testing.T) {
+	store := newMockStore()
+	h := NewHandler(store, WithAPIRoot("https://nssAAF.example.com"))
 
-	// Test empty authCtxId (passed directly, not via URL path)
-	t.Run("empty authCtxId", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPut,
-			"/nnssaaf-aiw/v1/authentications/valid-id",
-			bytes.NewBufferString(`{}`))
-		req.Header.Set(common.HeaderXRequestID, "test-req-id")
-		rec := httptest.NewRecorder()
-
-		handler.HandleConfirmAuthentication(rec, req, "")
-
-		assert.Equal(t, 400, rec.Code)
-		var problem common.ProblemDetails
-		err := json.Unmarshal(rec.Body.Bytes(), &problem)
-		require.NoError(t, err)
-		assert.Equal(t, "INVALID_AUTH_CTX_ID", problem.Cause)
-	})
-
-	// Test authCtxId with control character
-	t.Run("authCtxId with control character", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPut,
-			"/nnssaaf-aiw/v1/authentications/valid-id",
-			bytes.NewBufferString(`{}`))
-		req.Header.Set(common.HeaderXRequestID, "test-req-id")
-		rec := httptest.NewRecorder()
-
-		handler.HandleConfirmAuthentication(rec, req, "auth\nctx")
-
-		assert.Equal(t, 400, rec.Code)
-		var problem common.ProblemDetails
-		err := json.Unmarshal(rec.Body.Bytes(), &problem)
-		require.NoError(t, err)
-		assert.Equal(t, "INVALID_AUTH_CTX_ID", problem.Cause)
-	})
-}
-
-func TestGenerateAuthCtxID(t *testing.T) {
-	id1 := GenerateAuthCtxID()
-	id2 := GenerateAuthCtxID()
-	assert.NotEmpty(t, id1)
-	assert.NotEmpty(t, id2)
-	assert.NotEqual(t, id1, id2)
-}
-
-func TestBuildLocation(t *testing.T) {
-	loc := buildLocation("https://nssAAF.operator.com", "abc123")
-	assert.Equal(t, "https://nssAAF.operator.com/nnssaaf-aiw/v1/authentications/abc123", loc)
-
-	loc2 := buildLocation("https://nssAAF.operator.com/", "abc123")
-	assert.Equal(t, "https://nssAAF.operator.com/nnssaaf-aiw/v1/authentications/abc123", loc2)
-}
-
-func TestConfirmAuthDataValidate(t *testing.T) {
-	tests := []struct {
-		name    string
-		data    ConfirmAuthData
-		wantErr bool
-	}{
-		{
-			name: "valid",
-			data: ConfirmAuthData{
-				Supi:       "imu-208046000000001",
-				EapMessage: "dXNlcgBleGFtcGxlLmNvbQ==",
-			},
-			wantErr: false,
-		},
-		{
-			name: "valid with supported features",
-			data: ConfirmAuthData{
-				Supi:              "imu-208046000000001",
-				EapMessage:        "dXNlcgBleGFtcGxlLmNvbQ==",
-				SupportedFeatures: "3GPP-R18-AIW",
-			},
-			wantErr: false,
-		},
-		{
-			name: "missing SUPI",
-			data: ConfirmAuthData{
-				EapMessage: "dXNlcgBleGFtcGxlLmNvbQ==",
-			},
-			wantErr: true,
-		},
-		{
-			name: "invalid SUPI",
-			data: ConfirmAuthData{
-				Supi:       "invalid-format",
-				EapMessage: "dXNlcgBleGFtcGxlLmNvbQ==",
-			},
-			wantErr: true,
-		},
-		{
-			name: "missing EAP message",
-			data: ConfirmAuthData{
-				Supi: "imu-208046000000001",
-			},
-			wantErr: true,
-		},
-		{
-			name: "invalid EAP Base64",
-			data: ConfirmAuthData{
-				Supi:       "imu-208046000000001",
-				EapMessage: "!!!",
-			},
-			wantErr: true,
-		},
+	body := map[string]interface{}{
+		"supi":     "invalid-supi",
+		"eapIdRsp": "dXNlcgBleGFtcGxlLmNvbQ==",
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			errs := tt.data.Validate()
-			if tt.wantErr {
-				assert.NotEmpty(t, errs)
-			} else {
-				assert.Empty(t, errs)
-			}
-		})
-	}
+	rec := doRequest(h, http.MethodPost, "/nnssaaf-aiw/v1/authentications", body)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+
+	var problem common.ProblemDetails
+	err := json.Unmarshal(rec.Body.Bytes(), &problem)
+	require.NoError(t, err)
+	assert.Equal(t, 400, problem.Status)
+	assert.Contains(t, problem.Detail, "supi")
 }
 
-func TestFormatAiwErrors(t *testing.T) {
-	single := formatAiwErrors([]error{assert.AnError})
-	assert.Equal(t, assert.AnError.Error(), single)
+func TestCreateAuthenticationContext_StoreSaveError(t *testing.T) {
+	store := newMockStore()
+	store.saveErr = errors.New("write failed")
+	h := NewHandler(store, WithAPIRoot("https://nssAAF.example.com"))
 
-	multi := formatAiwErrors([]error{assert.AnError, io.EOF})
-	assert.Contains(t, multi, "; ")
-
-	empty := formatAiwErrors([]error{})
-	assert.Equal(t, "unknown validation error", empty)
-}
-
-func TestAuthConfirmationResponseMarshalJSON(t *testing.T) {
-	tests := []struct {
-		name       string
-		resp       AuthConfirmationResponse
-		wantFields []string
-		omitFields []string
-	}{
-		{
-			name: "only required fields",
-			resp: AuthConfirmationResponse{
-				Supi: "imu-208046000000001",
-			},
-			wantFields: []string{`"supi":"imu-208046000000001"`},
-			omitFields: []string{"eapMessage", "authResult", "pvsInfo", "msk", "supportedFeatures"},
-		},
-		{
-			name: "all fields populated",
-			resp: AuthConfirmationResponse{
-				Supi:              "imu-208046000000001",
-				EapMessage:        strPtr("eap-data"),
-				AuthResult:        authResultPtr(types.AuthResultSuccess),
-				PvsInfo:           []PvsInfo{{ServerType: "location", ServerID: "srv-1"}},
-				Msk:               strPtr("bXNrLWtleS10ZXN0"),
-				SupportedFeatures: "3GPP-R18-AIW",
-			},
-			wantFields: []string{
-				`"supi":"imu-208046000000001"`,
-				`"eapMessage":"eap-data"`,
-				`"authResult":"EAP_SUCCESS"`,
-				`"pvsInfo"`,
-				`"msk":"bXNrLWtleS10ZXN0"`,
-				`"supportedFeatures":"3GPP-R18-AIW"`,
-			},
-			omitFields: []string{},
-		},
-		{
-			name: "nil EAP message omitted",
-			resp: AuthConfirmationResponse{
-				Supi:       "imu-208046000000001",
-				EapMessage: nil,
-			},
-			omitFields: []string{"eapMessage"},
-		},
-		{
-			name: "nil auth result omitted",
-			resp: AuthConfirmationResponse{
-				Supi:       "imu-208046000000001",
-				AuthResult: nil,
-			},
-			omitFields: []string{"authResult"},
-		},
-		{
-			name: "nil msk omitted",
-			resp: AuthConfirmationResponse{
-				Supi: "imu-208046000000001",
-				Msk:  nil,
-			},
-			omitFields: []string{"msk"},
-		},
-		{
-			name: "empty pvsInfo omitted",
-			resp: AuthConfirmationResponse{
-				Supi:     "imu-208046000000001",
-				PvsInfo:  nil,
-			},
-			omitFields: []string{"pvsInfo"},
-		},
-		{
-			name: "failure result",
-			resp: AuthConfirmationResponse{
-				Supi:       "imu-208046000000001",
-				AuthResult: authResultPtr(types.AuthResultFailure),
-			},
-			wantFields: []string{`"authResult":"EAP_FAILURE"`},
-		},
+	body := map[string]interface{}{
+		"supi": "imu-208046000000001",
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			data, err := tt.resp.MarshalJSON()
-			require.NoError(t, err)
-			jsonStr := string(data)
-			for _, f := range tt.wantFields {
-				assert.Contains(t, jsonStr, f)
-			}
-			for _, f := range tt.omitFields {
-				assert.NotContains(t, jsonStr, `"`+f+`"`)
-			}
-		})
+	rec := doRequest(h, http.MethodPost, "/nnssaaf-aiw/v1/authentications", body)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+func TestCreateAuthenticationContext_InvalidJSON(t *testing.T) {
+	store := newMockStore()
+	h := NewHandler(store, WithAPIRoot("https://nssAAF.example.com"))
+
+	req := httptest.NewRequest(http.MethodPost,
+		"/nnssaaf-aiw/v1/authentications",
+		strings.NewReader("broken json"))
+	req.Header.Set(common.HeaderXRequestID, "test-req-id")
+	req.Header.Set(common.HeaderContentType, common.MediaTypeJSONVersion)
+	rec := httptest.NewRecorder()
+	makeRouter(h).ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+// ─── ConfirmAuthentication tests ────────────────────────────────────────────────
+
+func TestConfirmAuthentication_OK(t *testing.T) {
+	store := newMockStore()
+	store.data["auth-ctx-001"] = &AuthContext{
+		AuthCtxID: "auth-ctx-001",
+		Supi:      "imu-208046000000001",
 	}
-}
+	h := NewHandler(store, WithAPIRoot("https://nssAAF.example.com"))
 
-func TestNewHandler(t *testing.T) {
-	t.Run("nil config defaults to safe values", func(t *testing.T) {
-		h := NewHandler(nil)
-		assert.Equal(t, "https://nssAAF.operator.com", h.cfg.BaseURL)
-	})
-
-	t.Run("nil config still sets baseURL", func(t *testing.T) {
-		h := NewHandler(nil)
-		assert.NotNil(t, h.cfg)
-	})
-
-	t.Run("empty baseURL defaults", func(t *testing.T) {
-		h := NewHandler(&Config{})
-		assert.Equal(t, "https://nssAAF.operator.com", h.cfg.BaseURL)
-	})
-
-	t.Run("explicit baseURL preserved", func(t *testing.T) {
-		h := NewHandler(&Config{BaseURL: "https://custom.operator.com"})
-		assert.Equal(t, "https://custom.operator.com", h.cfg.BaseURL)
-	})
-}
-
-func TestHandleConfirmAuthentication_ValidationErrors(t *testing.T) {
-	handler := NewHandler(&Config{BaseURL: "https://nssAAF.operator.com"})
-
-	tests := []struct {
-		name           string
-		authCtxID      string
-		body           string
-		wantStatus     int
-		wantErrCause   string
-	}{
-		{
-			name:         "malformed JSON body",
-			authCtxID:    "valid-id",
-			body:         `{`,
-			wantStatus:   400,
-			wantErrCause: "INVALID_PAYLOAD",
-		},
-		{
-			name:         "missing SUPI in body",
-			authCtxID:    "valid-id",
-			body:         `{"eapMessage":"dXNlcgBleGFtcGxlLmNvbQ=="}`,
-			wantStatus:   400,
-			wantErrCause: "VALIDATION_ERROR",
-		},
-		{
-			name:         "invalid SUPI in body",
-			authCtxID:    "valid-id",
-			body:         `{"supi":"bad","eapMessage":"dXNlcgBleGFtcGxlLmNvbQ=="}`,
-			wantStatus:   400,
-			wantErrCause: "VALIDATION_ERROR",
-		},
-		{
-			name:         "missing EAP message",
-			authCtxID:    "valid-id",
-			body:         `{"supi":"imu-208046000000001"}`,
-			wantStatus:   400,
-			wantErrCause: "VALIDATION_ERROR",
-		},
-		{
-			name:         "invalid EAP Base64",
-			authCtxID:    "valid-id",
-			body:         `{"supi":"imu-208046000000001","eapMessage":"!!!"}`,
-			wantStatus:   400,
-			wantErrCause: "VALIDATION_ERROR",
-		},
+	body := map[string]interface{}{
+		"supi":       "imu-208046000000001",
+		"eapMessage": "dGVzdA==", // base64 "test"
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPut,
-				"/nnssaaf-aiw/v1/authentications/"+tt.authCtxID,
-				bytes.NewBufferString(tt.body))
-			req.Header.Set(common.HeaderXRequestID, "test-req-id")
-			req.Header.Set(common.HeaderContentType, common.MediaTypeJSON)
-			rec := httptest.NewRecorder()
+	rec := doRequest(h, http.MethodPut,
+		"/nnssaaf-aiw/v1/authentications/auth-ctx-001", body)
 
-			handler.HandleConfirmAuthentication(rec, req, tt.authCtxID)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "test-req-id", rec.Header().Get(common.HeaderXRequestID))
 
-			assert.Equal(t, tt.wantStatus, rec.Code)
-			assert.Equal(t, common.MediaTypeProblemJSON, rec.Header().Get(common.HeaderContentType))
+	var resp aiwnats.AuthConfirmationResponse
+	err := json.Unmarshal(rec.Body.Bytes(), &resp)
+	require.NoError(t, err)
+	assert.Equal(t, "imu-208046000000001", string(resp.Supi))
+	assert.NotNil(t, resp.EapMessage)
+	assert.Nil(t, resp.AuthResult) // Phase 1: continue (null)
+}
 
-			var problem common.ProblemDetails
-			err := json.Unmarshal(rec.Body.Bytes(), &problem)
-			require.NoError(t, err)
-			assert.Contains(t, problem.Cause, tt.wantErrCause)
-		})
+func TestConfirmAuthentication_NotFound(t *testing.T) {
+	store := newMockStore()
+	h := NewHandler(store, WithAPIRoot("https://nssAAF.example.com"))
+
+	body := map[string]interface{}{
+		"supi":       "imu-208046000000001",
+		"eapMessage": "dGVzdA==",
 	}
+
+	rec := doRequest(h, http.MethodPut,
+		"/nnssaaf-aiw/v1/authentications/nonexistent-id", body)
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
-func TestRouter_ServeHTTP_AIW(t *testing.T) {
-	handler := NewHandler(&Config{BaseURL: "https://nssAAF.operator.com"})
-	router := NewRouter(handler)
+func TestConfirmAuthentication_SupiMismatch(t *testing.T) {
+	store := newMockStore()
+	store.data["auth-ctx-002"] = &AuthContext{
+		AuthCtxID: "auth-ctx-002",
+		Supi:      "imu-208046000000001",
+	}
+	h := NewHandler(store, WithAPIRoot("https://nssAAF.example.com"))
 
-	t.Run("POST /authentications routes to create handler", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost,
-			"/nnssaaf-aiw/v1/authentications",
-			bytes.NewBufferString(`{"supi":"imu-208046000000001"}`))
-		req.Header.Set(common.HeaderXRequestID, "test-req-id")
-		rec := httptest.NewRecorder()
+	body := map[string]interface{}{
+		"supi":       "imu-999999999999999", // different SUPI
+		"eapMessage": "dGVzdA==",
+	}
 
-		router.ServeHTTP(rec, req)
+	rec := doRequest(h, http.MethodPut,
+		"/nnssaaf-aiw/v1/authentications/auth-ctx-002", body)
 
-		// Phase 1 stub returns 404 for AAA not configured
-		assert.Equal(t, 404, rec.Code)
-	})
-
-	t.Run("PUT /authentications/{authCtxId} routes to confirm handler", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPut,
-			"/nnssaaf-aiw/v1/authentications/test-ctx-id",
-			bytes.NewBufferString(`{"supi":"imu-208046000000001","eapMessage":"dXNlcgBleGFtcGxlLmNvbQ=="}`))
-		req.Header.Set(common.HeaderXRequestID, "test-req-id")
-		rec := httptest.NewRecorder()
-
-		router.ServeHTTP(rec, req)
-
-		// Phase 1 stub returns 404 for auth context not found
-		assert.Equal(t, 404, rec.Code)
-	})
-
-	t.Run("PUT /authentications/ with invalid authCtxId returns 400", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPut,
-			"/nnssaaf-aiw/v1/authentications/bad%0Aid",
-			bytes.NewBufferString(`{}`))
-		req.Header.Set(common.HeaderXRequestID, "test-req-id")
-		rec := httptest.NewRecorder()
-
-		router.ServeHTTP(rec, req)
-
-		assert.Equal(t, 400, rec.Code)
-		var problem common.ProblemDetails
-		err := json.Unmarshal(rec.Body.Bytes(), &problem)
-		require.NoError(t, err)
-		assert.Equal(t, "INVALID_AUTH_CTX_ID", problem.Cause)
-	})
-
-	t.Run("unhandled path returns 404", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodDelete,
-			"/nnssaaf-aiw/v1/authentications/some-id",
-			nil)
-		req.Header.Set(common.HeaderXRequestID, "test-req-id")
-		rec := httptest.NewRecorder()
-
-		router.ServeHTTP(rec, req)
-
-		assert.Equal(t, 404, rec.Code)
-		var problem common.ProblemDetails
-		err := json.Unmarshal(rec.Body.Bytes(), &problem)
-		require.NoError(t, err)
-		assert.Equal(t, "NOT_FOUND", problem.Cause)
-	})
-
-	t.Run("GET on POST path returns 404", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet,
-			"/nnssaaf-aiw/v1/authentications",
-			nil)
-		req.Header.Set(common.HeaderXRequestID, "test-req-id")
-		rec := httptest.NewRecorder()
-
-		router.ServeHTTP(rec, req)
-
-		assert.Equal(t, 404, rec.Code)
-	})
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "SUPI does not match")
 }
 
-// Helper: returns a pointer to a string.
-func strPtr(s string) *string { return &s }
+func TestConfirmAuthentication_InvalidSupi(t *testing.T) {
+	store := newMockStore()
+	h := NewHandler(store, WithAPIRoot("https://nssAAF.example.com"))
 
-// Helper: returns a pointer to an AuthResult.
-func authResultPtr(r types.AuthResult) *types.AuthResult { return &r }
+	body := map[string]interface{}{
+		"supi":       "bad-supi",
+		"eapMessage": "dGVzdA==",
+	}
+
+	rec := doRequest(h, http.MethodPut,
+		"/nnssaaf-aiw/v1/authentications/any-id", body)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestConfirmAuthentication_MissingEapMessage(t *testing.T) {
+	store := newMockStore()
+	store.data["auth-ctx-003"] = &AuthContext{
+		AuthCtxID: "auth-ctx-003",
+		Supi:      "imu-208046000000001",
+	}
+	h := NewHandler(store, WithAPIRoot("https://nssAAF.example.com"))
+
+	body := map[string]interface{}{
+		"supi": "imu-208046000000001",
+		// eapMessage missing
+	}
+
+	rec := doRequest(h, http.MethodPut,
+		"/nnssaaf-aiw/v1/authentications/auth-ctx-003", body)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestConfirmAuthentication_EmptyEapMessage(t *testing.T) {
+	store := newMockStore()
+	store.data["auth-ctx-004"] = &AuthContext{
+		AuthCtxID: "auth-ctx-004",
+		Supi:      "imu-208046000000001",
+	}
+	h := NewHandler(store, WithAPIRoot("https://nssAAF.example.com"))
+
+	body := map[string]interface{}{
+		"supi":       "imu-208046000000001",
+		"eapMessage": "",
+	}
+
+	rec := doRequest(h, http.MethodPut,
+		"/nnssaaf-aiw/v1/authentications/auth-ctx-004", body)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestConfirmAuthentication_StoreLoadError(t *testing.T) {
+	store := newMockStore()
+	store.loadErr = errors.New("store read failed")
+	h := NewHandler(store, WithAPIRoot("https://nssAAF.example.com"))
+
+	body := map[string]interface{}{
+		"supi":       "imu-208046000000001",
+		"eapMessage": "dGVzdA==",
+	}
+
+	rec := doRequest(h, http.MethodPut,
+		"/nnssaaf-aiw/v1/authentications/any-id", body)
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+func TestConfirmAuthentication_InvalidJSON(t *testing.T) {
+	store := newMockStore()
+	store.data["auth-ctx-005"] = &AuthContext{
+		AuthCtxID: "auth-ctx-005",
+		Supi:      "imu-208046000000001",
+	}
+	h := NewHandler(store, WithAPIRoot("https://nssAAF.example.com"))
+
+	req := httptest.NewRequest(http.MethodPut,
+		"/nnssaaf-aiw/v1/authentications/auth-ctx-005",
+		strings.NewReader("not-json"))
+	req.Header.Set(common.HeaderXRequestID, "test-req-id")
+	req.Header.Set(common.HeaderContentType, common.MediaTypeJSONVersion)
+	rec := httptest.NewRecorder()
+	makeRouter(h).ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+// ─── InMemoryStore tests ───────────────────────────────────────────────────
+
+func TestInMemoryStore(t *testing.T) {
+	store := NewInMemoryStore()
+
+	ctx := &AuthContext{AuthCtxID: "id-001", Supi: "imu-208046000000001"}
+	err := store.Save(ctx)
+	require.NoError(t, err)
+
+	loaded, err := store.Load("id-001")
+	require.NoError(t, err)
+	assert.Equal(t, "imu-208046000000001", loaded.Supi)
+
+	_, err = store.Load("nonexistent")
+	assert.ErrorIs(t, err, ErrNotFound)
+
+	err = store.Delete("id-001")
+	require.NoError(t, err)
+	_, err = store.Load("id-001")
+	assert.ErrorIs(t, err, ErrNotFound)
+
+	assert.NoError(t, store.Close())
+}
+
+// ─── Handler implements ServerInterface ────────────────────────────────────
+
+func TestHandler_ImplementsServerInterface(t *testing.T) {
+	// Compile-time check: Handler must implement aiwnats.ServerInterface.
+	var _ aiwnats.ServerInterface = (*Handler)(nil)
+}

@@ -50,7 +50,7 @@ func DialDTLS(cfg DTLSConfig) (*tls.Conn, error) {
 // DTLSConfig holds DTLS-specific configuration.
 // Spec: RFC 4818
 type DTLSConfig struct {
-	ServerAddress  string
+	ServerAddress string
 	ServerPort    int
 	SharedSecret  string
 	CACert        []byte
@@ -69,10 +69,14 @@ func ParseCertificate(pemData []byte) (*x509.Certificate, error) {
 }
 
 // ParsePrivateKey parses a PEM-encoded private key.
+// It first attempts PKCS8 (the standard format used by most tools), then falls back to PKCS1.
 func ParsePrivateKey(pemData []byte) (any, error) {
 	block, _ := pem.Decode(pemData)
 	if block == nil {
 		return nil, errors.New("radius: no PEM block found")
+	}
+	if key, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
+		return key, nil
 	}
 	return x509.ParsePKCS1PrivateKey(block.Bytes)
 }
@@ -89,7 +93,7 @@ func GenerateRandomAuthenticator() ([16]byte, error) {
 
 // udpClient implements a UDP-based RADIUS client transport.
 type udpClient struct {
-	conn   *net.UDPConn
+	conn      *net.UDPConn
 	localAddr net.UDPAddr
 }
 
@@ -111,7 +115,7 @@ func NewUDPClient(cfg UDPConfig) (Client, error) {
 	}
 
 	return &udpClient{
-		conn:   conn,
+		conn:      conn,
 		localAddr: *local,
 	}, nil
 }
@@ -124,18 +128,21 @@ func (c *udpClient) Send(ctx context.Context, packet []byte, server string) ([]b
 	}
 
 	if deadline, ok := ctx.Deadline(); ok {
-		c.conn.SetReadDeadline(deadline)
+		_ = c.conn.SetReadDeadline(deadline)
 	} else {
-		c.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		_ = c.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	}
 
-	_, err = c.conn.WriteToUDP(packet, addr)
+	n, err := c.conn.WriteToUDP(packet, addr)
 	if err != nil {
 		return nil, fmt.Errorf("radius: failed to send packet: %w", err)
 	}
+	if n < len(packet) {
+		return nil, fmt.Errorf("radius: partial send: %d of %d bytes", n, len(packet))
+	}
 
 	buf := make([]byte, 65535)
-	n, _, err := c.conn.ReadFromUDP(buf)
+	m, _, err := c.conn.ReadFromUDP(buf)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return nil, fmt.Errorf("radius: response timeout")
@@ -143,7 +150,7 @@ func (c *udpClient) Send(ctx context.Context, packet []byte, server string) ([]b
 		return nil, fmt.Errorf("radius: failed to receive response: %w", err)
 	}
 
-	return buf[:n], nil
+	return buf[:m], nil
 }
 
 // Close implements Client.

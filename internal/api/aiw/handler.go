@@ -1,144 +1,262 @@
-// Package aiw provides the Nnssaaf_AIW service operation handlers.
+// Package aiw provides HTTP handlers for the Nnssaaf_AIW service.
+// Spec: TS 29.526 §7.3
+//
+// This package implements the oapi-codegen ServerInterface generated from
+// TS29526_Nnssaaf_AIW.yaml. The generated router and middleware are
+// in github.com/operator/nssAAF/oapi-gen/gen/aiw.
 package aiw
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
-	"log/slog"
 	"net/http"
-	"strings"
 
 	"github.com/google/uuid"
 	"github.com/operator/nssAAF/internal/api/common"
-	"github.com/operator/nssAAF/internal/types"
+	aiwnats "github.com/operator/nssAAF/oapi-gen/gen/aiw"
 )
 
-// Config holds runtime configuration for the AIW handler.
-type Config struct {
-	BaseURL string
+// AAARouter forwards EAP payloads to AAA-S (RADIUS or Diameter).
+type AAARouter interface {
+	SendEAP(ctx context.Context, authCtxID string, eapPayload []byte) ([]byte, error)
 }
 
-// Handler handles Nnssaaf_AIW service operations.
-// Spec: TS 29.526 §7.3, N60 Interface
+// AuthContext represents an AIW authentication context.
+type AuthContext struct {
+	AuthCtxID  string
+	Supi       string
+	EapPayload []byte
+	TtlsInner  []byte
+}
+
+// AuthCtxStore manages AIW authentication contexts.
+// Phase 3 replaces InMemoryStore with Redis-backed implementation.
+type AuthCtxStore interface {
+	Load(id string) (*AuthContext, error)
+	Save(ctx *AuthContext) error
+	Delete(id string) error
+	Close() error
+}
+
+// ErrNotFound is returned when an authentication context is not found.
+var ErrNotFound = errors.New("auth context not found")
+
+// eapPayloadFromPtr safely dereferences a nullable *EapMessage ([]byte alias) or returns empty.
+func eapPayloadFromPtr(p *aiwnats.EapMessage) []byte {
+	if p == nil {
+		return nil
+	}
+	return *p
+}
+
+// InMemoryStore is a simple in-memory implementation of AuthCtxStore.
+// Phase 3 replaces this with Redis-based storage.
+type InMemoryStore struct {
+	data map[string]*AuthContext
+}
+
+// NewInMemoryStore creates a new in-memory auth context store.
+func NewInMemoryStore() *InMemoryStore {
+	return &InMemoryStore{data: make(map[string]*AuthContext)}
+}
+
+// Load implements AuthCtxStore.
+func (s *InMemoryStore) Load(id string) (*AuthContext, error) {
+	if ctx, ok := s.data[id]; ok {
+		return ctx, nil
+	}
+	return nil, ErrNotFound
+}
+
+// Save implements AuthCtxStore.
+func (s *InMemoryStore) Save(ctx *AuthContext) error {
+	s.data[ctx.AuthCtxID] = ctx
+	return nil
+}
+
+// Delete implements AuthCtxStore.
+func (s *InMemoryStore) Delete(id string) error {
+	delete(s.data, id)
+	return nil
+}
+
+// Close implements io.Closer. No-op for in-memory store, but required for
+// API consistency when Phase 3 swaps this with a Redis-backed store.
+func (s *InMemoryStore) Close() error {
+	return nil
+}
+
+// Handler implements aiwnats.ServerInterface.
 type Handler struct {
-	cfg *Config
+	store   AuthCtxStore
+	aaa     AAARouter
+	apiRoot string
+}
+
+// HandlerOption configures a Handler.
+type HandlerOption func(*Handler)
+
+// WithAAA sets the AAA router.
+func WithAAA(aaa AAARouter) HandlerOption {
+	return func(h *Handler) { h.aaa = aaa }
+}
+
+// WithAPIRoot sets the API root URL for Location header generation.
+func WithAPIRoot(apiRoot string) HandlerOption {
+	return func(h *Handler) { h.apiRoot = apiRoot }
 }
 
 // NewHandler creates a new AIW handler.
-func NewHandler(cfg *Config) *Handler {
-	if cfg == nil {
-		cfg = &Config{}
+func NewHandler(store AuthCtxStore, opts ...HandlerOption) *Handler {
+	h := &Handler{store: store}
+	for _, opt := range opts {
+		opt(h)
 	}
-	if cfg.BaseURL == "" {
-		cfg.BaseURL = "https://nssAAF.operator.com"
-	}
-	return &Handler{cfg: cfg}
+	return h
 }
 
-// HandleCreateAuthentication handles POST /nnssaaf-aiw/v1/authentications.
-// Spec: TS 29.526 §7.3.2, Operation: CreateAuthenticationContext
-func (h *Handler) HandleCreateAuthentication(w http.ResponseWriter, r *http.Request) {
+// ServeHTTP routes requests through the oapi-codegen handler.
+// It satisfies the http.Handler interface so it can be used directly with httptest.
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	reqID := common.GetRequestID(r.Context())
+	if reqID == "" {
+		reqID = uuid.NewString()
+	}
+	r = r.WithContext(common.WithRequestID(r.Context(), reqID))
+	aiwnats.Handler(h).ServeHTTP(w, r)
+}
+
+var _ http.Handler = (*Handler)(nil)
+
+// CreateAuthenticationContext handles POST /authentications.
+// Spec: TS 29.526 §7.3.2
+func (h *Handler) CreateAuthenticationContext(w http.ResponseWriter, r *http.Request) {
 	reqID := common.GetRequestID(r.Context())
 
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 64*1024))
-	if err != nil {
-		slog.Error("failed to read request body",
-			"request_id", reqID, "error", err)
-		common.WriteProblem(w, common.InternalServerProblem("failed to read request body"))
+	var body aiwnats.AuthInfo
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		common.WriteProblem(w, common.ValidationProblem("body", err.Error()))
 		return
 	}
 
-	info, err := ParseAuthInfo(body)
-	if err != nil {
-		slog.Warn("failed to parse AuthInfo",
-			"request_id", reqID, "error", err)
-		common.WriteProblem(w, common.NewProblem(400, types.CauseInvalidPayload,
-			fmt.Sprintf("invalid request body: %v", err)))
+	if err := common.ValidateSUPI(string(body.Supi)); err != nil {
+		var pd *common.ProblemDetails
+		if errors.As(err, &pd) {
+			common.WriteProblem(w, pd)
+		} else {
+			common.WriteProblem(w, common.ValidationProblem("supi", err.Error()))
+		}
 		return
 	}
 
-	if errs := info.Validate(); len(errs) > 0 {
-		detail := formatAiwErrors(errs)
-		slog.Warn("AIW request validation failed",
-			"request_id", reqID, "supi", info.Supi, "errors", detail)
-		common.WriteProblem(w, common.ValidationProblem("request", detail))
+	authCtxID := uuid.NewString()
+
+	authCtx := &AuthContext{
+		AuthCtxID:  authCtxID,
+		Supi:       string(body.Supi),
+		EapPayload: eapPayloadFromPtr(body.EapIdRsp),
+	}
+
+	if err := h.store.Save(authCtx); err != nil {
+		common.WriteProblem(w, common.InternalServerProblem(
+			fmt.Sprintf("failed to create auth context: %s", err)))
 		return
 	}
 
-	// TODO(Phase 3): Load AAA server config from storage
-	slog.Info("AIW AAA config lookup",
-		"request_id", reqID,
-		"supi", info.Supi,
-		"phase", "phase1-stub")
-	common.WriteProblem(w, types.ErrAaaServerNotConfigured.ToProblemDetails())
+	resp := aiwnats.AuthContext{
+		Supi:      body.Supi,
+		AuthCtxId: authCtxID,
+	}
+
+	if body.EapIdRsp != nil {
+		resp.EapMessage = body.EapIdRsp
+	}
+
+	location := fmt.Sprintf("%s/nnssaaf-aiw/v1/authentications/%s",
+		h.apiRoot, authCtxID)
+
+	w.Header().Set(common.HeaderLocation, location)
+	w.Header().Set(common.HeaderXRequestID, reqID)
+	w.Header().Set(common.HeaderContentType, common.MediaTypeJSONVersion)
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
-// HandleConfirmAuthentication handles PUT /nnssaaf-aiw/v1/authentications/{authCtxID}.
-// Spec: TS 29.526 §7.3.3, Operation: ConfirmAuthentication
-func (h *Handler) HandleConfirmAuthentication(w http.ResponseWriter, r *http.Request, authCtxID string) {
+// ConfirmAuthentication handles PUT /authentications/{authCtxId}.
+// Spec: TS 29.526 §7.3.3
+//
+//nolint:revive // authCtxId matches the generated ServerInterface signature
+func (h *Handler) ConfirmAuthentication(w http.ResponseWriter, r *http.Request, authCtxId string) {
 	reqID := common.GetRequestID(r.Context())
 
-	if err := common.ValidateAuthCtxID(authCtxID); err != nil {
-		common.WriteProblem(w, common.NewProblem(400, types.CauseInvalidAuthCtxID,
-			"authCtxID must be a non-empty string without control characters"))
+	if err := common.ValidateAuthCtxID(authCtxId); err != nil {
+		common.WriteProblem(w, common.ValidationProblem("authCtxId", err.Error()))
 		return
 	}
 
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 64*1024))
+	var body aiwnats.AuthConfirmationData
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		common.WriteProblem(w, common.ValidationProblem("body", err.Error()))
+		return
+	}
+
+	if err := common.ValidateSUPI(string(body.Supi)); err != nil {
+		var pd *common.ProblemDetails
+		if errors.As(err, &pd) {
+			common.WriteProblem(w, pd)
+		} else {
+			common.WriteProblem(w, common.ValidationProblem("supi", err.Error()))
+		}
+		return
+	}
+
+	if body.EapMessage == nil || len(*body.EapMessage) == 0 {
+		common.WriteProblem(w, common.ValidationProblem("eapMessage", "eapMessage is required"))
+		return
+	}
+
+	authCtx, err := h.store.Load(authCtxId)
 	if err != nil {
-		slog.Error("failed to read request body",
-			"request_id", reqID, "authCtxID", authCtxID, "error", err)
-		common.WriteProblem(w, common.InternalServerProblem("failed to read request body"))
+		if errors.Is(err, ErrNotFound) {
+			common.WriteProblem(w, common.NotFoundProblem(
+				fmt.Sprintf("authentication context %q not found", authCtxId)))
+			return
+		}
+		common.WriteProblem(w, common.InternalServerProblem(
+			fmt.Sprintf("failed to load auth context: %s", err)))
 		return
 	}
 
-	data, err := ParseConfirmAuthData(body)
-	if err != nil {
-		slog.Warn("failed to parse confirm data",
-			"request_id", reqID, "authCtxID", authCtxID, "error", err)
-		common.WriteProblem(w, common.NewProblem(400, types.CauseInvalidPayload,
-			fmt.Sprintf("invalid request body: %v", err)))
+	if string(body.Supi) != authCtx.Supi {
+		common.WriteProblem(w, common.ValidationProblem("supi",
+			"SUPI does not match the authenticated SUPI for this session"))
 		return
 	}
 
-	if errs := data.Validate(); len(errs) > 0 {
-		detail := formatAiwErrors(errs)
-		slog.Warn("AIW confirmation validation failed",
-			"request_id", reqID, "authCtxID", authCtxID, "errors", detail)
-		common.WriteProblem(w, common.ValidationProblem("request", detail))
+	// Store the Phase 2 EAP payload so it survives across round-trips.
+	authCtx.EapPayload = eapPayloadFromPtr(body.EapMessage)
+	if err := h.store.Save(authCtx); err != nil {
+		common.WriteProblem(w, common.InternalServerProblem(
+			fmt.Sprintf("failed to update auth context: %s", err)))
 		return
 	}
 
-	// TODO(Phase 3): Load from PostgreSQL + Redis cache
-	slog.Info("AIW session load",
-		"request_id", reqID,
-		"authCtxID", authCtxID,
-		"phase", "phase1-stub")
-	common.WriteProblem(w, types.ErrAuthContextNotFound.ToProblemDetails())
+	// Phase 2: h.aaa.SendEAP(r.Context(), authCtxId, authCtx.EapPayload)
+	// Phase 1: echo back the EAP message as the response.
+
+	resp := aiwnats.AuthConfirmationResponse{
+		Supi:       body.Supi,
+		EapMessage: body.EapMessage,
+		AuthResult: nil,
+	}
+
+	w.Header().Set(common.HeaderXRequestID, reqID)
+	w.Header().Set(common.HeaderContentType, common.MediaTypeJSONVersion)
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
-// GenerateAuthCtxID generates a new AIW authentication context identifier.
-func GenerateAuthCtxID() string {
-	return uuid.NewString()
-}
-
-// buildLocation builds the Location header URL for a newly created auth context.
-func buildLocation(baseURL, authCtxID string) string {
-	return fmt.Sprintf("%s/nnssaaf-aiw/v1/authentications/%s",
-		strings.TrimSuffix(baseURL, "/"), authCtxID)
-}
-
-// formatAiwErrors formats multiple errors into a single string.
-func formatAiwErrors(errs []error) string {
-	if len(errs) == 0 {
-		return "unknown validation error"
-	}
-	if len(errs) == 1 {
-		return errs[0].Error()
-	}
-	parts := make([]string, 0, len(errs))
-	for _, e := range errs {
-		parts = append(parts, e.Error())
-	}
-	return strings.Join(parts, "; ")
-}
+// Compile-time check: Handler must implement aiwnats.ServerInterface.
+var _ aiwnats.ServerInterface = (*Handler)(nil)

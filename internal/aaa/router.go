@@ -65,22 +65,22 @@ type RouteDecision struct {
 
 // ServerConfig holds configuration for a single AAA server.
 type ServerConfig struct {
-	Protocol   Protocol
-	Host       string
-	Port       int
+	Protocol     Protocol
+	Host         string
+	Port         int
 	SharedSecret string // RADIUS shared secret
-	TLSCert    string
-	TLSKey     string
-	TLSCA      string
-	Timeout    time.Duration
-	Weight     int // for load balancing
+	TLSCert      string
+	TLSKey       string
+	TLSCA        string
+	Timeout      time.Duration
+	Weight       int // for load balancing
 }
 
 // SnssaiConfig maps an S-NSSAI to AAA server configuration.
 // 3-level lookup: exact (sst+sd), sst-only (sst, sd=*), default (sst=*, sd=*).
 type SnssaiConfig struct {
-	Exact  *ServerConfig // exact (sst, sd)
-	SST    *ServerConfig // sst only, sd=*
+	Exact   *ServerConfig // exact (sst, sd)
+	SST     *ServerConfig // sst only, sd=*
 	Default *ServerConfig // global default
 }
 
@@ -91,7 +91,7 @@ type Router struct {
 	metrics *Metrics
 
 	// Protocol clients
-	radiusClient   *radius.RadiusClient
+	radiusClient   *radius.Client
 	diameterClient *diameter.Client
 
 	mu sync.RWMutex
@@ -101,7 +101,7 @@ type Router struct {
 type RouterOption func(*Router)
 
 // WithRadiusClient sets the RADIUS client.
-func WithRadiusClient(c *radius.RadiusClient) RouterOption {
+func WithRadiusClient(c *radius.Client) RouterOption {
 	return func(r *Router) { r.radiusClient = c }
 }
 
@@ -174,8 +174,8 @@ func (r *Router) ResolveRoute(sst uint8, sd string) *RouteDecision {
 
 // SendEAP forwards an EAP message to AAA-S and returns the response.
 // Implements eap.AAAClient.
-func (r *Router) SendEAP(ctx context.Context, authCtxId string, eapPayload []byte) ([]byte, error) {
-	// Extract S-NSSAI from authCtxId if possible.
+func (r *Router) SendEAP(ctx context.Context, authCtxID string, eapPayload []byte) ([]byte, error) {
+	// Extract S-NSSAI from authCtxID if possible.
 	// For now, use default routing.
 	decision := r.ResolveRoute(0, "")
 	if decision == nil {
@@ -183,7 +183,7 @@ func (r *Router) SendEAP(ctx context.Context, authCtxId string, eapPayload []byt
 	}
 
 	r.logger.Debug("aaa_route",
-		"auth_ctx_id", authCtxId,
+		"auth_ctx_id", authCtxID,
 		"protocol", decision.Protocol,
 		"host", decision.Host,
 		"mode", decision.Mode,
@@ -196,9 +196,9 @@ func (r *Router) SendEAP(ctx context.Context, authCtxId string, eapPayload []byt
 
 	switch decision.Protocol {
 	case ProtocolRADIUS:
-		response, err = r.sendRADIUS(ctx, authCtxId, eapPayload, decision)
+		response, err = r.sendRADIUS(ctx, authCtxID, eapPayload, decision)
 	case ProtocolDIAMETER:
-		response, err = r.sendDIAMETER(ctx, authCtxId, eapPayload, decision)
+		response, err = r.sendDIAMETER(ctx, authCtxID, eapPayload, decision)
 	default:
 		return nil, fmt.Errorf("aaa: unsupported protocol: %s", decision.Protocol)
 	}
@@ -222,32 +222,32 @@ func (r *Router) SendEAP(ctx context.Context, authCtxId string, eapPayload []byt
 }
 
 // sendRADIUS forwards an EAP message over RADIUS.
-func (r *Router) sendRADIUS(ctx context.Context, authCtxId string, eapPayload []byte, decision *RouteDecision) ([]byte, error) {
+func (r *Router) sendRADIUS(ctx context.Context, authCtxID string, eapPayload []byte, decision *RouteDecision) ([]byte, error) {
 	if r.radiusClient == nil {
 		return nil, fmt.Errorf("aaa: RADIUS client not configured")
 	}
 
 	// Extract GPSI from context if available.
-	// For now, use authCtxId as the identity.
-	gpsi := authCtxId
+	// For now, use authCtxID as the identity.
+	gpsi := authCtxID
 
 	return r.radiusClient.SendEAP(ctx, gpsi, eapPayload, 0, "")
 }
 
 // sendDIAMETER forwards an EAP message over Diameter.
-func (r *Router) sendDIAMETER(ctx context.Context, authCtxId string, eapPayload []byte, decision *RouteDecision) ([]byte, error) {
+func (r *Router) sendDIAMETER(ctx context.Context, authCtxID string, eapPayload []byte, decision *RouteDecision) ([]byte, error) {
 	if r.diameterClient == nil {
 		return nil, fmt.Errorf("aaa: Diameter client not configured")
 	}
 
 	// Build session ID.
-	sessionId := fmt.Sprintf("nssAAF;%d;%s", time.Now().UnixNano(), authCtxId)
+	sessionID := fmt.Sprintf("nssAAF;%d;%s", time.Now().UnixNano(), authCtxID)
 
-	return r.diameterClient.SendDER(ctx, sessionId, authCtxId, eapPayload, 0, "")
+	return r.diameterClient.SendDER(ctx, sessionID, authCtxID, eapPayload, 0, "")
 }
 
 // SetRadiusClient sets the RADIUS client.
-func (r *Router) SetRadiusClient(c *radius.RadiusClient) {
+func (r *Router) SetRadiusClient(c *radius.Client) {
 	r.mu.Lock()
 	r.radiusClient = c
 	r.mu.Unlock()

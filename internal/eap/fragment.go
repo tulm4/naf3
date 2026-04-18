@@ -31,25 +31,25 @@ const MaxFragmentsPerSession = 16
 // FragmentBuffer holds fragments for a single EAP message reassembly.
 // Spec: RFC 3748 §3.5
 type FragmentBuffer struct {
-	AuthCtxId    string
-	ExpectedId   uint8
-	FragmentSeq  uint16 // current fragment sequence number
-	TotalLength  uint32 // declared total length (from L flag), 0 if unknown
-	Received     uint32 // total bytes received so far
-	Fragments    map[uint16][]byte
-	Complete     bool
-	CreatedAt    int64 // Unix timestamp for TTL
+	AuthCtxID   string
+	ExpectedId  uint8
+	FragmentSeq uint16 // current fragment sequence number
+	TotalLength uint32 // declared total length (from L flag), 0 if unknown
+	Received    uint32 // total bytes received so far
+	Fragments   map[uint16][]byte
+	Complete    bool
+	CreatedAt   int64 // Unix timestamp for TTL
 }
 
 // NewFragmentBuffer creates a new fragment buffer for a session.
-func NewFragmentBuffer(authCtxId string, id uint8) *FragmentBuffer {
+func NewFragmentBuffer(authCtxID string, id uint8) *FragmentBuffer {
 	return &FragmentBuffer{
-		AuthCtxId:   authCtxId,
+		AuthCtxID:   authCtxID,
 		ExpectedId:  id,
 		FragmentSeq: 0,
 		Fragments:   make(map[uint16][]byte),
 		Complete:    false,
-		CreatedAt:  nowUnix(),
+		CreatedAt:   nowUnix(),
 	}
 }
 
@@ -71,8 +71,9 @@ func (fb *FragmentBuffer) AddFragment(seq uint16, data []byte, moreFragments boo
 	fb.FragmentSeq++
 
 	if !moreFragments {
-		// No more fragments coming: complete if total length matches or was unknown.
+		// No more fragments coming.
 		if fb.TotalLength > 0 {
+			// We know the total length — validate exact match.
 			if fb.Received > fb.TotalLength {
 				return nil, fmt.Errorf("%w: received %d bytes, expected %d",
 					ErrFragmentOverflow, fb.Received, fb.TotalLength)
@@ -82,6 +83,7 @@ func (fb *FragmentBuffer) AddFragment(seq uint16, data []byte, moreFragments boo
 					ErrFragmentIncomplete, fb.Received, fb.TotalLength)
 			}
 		}
+		// TotalLength == 0 (no L flag sent): accept whatever we've received so far.
 		fb.Complete = true
 		return fb.Reassemble()
 	}
@@ -150,10 +152,10 @@ func (fb *FragmentBuffer) Size() int {
 // Manager maintains fragment buffers for multiple concurrent sessions.
 // Thread-safe.
 type FragmentManager struct {
-	mu       sync.RWMutex
-	buffers  map[string]*FragmentBuffer
-	ttl      int64 // TTL in seconds
-	maxAge   int64 // maximum age before expiry
+	mu      sync.RWMutex
+	buffers map[string]*FragmentBuffer
+	ttl     int64 // TTL in seconds
+	maxAge  int64 // maximum age before expiry
 }
 
 // NewFragmentManager creates a new fragment manager with the given TTL in seconds.
@@ -166,36 +168,36 @@ func NewFragmentManager(ttlSeconds int64) *FragmentManager {
 }
 
 // fragmentKey creates a unique key for a fragment buffer.
-func fragmentKey(authCtxId string, id uint8) string {
-	return fmt.Sprintf("%s:%d", authCtxId, id)
+func fragmentKey(authCtxID string, id uint8) string {
+	return fmt.Sprintf("%s:%d", authCtxID, id)
 }
 
 // GetOrCreate returns an existing buffer or creates a new one.
-func (m *FragmentManager) GetOrCreate(authCtxId string, id uint8) (*FragmentBuffer, bool) {
-	key := fragmentKey(authCtxId, id)
+func (m *FragmentManager) GetOrCreate(authCtxID string, id uint8) (*FragmentBuffer, bool) {
+	key := fragmentKey(authCtxID, id)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if buf, ok := m.buffers[key]; ok {
 		return buf, false
 	}
-	buf := NewFragmentBuffer(authCtxId, id)
+	buf := NewFragmentBuffer(authCtxID, id)
 	buf.CreatedAt = nowUnix()
 	m.buffers[key] = buf
 	return buf, true
 }
 
 // Get returns an existing buffer.
-func (m *FragmentManager) Get(authCtxId string, id uint8) *FragmentBuffer {
-	key := fragmentKey(authCtxId, id)
+func (m *FragmentManager) Get(authCtxID string, id uint8) *FragmentBuffer {
+	key := fragmentKey(authCtxID, id)
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.buffers[key]
 }
 
 // Delete removes a buffer.
-func (m *FragmentManager) Delete(authCtxId string, id uint8) {
-	key := fragmentKey(authCtxId, id)
+func (m *FragmentManager) Delete(authCtxID string, id uint8) {
+	key := fragmentKey(authCtxID, id)
 	m.mu.Lock()
 	delete(m.buffers, key)
 	m.mu.Unlock()

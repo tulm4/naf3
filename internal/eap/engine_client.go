@@ -18,7 +18,7 @@ var ErrNoAAAClient = errors.New("eap: aaa client not configured")
 type AAAClient interface {
 	// SendEAP forwards an EAP message to AAA-S and returns the response.
 	// The response may be an EAP-Request (continue) or EAP-Success/Failure.
-	SendEAP(ctx context.Context, authCtxId string, eapPayload []byte) ([]byte, error)
+	SendEAP(ctx context.Context, authCtxID string, eapPayload []byte) ([]byte, error)
 }
 
 // sha256Hash computes the SHA-256 hash of data.
@@ -55,12 +55,12 @@ func newSessionManager(ttl time.Duration) *sessionManager {
 	}
 }
 
-// get returns a session by authCtxId.
-func (m *sessionManager) get(authCtxId string) (*Session, error) {
+// get returns a session by authCtxID.
+func (m *sessionManager) get(authCtxID string) (*Session, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	session, ok := m.sessions[authCtxId]
+	session, ok := m.sessions[authCtxID]
 	if !ok {
 		return nil, ErrSessionNotFound
 	}
@@ -76,14 +76,14 @@ func (m *sessionManager) get(authCtxId string) (*Session, error) {
 // put stores or updates a session.
 func (m *sessionManager) put(session *Session) {
 	m.mu.Lock()
-	m.sessions[session.AuthCtxId] = session
+	m.sessions[session.AuthCtxID] = session
 	m.mu.Unlock()
 }
 
 // delete removes a session.
-func (m *sessionManager) delete(authCtxId string) {
+func (m *sessionManager) delete(authCtxID string) {
 	m.mu.Lock()
-	delete(m.sessions, authCtxId)
+	delete(m.sessions, authCtxID)
 	m.mu.Unlock()
 }
 
@@ -117,7 +117,7 @@ func (m *sessionManager) stats() SessionManagerStats {
 	defer m.mu.RUnlock()
 	return SessionManagerStats{
 		ActiveSessions: len(m.sessions),
-		TTL:           m.ttl,
+		TTL:            m.ttl,
 	}
 }
 
@@ -139,9 +139,9 @@ func (m *sessionManager) TestPut(session *Session) {
 	m.put(session)
 }
 
-// TestGet retrieves a session by authCtxId (for testing).
-func (m *sessionManager) TestGet(authCtxId string) (*Session, error) {
-	return m.get(authCtxId)
+// TestGet retrieves a session by authCtxID (for testing).
+func (m *sessionManager) TestGet(authCtxID string) (*Session, error) {
+	return m.get(authCtxID)
 }
 
 // TestSize returns the number of sessions (for testing).
@@ -150,6 +150,6 @@ func (m *sessionManager) TestSize() int {
 }
 
 // NewTestSession creates a session for testing.
-func NewTestSession(authCtxId, gpsi string) *Session {
-	return NewSession(authCtxId, gpsi)
+func NewTestSession(authCtxID, gpsi string) *Session {
+	return NewSession(authCtxID, gpsi)
 }

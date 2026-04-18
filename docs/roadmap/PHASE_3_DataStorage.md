@@ -13,23 +13,23 @@ Phase 3 xây dựng persistence layer: PostgreSQL schemas và Redis cache.
 **Design Doc:** `docs/design/04_data_model.md`, `docs/design/11_database_ha.md`
 
 **Deliverables:**
-- [ ] `session.go` — Session repository
-- [ ] `aaa_config.go` — AAA config repository
-- [ ] `audit.go` — Audit log repository
-- [ ] `migrations/` — Database migrations
-- [ ] `pool.go` — Connection pool management
-- [ ] `session_test.go` — Unit tests
+- [x] `session.go` — Session repository
+- [x] `aaa_config.go` — AAA config repository
+- [x] `audit.go` — Audit log repository
+- [x] `migrations/` — Database migrations
+- [x] `pool.go` — Connection pool management
+- [x] `session_test.go` — Unit tests
 
 ### 2. `internal/storage/postgres/migrations/` — Migrations
 
 **Priority:** P0
 
 **Deliverables:**
-- [ ] `000001_create_sessions_table.up.sql`
-- [ ] `000002_create_aaa_configs_table.up.sql`
-- [ ] `000003_create_audit_log_table.up.sql`
-- [ ] `000004_create_indexes.up.sql`
-- [ ] `migrate.go` — Migration runner
+- [x] `000001_create_sessions_table.up.sql`
+- [x] `000002_create_aaa_configs_table.up.sql`
+- [x] `000003_create_audit_log_table.up.sql`
+- [x] `000004_create_indexes.up.sql`
+- [x] `migrate.go` — Migration runner
 
 **Key Tables:**
 ```sql
@@ -66,12 +66,12 @@ CREATE TABLE aaa_server_configs (
 **Design Doc:** `docs/design/04_data_model.md`, `docs/design/12_redis_ha.md`
 
 **Deliverables:**
-- [ ] `session_cache.go` — Session hot cache
-- [ ] `idempotency.go` — Idempotency cache
-- [ ] `ratelimit.go` — Rate limiter
-- [ ] `lock.go` — Distributed lock
-- [ ] `pool.go` — Redis cluster pool
-- [ ] `cache_test.go` — Unit tests
+- [x] `session_cache.go` — Session hot cache
+- [x] `idempotency.go` — Idempotency cache
+- [x] `ratelimit.go` — Rate limiter
+- [x] `lock.go` — Distributed lock
+- [x] `pool.go` — Redis cluster pool
+- [x] `cache_test.go` — Unit tests
 
 **Key Redis Keys:**
 ```
@@ -84,9 +84,9 @@ nssaa:lock:session:{authCtxId} → String NX (30 sec TTL)
 
 ## Validation Checklist
 
-- [ ] Monthly partitions auto-created
-- [ ] GPSI hashed in audit log (SHA-256)
-- [ ] Session state encrypted at rest (AES-256-GCM)
-- [ ] Redis TTL: session 5min, idempotency 1h
-- [ ] Sliding window rate limiting implemented
+- [x] Monthly partitions auto-created
+- [x] GPSI hashed in audit log (SHA-256)
+- [x] Session state encrypted at rest (AES-256-GCM)
+- [x] Redis TTL: session 5min, idempotency 1h
+- [x] Sliding window rate limiting implemented
 - [ ] Unit test coverage >80%

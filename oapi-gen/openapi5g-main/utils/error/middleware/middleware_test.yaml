@@ -1,0 +1,55 @@
+openapi: "3.0.1"
+components:
+  schemas:
+    Request:
+      type: object
+      properties:
+        field1:
+          type: string
+        field2:
+          type: string
+      required:
+        - field1
+        - field2
+    Response:
+      type: object
+      properties:
+        fieldA:
+          type: string
+        fieldB:
+          type: string
+        fieldF:
+          type: number
+      required:
+        - fieldA
+        - fieldB
+paths:
+  /test/{path-param}:
+    parameters:
+      - in: path
+        name: path-param
+        required: true
+        schema:
+          type: integer
+      - in: query
+        name: query-param
+        schema:
+          type: integer
+    post:
+      operationId: test
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Request"
+      responses:
+        201:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Response"
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: ../../../modSpecs/TS29571_CommonData.yaml#/components/schemas/ProblemDetails

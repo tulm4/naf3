@@ -29,8 +29,9 @@ const MSKLength = 64
 // For TLS 1.2: uses the TLS 1.2 exporter interface.
 //
 // MSK structure (RFC 5216):
-//   MSK[0:31]  = MSK Part 1 (EMSK in TLS 1.2)
-//   MSK[32:63] = MSK Part 2
+//
+//	MSK[0:31]  = MSK Part 1 (EMSK in TLS 1.2)
+//	MSK[32:63] = MSK Part 2
 //
 // EMSK (Extended MSK, RFC 5295) is also derived but not currently used.
 func DeriveMSK(connState *tls.ConnectionState) ([]byte, error) {
@@ -55,7 +56,7 @@ func DeriveMSK(connState *tls.ConnectionState) ([]byte, error) {
 // RFC 5216 does not explicitly define TLS 1.3 usage, but the same exporter
 // label and length apply. TLS 1.3 master secret is derived differently
 // and accessible via the connection state.
-func deriveMSKTLS13(connState *tls.ConnectionState) ([]byte, error) {
+func deriveMSKTLS13(_ *tls.ConnectionState) ([]byte, error) {
 	// In TLS 1.3, we use the early exporter (TLS 1.3 does not have the
 	// same exporter interface as TLS 1.2). The MSK is derived from the
 	// TLS 1.3 traffic keys via the exporter label.
@@ -76,7 +77,7 @@ func deriveMSKTLS13(connState *tls.ConnectionState) ([]byte, error) {
 // deriveMSKTLS12 derives MSK using TLS 1.2 exporter.
 // RFC 5216 §2.1.4: MSK = TLS-Exporter("EAP-TLS MSK", 64)
 // RFC 5705 defines the TLS exporter interface.
-func deriveMSKTLS12(connState *tls.ConnectionState) ([]byte, error) {
+func deriveMSKTLS12(_ *tls.ConnectionState) ([]byte, error) {
 	// TLS 1.2 MSK derivation requires access to the TLS connection
 	// with an exporter context. Since Go's standard tls.Conn does not
 	// expose the exporter interface directly, we use a workaround
@@ -91,33 +92,38 @@ func deriveMSKTLS12(connState *tls.ConnectionState) ([]byte, error) {
 	return nil, fmt.Errorf("%w: TLS 1.2 MSK derivation requires TLS exporter; implement using custom TLS config or server-side MSK attribute", ErrMSKDerivationFailed)
 }
 
-// VerifyServerCertificate verifies the server certificate chain.
-// Returns an error if verification fails.
+// VerifyServerCertificate verifies the server certificate chain against the given root CA pool.
+// If VerifiedChains is non-empty (TLS handshake already succeeded), the certificate is already
+// verified — this function returns nil immediately in that case. If VerifiedChains is empty
+// (e.g. insecure skip-verify mode), a full re-verification is performed.
 func VerifyServerCertificate(connState *tls.ConnectionState, roots *x509.CertPool) error {
-	if connState == nil || len(connState.VerifiedChains) == 0 {
-		return errors.New("eap: no verified certificate chain")
+	if connState == nil {
+		return errors.New("eap: nil connection state")
 	}
 
-	opts := x509.VerifyOptions{
-		Roots:         roots,
-		Intermediates: x509.NewCertPool(),
+	// If VerifiedChains is populated, the TLS handshake already verified the chain.
+	if len(connState.VerifiedChains) > 0 {
+		return nil
 	}
 
-	// Build intermediate pool from verified chain.
-	for _, chain := range connState.VerifiedChains {
-		// chain[0] is the leaf (server) cert
-		// chain[1:] are intermediates
-		for _, cert := range chain[1:] {
-			opts.Intermediates.AddCert(cert)
+	// VerifiedChains is empty — re-verify from scratch.
+	leaf := connState.PeerCertificates[0]
+	if leaf == nil {
+		return errors.New("eap: no peer certificates")
+	}
+
+	opts := x509.VerifyOptions{Roots: roots}
+	if len(connState.PeerCertificates) > 1 {
+		intermediates := x509.NewCertPool()
+		for _, cert := range connState.PeerCertificates[1:] {
+			intermediates.AddCert(cert)
 		}
+		opts.Intermediates = intermediates
 	}
 
-	// Verify using the leaf certificate.
-	leaf := connState.VerifiedChains[0][0]
 	if _, err := leaf.Verify(opts); err != nil {
 		return fmt.Errorf("eap: certificate verification failed: %w", err)
 	}
-
 	return nil
 }
 

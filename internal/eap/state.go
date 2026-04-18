@@ -43,13 +43,13 @@ func (c EapCode) IsValid() bool {
 // EAP method types.
 // Spec: RFC 3748 §5, TS 33.501 §5.13
 const (
-	EapMethodIdentity  EapMethod = 1  // EAP-Identity/NAK
-	EapMethodNotification EapMethod = 2 // RFC 3748 §5.2
-	EapMethodNak       EapMethod = 3  // RFC 3748 §5.3
-	EapMethodTLS      EapMethod = 13 // EAP-TLS (RFC 5216)
-	EapMethodTTLS     EapMethod = 21 // EAP-TTLS (RFC 5281)
-	EapMethodPEAP     EapMethod = 26 // PEAP
-	EapMethodAKAPrime EapMethod = 50 // EAP-AKA' (RFC 5448)
+	EapMethodIdentity     EapMethod = 1  // EAP-Identity/NAK
+	EapMethodNotification EapMethod = 2  // RFC 3748 §5.2
+	EapMethodNak          EapMethod = 3  // RFC 3748 §5.3
+	EapMethodTLS          EapMethod = 13 // EAP-TLS (RFC 5216)
+	EapMethodTTLS         EapMethod = 21 // EAP-TTLS (RFC 5281)
+	EapMethodPEAP         EapMethod = 26 // PEAP
+	EapMethodAKAPrime     EapMethod = 50 // EAP-AKA' (RFC 5448)
 )
 
 // EapMethod represents an EAP authentication method.
@@ -101,9 +101,9 @@ func (m EapMethod) IsTunneled() bool {
 // EAP-TLS flags as defined in RFC 5216 §2.1.5.
 // Spec: RFC 5216 §2.1.5
 const (
-	EapTlsFlagsMoreFrags  EapTlsFlags = 0x40 // More fragments follow
-	EapTlsFlagsLength      EapTlsFlags = 0x20 // Total length field is present
-	EapTlsFlagsReserved    EapTlsFlags = 0x1F // Reserved (must be zero)
+	EapTlsFlagsMoreFrags EapTlsFlags = 0x40 // More fragments follow
+	EapTlsFlagsLength    EapTlsFlags = 0x20 // Total length field is present
+	EapTlsFlagsReserved  EapTlsFlags = 0x1F // Reserved (must be zero)
 )
 
 // EapTlsFlags represents the flags field in EAP-TLS packets.
@@ -120,10 +120,10 @@ type EapResult int
 
 const (
 	ResultContinue EapResult = iota // More rounds needed
-	ResultSuccess                    // EAP-Success received
-	ResultFailure                    // EAP-Failure received
-	ResultIgnored                    // Message ignored (duplicate/out-of-order)
-	ResultTimeout                    // No response within timeout
+	ResultSuccess                   // EAP-Success received
+	ResultFailure                   // EAP-Failure received
+	ResultIgnored                   // Message ignored (duplicate/out-of-order)
+	ResultTimeout                   // No response within timeout
 )
 
 // String implements fmt.Stringer.

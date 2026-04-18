@@ -56,7 +56,7 @@ func TestParse_success(t *testing.T) {
 	assert.Equal(t, uint8(2), pkt.Id)
 	assert.Equal(t, uint16(4), pkt.Length)
 	assert.Equal(t, uint8(0), pkt.Type) // Success has no Type field
-	assert.Empty(t, pkt.Data) // codec sets Data from data[4:], which is empty
+	assert.Empty(t, pkt.Data)           // codec sets Data from data[4:], which is empty
 }
 
 func TestParse_failure(t *testing.T) {
@@ -322,7 +322,7 @@ func TestSessionStateString(t *testing.T) {
 func TestNewSession(t *testing.T) {
 	session := NewSession("auth-123", "user@example.com")
 
-	assert.Equal(t, "auth-123", session.AuthCtxId)
+	assert.Equal(t, "auth-123", session.AuthCtxID)
 	assert.Equal(t, "user@example.com", session.Gpsi)
 	assert.Equal(t, SessionStateInit, session.State)
 	assert.Equal(t, DefaultMaxRounds, session.MaxRounds)
@@ -508,7 +508,7 @@ func TestSessionManagerExpired(t *testing.T) {
 func TestSessionManagerCleanup(t *testing.T) {
 	mgr := NewTestSessionManager(100 * time.Millisecond) // 100ms TTL
 
-	// Each session uses a different authCtxId so they don't overwrite each other.
+	// Each session uses a different authCtxID so they don't overwrite each other.
 	for i := 0; i < 5; i++ {
 		session := NewTestSession(fmt.Sprintf("auth-expire-%d", i), "user@test")
 		mgr.TestPut(session)
@@ -521,7 +521,7 @@ func TestSessionManagerCleanup(t *testing.T) {
 
 	// All 5 expired sessions should be cleaned; fresh one remains.
 	count := mgr.cleanup()
-	assert.Equal(t, 5, count) // all 5 expired sessions cleaned
+	assert.Equal(t, 5, count)          // all 5 expired sessions cleaned
 	assert.Equal(t, 1, mgr.TestSize()) // only fresh session remains
 }
 
@@ -603,6 +603,24 @@ func TestFragmentBufferIncomplete(t *testing.T) {
 	// Last fragment but total length not met.
 	_, err = buf.AddFragment(1, []byte("!"), false)
 	assert.Error(t, err)
+}
+
+// Regression: AddFragment with last fragment (moreFragments=false) but TotalLength==0
+// must accept whatever was received. Previously it fell through to the "more coming" path
+// and marked Complete=true prematurely when Received >= TotalLength (0).
+func TestFragmentBufferLastFragmentWithoutTotalLength(t *testing.T) {
+	buf := NewFragmentBuffer("auth-123", 1)
+	// TotalLength stays 0 (no L flag in the EAP-TLS packet).
+
+	// First fragment with last=false.
+	_, err := buf.AddFragment(0, []byte("hello"), false)
+	require.NoError(t, err)
+	assert.True(t, buf.Complete)
+
+	// Reassembly must succeed with exactly "hello".
+	data, err := buf.Reassemble()
+	require.NoError(t, err)
+	assert.Equal(t, []byte("hello"), data)
 }
 
 func TestFragmentBufferDuplicate(t *testing.T) {
@@ -908,11 +926,11 @@ func TestConstants(t *testing.T) {
 func TestErrors(t *testing.T) {
 	assert.Error(t, ErrSessionNotFound)
 	assert.Error(t, ErrSessionAlreadyDone)
-	assert.Error(t, ErrEapIdMismatch)
+	assert.Error(t, ErrEapIDMismatch)
 	assert.Error(t, ErrMaxRoundsExceeded)
 	assert.Error(t, ErrSessionTimeout)
 	assert.Error(t, ErrInvalidStateTransition)
-	assert.Error(t, ErrMissingAuthCtxId)
+	assert.Error(t, ErrMissingAuthCtxID)
 	assert.Error(t, ErrInvalidPacket)
 	assert.Error(t, ErrUnexpectedLength)
 	assert.Error(t, ErrPayloadTooLarge)

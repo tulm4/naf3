@@ -34,9 +34,10 @@ type VSA struct {
 // Spec: RFC 2865 §5.26
 //
 // The VSA data format is:
-//   [0-2]   Vendor-ID (3 bytes, little-endian)
-//   [3]     Vendor-Type (1 byte)
-//   [4...]  Vendor-Data (variable)
+//
+//	[0-2]   Vendor-ID (3 bytes, little-endian)
+//	[3]     Vendor-Type (1 byte)
+//	[4...]  Vendor-Data (variable)
 func DecodeVSA(attr *Attribute) (*VSA, error) {
 	if attr == nil || attr.Type != AttrVendorSpecific {
 		return nil, fmt.Errorf("%w: not a VSA", ErrInvalidVSA)
@@ -63,13 +64,15 @@ func DecodeVSA(attr *Attribute) (*VSA, error) {
 // Spec: RFC 2865 §5.26
 //
 // The VSA data format is:
-//   [0-2]   Vendor-ID (3 bytes LE)
-//   [3]     Vendor-Type (1 byte)
-//   [4...]  Vendor-Data (variable)
+//
+//	[0-2]   Vendor-ID (3 bytes LE)
+//	[3]     Vendor-Type (1 byte)
+//	[4...]  Vendor-Data (variable)
 //
 // EncodeVSA constructs an Attribute with:
-//   Type = AttrVendorSpecific (26)
-//   Value = [VID0, VID1, VID2, VendorType, VendorData...]
+//
+//	Type = AttrVendorSpecific (26)
+//	Value = [VID0, VID1, VID2, VendorType, VendorData...]
 //
 // DecodeVSA reads Vendor-ID from bytes 0-2 (LE), Vendor-Type from byte 3,
 // and Vendor-Data from byte 4 onward.

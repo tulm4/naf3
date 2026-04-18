@@ -159,7 +159,7 @@ func TestGetAttribute(t *testing.T) {
 	attrs := []Attribute{
 		MakeStringAttribute(AttrUserName, "bob"),
 		MakeIntegerAttribute(AttrNASPortType, 19),
-		MakeStringAttribute(AttrCallingStationId, "1234"),
+		MakeStringAttribute(AttrCallingStationID, "1234"),
 	}
 
 	userName := GetAttribute(attrs, AttrUserName)
@@ -170,7 +170,7 @@ func TestGetAttribute(t *testing.T) {
 	assert.NotNil(t, nasPort)
 	assert.Equal(t, uint32(19), GetInteger(nasPort))
 
-	missing := GetAttribute(attrs, AttrAcctSessionId)
+	missing := GetAttribute(attrs, AttrAcctSessionID)
 	assert.Nil(t, missing)
 }
 
@@ -184,7 +184,7 @@ func TestGetAttributes(t *testing.T) {
 	eapAttrs := GetAttributes(attrs, AttrEAPMessage)
 	assert.Len(t, eapAttrs, 2)
 
-	none := GetAttributes(attrs, AttrAcctSessionId)
+	none := GetAttributes(attrs, AttrAcctSessionID)
 	assert.Len(t, none, 0)
 }
 
@@ -496,8 +496,8 @@ func TestFullPacketRoundTrip(t *testing.T) {
 	packet := BuildAccessRequest(1, auth, []Attribute{
 		MakeStringAttribute(AttrUserName, "alice@example.com"),
 		MakeIntegerAttribute(AttrServiceType, ServiceTypeAuthenticateOnly),
-		MakeIntegerAttribute(AttrNASPortType, NASPortTypeVirtual_),
-		MakeStringAttribute(AttrCallingStationId, "alice@example.com"),
+		MakeIntegerAttribute(AttrNASPortType, NASPortTypeNASVirtual),
+		MakeStringAttribute(AttrCallingStationID, "alice@example.com"),
 		Make3GPPSNSSAIAttribute(1, "ABCDEF"),
 		MakeAttribute(AttrEAPMessage, []byte("eap-data")),
 	})

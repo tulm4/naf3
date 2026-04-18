@@ -25,8 +25,8 @@ import (
 // mockAAAClient is a mock implementation of AAAClient for testing.
 type mockAAAClient struct {
 	mu         sync.Mutex
-	responses  map[string][]byte // authCtxId → response bytes
-	eapPayload []byte           // last received payload
+	responses  map[string][]byte // authCtxID → response bytes
+	eapPayload []byte            // last received payload
 	callCount  atomic.Int32
 
 	// Configurable behavior.
@@ -43,7 +43,7 @@ func newMockAAAClient() *mockAAAClient {
 	}
 }
 
-func (m *mockAAAClient) SendEAP(ctx context.Context, authCtxId string, eapPayload []byte) ([]byte, error) {
+func (m *mockAAAClient) SendEAP(ctx context.Context, authCtxID string, eapPayload []byte) ([]byte, error) {
 	m.mu.Lock()
 	m.eapPayload = eapPayload
 	m.callCount.Add(1)
@@ -73,16 +73,16 @@ func (m *mockAAAClient) SendEAP(ctx context.Context, authCtxId string, eapPayloa
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if resp, ok := responses[authCtxId]; ok {
+	if resp, ok := responses[authCtxID]; ok {
 		return resp, nil
 	}
 	return defaultResp, nil
 }
 
-func (m *mockAAAClient) SetResponse(authCtxId string, response []byte) {
+func (m *mockAAAClient) SetResponse(authCtxID string, response []byte) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.responses[authCtxId] = response
+	m.responses[authCtxID] = response
 }
 
 func (m *mockAAAClient) SetNextFailure(err error) {
@@ -168,7 +168,7 @@ func TestStartSession(t *testing.T) {
 	session, err := engine.StartSession("auth-001", "user@example.com")
 	require.NoError(t, err)
 	assert.NotNil(t, session)
-	assert.Equal(t, "auth-001", session.AuthCtxId)
+	assert.Equal(t, "auth-001", session.AuthCtxID)
 	assert.Equal(t, "user@example.com", session.Gpsi)
 	assert.Equal(t, SessionStateInit, session.State)
 	assert.Equal(t, DefaultMaxRounds, session.MaxRounds)
@@ -182,7 +182,7 @@ func TestStartSessionWithCustomConfig(t *testing.T) {
 	cfg := Config{
 		MaxRounds:    10,
 		RoundTimeout: 5 * time.Second,
-		SessionTTL:    20 * time.Minute,
+		SessionTTL:   20 * time.Minute,
 	}
 	engine := NewEngine(cfg, mock, logger)
 
@@ -199,7 +199,7 @@ func TestStartSessionEmptyAuthCtxId(t *testing.T) {
 
 	session, err := engine.StartSession("", "user@test")
 	assert.Nil(t, session)
-	assert.ErrorIs(t, err, ErrMissingAuthCtxId)
+	assert.ErrorIs(t, err, ErrMissingAuthCtxID)
 }
 
 // ---------------------------------------------------------------------------
@@ -375,7 +375,7 @@ func TestProcessEAPFailure(t *testing.T) {
 	require.NoError(t, decodeErr, "eapMsg should contain valid base64")
 	eapPkt, parseErr := Parse(eapBytes)
 	require.NoError(t, parseErr)
-	assert.Equal(t, EapCodeFailure, eapPkt.Code)
+	assert.Equal(t, CodeFailure, eapPkt.Code)
 }
 
 // ---------------------------------------------------------------------------
@@ -396,6 +396,24 @@ func TestProcessAAAError(t *testing.T) {
 	eapResp := BuildResponse(1, EapMethodIdentity, []byte("user@test"))
 	_, _, err = engine.Process(context.Background(), "auth-aaa-err", eapResp.RawData)
 	assert.Error(t, err)
+}
+
+// Regression: forwardToAAA returning nil must not cause a panic in handleExchange.
+func TestProcessNilResponseFromAAA(t *testing.T) {
+	logger := slog.Default()
+	mock := newMockAAAClient()
+	engine := NewEngine(DefaultConfig(), mock, logger)
+
+	_, err := engine.StartSession("auth-nil-resp", "user@test")
+	require.NoError(t, err)
+
+	// Set AAA to return a nil response.
+	mock.SetResponse("auth-nil-resp", nil)
+
+	eapResp := BuildResponse(1, EapMethodIdentity, []byte("user@test"))
+	_, _, processErr := engine.Process(context.Background(), "auth-nil-resp", eapResp.RawData)
+	// Should return an error, not nil. The old code would panic on nil dereference.
+	require.Error(t, processErr, "nil response should produce an error, not panic")
 }
 
 // ---------------------------------------------------------------------------
@@ -483,7 +501,7 @@ func TestProcessIdMismatch(t *testing.T) {
 	// Second response with Id=5 (not 2).
 	eapResp2 := BuildResponse(5, EapMethodTLS, []byte{0x01})
 	_, _, err = engine.Process(context.Background(), "auth-id-mismatch", eapResp2.RawData)
-	assert.ErrorIs(t, err, ErrEapIdMismatch)
+	assert.ErrorIs(t, err, ErrEapIDMismatch)
 }
 
 // ---------------------------------------------------------------------------

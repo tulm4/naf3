@@ -33,11 +33,11 @@ type Config struct {
 // DefaultConfig returns a Config with sensible defaults.
 func DefaultConfig() Config {
 	return Config{
-		MaxRounds:             DefaultMaxRounds,
-		RoundTimeout:          DefaultRoundTimeout,
-		SessionTTL:            DefaultSessionTTL,
-		FragmentTTLSeconds:    60,
-		TLSSessionCacheSize:   1024,
+		MaxRounds:           DefaultMaxRounds,
+		RoundTimeout:        DefaultRoundTimeout,
+		SessionTTL:          DefaultSessionTTL,
+		FragmentTTLSeconds:  60,
+		TLSSessionCacheSize: 1024,
 	}
 }
 
@@ -91,8 +91,8 @@ func NewEngine(cfg Config, aaaClient AAAClient, logger *slog.Logger) *Engine {
 		cfg:            cfg,
 		sessionManager: newSessionManager(cfg.SessionTTL),
 		fragmentMgr:    NewFragmentManager(cfg.FragmentTTLSeconds),
-		aaaClient:     aaaClient,
-		logger:        &defaultLogger{logger},
+		aaaClient:      aaaClient,
+		logger:         &defaultLogger{logger},
 	}
 }
 
@@ -102,18 +102,18 @@ func (e *Engine) SetTLSConfig(cfg *tls.Config) {
 }
 
 // StartSession creates a new EAP session for an authentication context.
-func (e *Engine) StartSession(authCtxId, gpsi string) (*Session, error) {
-	if authCtxId == "" {
-		return nil, ErrMissingAuthCtxId
+func (e *Engine) StartSession(authCtxID, gpsi string) (*Session, error) {
+	if authCtxID == "" {
+		return nil, ErrMissingAuthCtxID
 	}
 
-	session := NewSession(authCtxId, gpsi)
+	session := NewSession(authCtxID, gpsi)
 	session.MaxRounds = e.cfg.MaxRounds
 	session.Timeout = e.cfg.RoundTimeout
 
 	e.sessionManager.put(session)
 	e.logger.Info("eap_session_started",
-		"auth_ctx_id", authCtxId,
+		"auth_ctx_id", authCtxID,
 		"gpsi", gpsi,
 		"max_rounds", session.MaxRounds,
 	)
@@ -121,18 +121,18 @@ func (e *Engine) StartSession(authCtxId, gpsi string) (*Session, error) {
 	return session, nil
 }
 
-// GetSession returns an existing EAP session by authCtxId.
-func (e *Engine) GetSession(authCtxId string) (*Session, error) {
-	return e.sessionManager.get(authCtxId)
+// GetSession returns an existing EAP session by authCtxID.
+func (e *Engine) GetSession(authCtxID string) (*Session, error) {
+	return e.sessionManager.get(authCtxID)
 }
 
 // Process processes an incoming EAP message from AMF.
 // It determines whether this is a new request, a retry, or part of an ongoing session.
-func (e *Engine) Process(ctx context.Context, authCtxId string, eapPayload []byte) (*types.EapMessage, types.AuthResult, error) {
-	session, err := e.sessionManager.get(authCtxId)
+func (e *Engine) Process(ctx context.Context, authCtxID string, eapPayload []byte) (*types.EapMessage, types.AuthResult, error) {
+	session, err := e.sessionManager.get(authCtxID)
 	if err != nil {
 		// No existing session — this should not happen for non-initial messages.
-		return nil, types.AuthResultFailure, fmt.Errorf("no session found for authCtxId=%s: %w", authCtxId, err)
+		return nil, types.AuthResultFailure, fmt.Errorf("no session found for authCtxID=%s: %w", authCtxID, err)
 	}
 
 	// Check for idle timeout.
@@ -140,7 +140,7 @@ func (e *Engine) Process(ctx context.Context, authCtxId string, eapPayload []byt
 		session.MarkTimeout()
 		e.sessionManager.put(session)
 		e.logger.Warn("eap_session_timeout",
-			"auth_ctx_id", authCtxId,
+			"auth_ctx_id", authCtxID,
 			"last_activity", session.LastActivity,
 		)
 		return nil, types.AuthResultFailure, ErrSessionTimeout
@@ -150,7 +150,7 @@ func (e *Engine) Process(ctx context.Context, authCtxId string, eapPayload []byt
 	packet, err := Parse(eapPayload)
 	if err != nil {
 		e.logger.Error("eap_parse_error",
-			"auth_ctx_id", authCtxId,
+			"auth_ctx_id", authCtxID,
 			"error", err,
 		)
 		return nil, types.AuthResultFailure, err
@@ -160,7 +160,7 @@ func (e *Engine) Process(ctx context.Context, authCtxId string, eapPayload []byt
 	msgHash := sha256Hash(eapPayload)
 	if bytesEqual(session.LastNonce, msgHash) && session.CachedResponse != nil {
 		e.logger.Debug("eap_retry_detected",
-			"auth_ctx_id", authCtxId,
+			"auth_ctx_id", authCtxID,
 			"id", packet.Id,
 		)
 		respMsg := types.NewEapMessage(session.CachedResponse)
@@ -237,13 +237,16 @@ func (e *Engine) handleInit(ctx context.Context, session *Session, packet *Packe
 		method := e.detectEapMethodFromIdentity(packet.Data)
 		session.Method = method
 		e.logger.Info("eap_method_detected",
-			"auth_ctx_id", session.AuthCtxId,
+			"auth_ctx_id", session.AuthCtxID,
 			"method", method,
 		)
 	}
 
 	// Forward to AAA-S.
 	resp, _, err := e.forwardToAAA(ctx, session, rawPayload)
+	if resp == nil {
+		return nil, ResultFailure, fmt.Errorf("aaa client returned nil response")
+	}
 	return resp, ResultContinue, err
 }
 
@@ -252,17 +255,17 @@ func (e *Engine) handleExchange(ctx context.Context, session *Session, packet *P
 	// Validate ID matches expected.
 	if packet.Id != session.ExpectedId {
 		e.logger.Warn("eap_id_mismatch",
-			"auth_ctx_id", session.AuthCtxId,
+			"auth_ctx_id", session.AuthCtxID,
 			"expected_id", session.ExpectedId,
 			"got_id", packet.Id,
 		)
-		return nil, ResultIgnored, ErrEapIdMismatch
+		return nil, ResultIgnored, ErrEapIDMismatch
 	}
 
 	// Check round limit.
 	if session.Rounds >= session.MaxRounds {
 		e.logger.Warn("eap_max_rounds_exceeded",
-			"auth_ctx_id", session.AuthCtxId,
+			"auth_ctx_id", session.AuthCtxID,
 			"rounds", session.Rounds,
 			"max", session.MaxRounds,
 		)
@@ -279,6 +282,9 @@ func (e *Engine) handleExchange(ctx context.Context, session *Session, packet *P
 	if err != nil {
 		return nil, ResultFailure, err
 	}
+	if response == nil {
+		return nil, ResultFailure, fmt.Errorf("aaa client returned nil response")
+	}
 
 	// Parse AAA response.
 	respPacket, parseErr := Parse(response)
@@ -294,7 +300,7 @@ func (e *Engine) handleExchange(ctx context.Context, session *Session, packet *P
 	case EapCodeSuccess:
 		session.MarkDone()
 		e.logger.Info("eap_auth_success",
-			"auth_ctx_id", session.AuthCtxId,
+			"auth_ctx_id", session.AuthCtxID,
 			"rounds", session.Rounds,
 		)
 		return response, ResultSuccess, nil
@@ -302,7 +308,7 @@ func (e *Engine) handleExchange(ctx context.Context, session *Session, packet *P
 	case EapCodeFailure:
 		session.MarkFailed()
 		e.logger.Info("eap_auth_failure",
-			"auth_ctx_id", session.AuthCtxId,
+			"auth_ctx_id", session.AuthCtxID,
 			"rounds", session.Rounds,
 		)
 		return response, ResultFailure, nil
@@ -320,7 +326,11 @@ func (e *Engine) handleExchange(ctx context.Context, session *Session, packet *P
 func (e *Engine) handleCompleting(ctx context.Context, session *Session, packet *Packet, rawPayload []byte) ([]byte, EapResult, error) {
 	session.Rounds++
 	session.ExpectedId = packet.Id + 1
-	return e.forwardToAAA(ctx, session, rawPayload)
+	resp, _, err := e.forwardToAAA(ctx, session, rawPayload)
+	if resp == nil {
+		return nil, ResultFailure, fmt.Errorf("aaa client returned nil response")
+	}
+	return resp, ResultContinue, err
 }
 
 // forwardToAAA forwards an EAP message to AAA-S and returns the response.
@@ -330,16 +340,16 @@ func (e *Engine) forwardToAAA(ctx context.Context, session *Session, eapPayload 
 	}
 
 	e.logger.Debug("eap_forward_to_aaa",
-		"auth_ctx_id", session.AuthCtxId,
+		"auth_ctx_id", session.AuthCtxID,
 		"snssai_key", session.SnssaiKey,
 		"method", session.Method,
 		"rounds", session.Rounds,
 	)
 
-	response, err := e.aaaClient.SendEAP(ctx, session.AuthCtxId, eapPayload)
+	response, err := e.aaaClient.SendEAP(ctx, session.AuthCtxID, eapPayload)
 	if err != nil {
 		e.logger.Error("eap_aaa_error",
-			"auth_ctx_id", session.AuthCtxId,
+			"auth_ctx_id", session.AuthCtxID,
 			"error", err,
 		)
 		return nil, ResultFailure, fmt.Errorf("aaa client error: %w", err)
@@ -356,14 +366,13 @@ func (e *Engine) detectEapMethodFromIdentity(data []byte) EapMethod {
 	}
 	// Check for common EAP method prefixes in identity.
 	// This is a simplified heuristic; real implementation may consult AAA config.
-	_ = data
 	return EapMethodTLS // Default to EAP-TLS for enterprise slices.
 }
 
 // DeleteSession removes a session from the manager.
-func (e *Engine) DeleteSession(authCtxId string) {
-	e.sessionManager.delete(authCtxId)
-	e.logger.Debug("eap_session_deleted", "auth_ctx_id", authCtxId)
+func (e *Engine) DeleteSession(authCtxID string) {
+	e.sessionManager.delete(authCtxID)
+	e.logger.Debug("eap_session_deleted", "auth_ctx_id", authCtxID)
 }
 
 // Stats returns engine statistics.

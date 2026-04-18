@@ -12,9 +12,9 @@ import (
 // Metrics holds AAA protocol metrics.
 type Metrics struct {
 	// Counters: protocol → host → result → count
-	requests   map[string]map[string]map[string]int64
-	latencies  map[string]map[string]*atomic.Int64 // sum of latencies in ns
-	counters   map[string]map[string]*atomic.Int64 // request counts
+	requests  map[string]map[string]map[string]int64
+	latencies map[string]map[string]*atomic.Int64 // sum of latencies in ns
+	counters  map[string]map[string]*atomic.Int64 // request counts
 
 	mu sync.RWMutex
 }

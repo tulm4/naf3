@@ -4,6 +4,8 @@ package diameter
 
 import (
 	"encoding/hex"
+	"errors"
+	"fmt"
 
 	"github.com/fiorix/go-diameter/v4/diam"
 	"github.com/fiorix/go-diameter/v4/diam/avp"
@@ -17,25 +19,28 @@ const VendorID3GPP uint32 = 10415
 // Spec: TS 29.571 §5.4.4.60, TS 29.561 §17
 //
 // Format:
-//   3GPP-S-NSSAI ::= <AVP Header: 310, Vendor: 10415>
-//                    { Slice/Service Type }
-//                    [ Slice Differentiator ]
+//
+//	3GPP-S-NSSAI ::= <AVP Header: 310, Vendor: 10415>
+//	                 { Slice/Service Type }
+//	                 [ Slice Differentiator ]
 //
 // AVP Code 310, Vendor 10415, M-bit and V-bit set.
-func EncodeSnssaiAVP(sst uint8, sd string) *diam.AVP {
+// Returns an error if sd is not a valid 6-character hex string.
+func EncodeSnssaiAVP(sst uint8, sd string) (*diam.AVP, error) {
 	sstAVP := diam.NewAVP(259, avp.Mbit|avp.Vbit, VendorID3GPP, datatype.Unsigned32(sst))
 
 	group := &diam.GroupedAVP{AVP: []*diam.AVP{sstAVP}}
 
 	if sd != "" {
-		sdBytes := parseSDToBytes(sd)
-		if sdBytes != nil {
-			sdAVP := diam.NewAVP(260, avp.Mbit|avp.Vbit, VendorID3GPP, datatype.OctetString(sdBytes))
-			group.AVP = append(group.AVP, sdAVP)
+		sdBytes, err := parseSDToBytes(sd)
+		if err != nil {
+			return nil, fmt.Errorf("diameter: invalid SNSSAI SD %q: %w", sd, err)
 		}
+		sdAVP := diam.NewAVP(260, avp.Mbit|avp.Vbit, VendorID3GPP, datatype.OctetString(sdBytes))
+		group.AVP = append(group.AVP, sdAVP)
 	}
 
-	return diam.NewAVP(310, avp.Mbit|avp.Vbit, VendorID3GPP, group)
+	return diam.NewAVP(310, avp.Mbit|avp.Vbit, VendorID3GPP, group), nil
 }
 
 // EncodeEapPayloadAVP encodes an EAP payload as a Diameter AVP.
@@ -52,20 +57,26 @@ func EncodeUserNameAVP(userName string) *diam.AVP {
 	return diam.NewAVP(avp.UserName, avp.Mbit, 0, datatype.UTF8String(userName))
 }
 
-// EncodeSessionIdAVP encodes a session ID.
+// EncodeSessionIDAVP encodes a session ID.
 // AVP Code 263, M-bit set.
-func EncodeSessionIdAVP(sessionId string) *diam.AVP {
-	return diam.NewAVP(avp.SessionID, avp.Mbit, 0, datatype.UTF8String(sessionId))
+func EncodeSessionIDAVP(sessionID string) *diam.AVP {
+	return diam.NewAVP(avp.SessionID, avp.Mbit, 0, datatype.UTF8String(sessionID))
 }
 
+// ErrInvalidSD indicates the Slice Differentiator is not a valid 6-character hex string.
+var ErrInvalidSD = errors.New("SNSSAI SD must be exactly 6 hexadecimal characters")
+
 // parseSDToBytes converts a 6-character hex SD string to 3 bytes.
-func parseSDToBytes(sd string) []byte {
+func parseSDToBytes(sd string) ([]byte, error) {
 	if len(sd) != 6 {
-		return nil
+		return nil, ErrInvalidSD
 	}
 	b, err := hex.DecodeString(sd)
-	if err != nil || len(b) != 3 {
-		return nil
+	if err != nil {
+		return nil, ErrInvalidSD
 	}
-	return b
+	if len(b) != 3 {
+		return nil, ErrInvalidSD
+	}
+	return b, nil
 }

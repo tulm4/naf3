@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/fiorix/go-diameter/v4/diam"
@@ -33,12 +34,14 @@ const (
 
 // Config holds Diameter client configuration.
 type Config struct {
-	OriginHost  string
-	OriginRealm string
+	OriginHost       string
+	OriginRealm      string
+	DestinationHost  string
+	DestinationRealm string
 
 	// Connection
 	ServerAddress string
-	Network      string // "tcp", "sctp", or "tcp+tls"
+	Network       string // "tcp", "sctp", or "tcp+tls"
 
 	// TLS
 	UseTLS  bool
@@ -64,8 +67,11 @@ type Client struct {
 	logger   *slog.Logger
 
 	// Pending requests: hop-by-hop ID → result channel.
-	pending    map[uint32]chan *diam.Message
-	pendingMu  sync.RWMutex
+	pending   map[uint32]chan *diam.Message
+	pendingMu sync.RWMutex
+
+	// Atomic counter for generating unique hop-by-hop IDs.
+	hopByHopSeq uint64
 }
 
 // NewClient creates a new Diameter client.
@@ -149,8 +155,8 @@ func (c *Client) Close() error {
 }
 
 // SendDER sends a Diameter-EAP-Request and waits for a DEA response.
-// Spec: RFC 4072, TS 29.561 §17
-func (c *Client) SendDER(ctx context.Context, sessionId, userName string, eapPayload []byte, sst uint8, sd string) ([]byte, error) {
+// Spec: RFC 4072, RFC 6733 §8.8, TS 29.561 §17
+func (c *Client) SendDER(ctx context.Context, sessionID, userName string, eapPayload []byte, sst uint8, sd string) ([]byte, error) {
 	conn, err := c.getConn()
 	if err != nil {
 		return nil, err
@@ -158,36 +164,68 @@ func (c *Client) SendDER(ctx context.Context, sessionId, userName string, eapPay
 
 	// Create channel for response.
 	respCh := make(chan *diam.Message, 1)
-	hopByHop := c.addPending(hopByHopID(conn), respCh)
+	hopByHop := c.nextHopByHopID()
+	c.addPending(hopByHop, respCh)
 	defer c.removePending(hopByHop)
 
 	// Build DER message.
 	m := diam.NewRequest(CmdDER, AppIDAAP, conn.Dictionary())
 	m.Header.HopByHopID = hopByHop
 
-	m.NewAVP(avp.SessionID, avp.Mbit, 0, datatype.UTF8String(sessionId))
-	m.NewAVP(avp.AuthApplicationID, avp.Mbit, 0, datatype.Unsigned32(AppIDAAP))
-	m.NewAVP(avp.AuthRequestType, avp.Mbit, 0, datatype.Unsigned32(1))
-	m.NewAVP(avp.AuthSessionState, avp.Mbit, 0, datatype.Unsigned32(1))
-	m.NewAVP(avp.OriginHost, avp.Mbit, 0, c.settings.OriginHost)
-	m.NewAVP(avp.OriginRealm, avp.Mbit, 0, c.settings.OriginRealm)
-	m.NewAVP(avp.DestinationHost, avp.Mbit, 0, datatype.DiameterIdentity(c.cfg.OriginHost))
-	m.NewAVP(avp.DestinationRealm, avp.Mbit, 0, c.settings.OriginRealm)
-	m.NewAVP(avp.UserName, avp.Mbit, 0, datatype.UTF8String(userName))
-	m.NewAVP(209, 0, 0, datatype.OctetString(eapPayload)) // EAP-Payload AVP
-	m.AddAVP(EncodeSnssaiAVP(sst, sd))
+	addAVP := func(code interface{}, flags uint8, vendor uint32, data datatype.Type) error {
+		_, err := m.NewAVP(code, flags, vendor, data)
+		return err
+	}
 
-	// Set timeout.
-	deadline, ok := ctx.Deadline()
-	if ok {
-		conn.(interface {
+	if err := addAVP(avp.SessionID, avp.Mbit, 0, datatype.UTF8String(sessionID)); err != nil {
+		return nil, err
+	}
+	if err := addAVP(avp.AuthApplicationID, avp.Mbit, 0, datatype.Unsigned32(AppIDAAP)); err != nil {
+		return nil, err
+	}
+	if err := addAVP(avp.AuthRequestType, avp.Mbit, 0, datatype.Unsigned32(1)); err != nil {
+		return nil, err
+	}
+	if err := addAVP(avp.AuthSessionState, avp.Mbit, 0, datatype.Unsigned32(1)); err != nil {
+		return nil, err
+	}
+	if err := addAVP(avp.OriginHost, avp.Mbit, 0, c.settings.OriginHost); err != nil {
+		return nil, err
+	}
+	if err := addAVP(avp.OriginRealm, avp.Mbit, 0, c.settings.OriginRealm); err != nil {
+		return nil, err
+	}
+	if err := addAVP(avp.OriginStateID, avp.Mbit, 0, datatype.Unsigned32(1)); err != nil {
+		// RFC 6733 §8.8: Origin-State-Type is mandatory.
+		return nil, err
+	}
+	if err := addAVP(avp.DestinationHost, avp.Mbit, 0, datatype.DiameterIdentity(c.cfg.DestinationHost)); err != nil {
+		return nil, err
+	}
+	if err := addAVP(avp.DestinationRealm, avp.Mbit, 0, datatype.DiameterIdentity(c.cfg.DestinationRealm)); err != nil {
+		return nil, err
+	}
+	if err := addAVP(avp.UserName, avp.Mbit, 0, datatype.UTF8String(userName)); err != nil {
+		return nil, err
+	}
+	if err := addAVP(209, 0, 0, datatype.OctetString(eapPayload)); err != nil {
+		return nil, err
+	}
+	snssaiAVP, err := EncodeSnssaiAVP(sst, sd)
+	if err != nil {
+		return nil, fmt.Errorf("diameter: failed to encode SNSSAI AVP: %w", err)
+	}
+	m.AddAVP(snssaiAVP)
+
+	// Set deadline on the connection.
+	if deadline, ok := ctx.Deadline(); ok {
+		if dc, ok := conn.(interface {
 			SetWriteDeadline(t time.Time) error
 			SetReadDeadline(t time.Time) error
-		}).SetWriteDeadline(deadline)
-		conn.(interface {
-			SetWriteDeadline(t time.Time) error
-			SetReadDeadline(t time.Time) error
-		}).SetReadDeadline(deadline)
+		}); ok {
+			_ = dc.SetWriteDeadline(deadline)
+			_ = dc.SetReadDeadline(deadline)
+		}
 	}
 
 	_, err = m.WriteTo(conn)
@@ -197,7 +235,7 @@ func (c *Client) SendDER(ctx context.Context, sessionId, userName string, eapPay
 	}
 
 	c.logger.Debug("diameter_der_sent",
-		"session_id", sessionId,
+		"session_id", sessionID,
 		"hop_by_hop", hopByHop,
 		"eap_len", len(eapPayload),
 	)
@@ -208,9 +246,6 @@ func (c *Client) SendDER(ctx context.Context, sessionId, userName string, eapPay
 		c.removePending(hopByHop)
 		return nil, ctx.Err()
 	case resp := <-respCh:
-		if resp == nil {
-			return nil, fmt.Errorf("diameter: DEA response was nil")
-		}
 		// Serialize to bytes for caller.
 		data, err := resp.Serialize()
 		if err != nil {
@@ -257,10 +292,9 @@ func (c *Client) getConn() (diam.Conn, error) {
 	return conn, nil
 }
 
-// hopByHopID returns the next hop-by-hop ID for the connection.
-// Uses a simple counter for uniqueness.
-func hopByHopID(conn diam.Conn) uint32 {
-	return uint32(time.Now().UnixNano() & 0xFFFFFFFF)
+// nextHopByHopID returns the next unique hop-by-hop ID using an atomic counter.
+func (c *Client) nextHopByHopID() uint32 {
+	return uint32(atomic.AddUint64(&c.hopByHopSeq, 1))
 }
 
 // addPending registers a pending request and returns the hop-by-hop ID.

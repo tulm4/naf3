@@ -26,16 +26,16 @@ import (
 
 // mockTransport implements the Client interface for testing.
 type mockTransport struct {
-	mu       sync.Mutex
+	mu        sync.Mutex
 	responses map[string][]byte // server address → response
-	sendLog  []sendEntry
-	calls    int
-	closed   bool
+	sendLog   []sendEntry
+	calls     int
+	closed    bool
 }
 
 type sendEntry struct {
-	Packet   []byte
-	Server   string
+	Packet []byte
+	Server string
 }
 
 func newMockTransport() *mockTransport {
@@ -96,7 +96,7 @@ func TestClientRadiusClientDefaults(t *testing.T) {
 	logger := slog.Default()
 
 	// Create client directly with mock transport.
-	c := &RadiusClient{
+	c := &Client{
 		config: Config{
 			ServerAddress:  "127.0.0.1",
 			ServerPort:     1812,
@@ -106,7 +106,7 @@ func TestClientRadiusClientDefaults(t *testing.T) {
 			ResponseWindow: 10 * time.Second,
 		},
 		transport: newMockTransport(),
-		logger:   logger,
+		logger:    logger,
 	}
 
 	assert.NotNil(t, c)
@@ -150,6 +150,80 @@ func TestVerifyMessageAuthenticator(t *testing.T) {
 	// Wrong secret.
 	ok = VerifyMessageAuthenticator(raw, "wrong-secret")
 	assert.False(t, ok)
+}
+
+// Regression: VerifyMessageAuthenticator must not panic on a truncated MA attribute.
+// Previously it sliced from offset (instead of offset+2) and skipped 2 bytes
+// from the received value, masking the bug. The correct code slices from
+// offset+2 and compares directly.
+func TestVerifyMessageAuthenticatorTruncatedPacket(t *testing.T) {
+	auth := [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	packet := BuildAccessRequest(1, auth, []Attribute{
+		MakeStringAttribute(AttrUserName, "user"),
+	})
+	raw := packet.Encode()
+	raw = AddMessageAuthenticator(raw, "secret")
+
+	// Truncate the packet so the MA value is cut short.
+	// The MA attribute header (type=80, len=18) is at offset≥20, but the 16-byte
+	// value is partially outside the buffer. Must not panic.
+	truncated := raw[:len(raw)-8]
+	assert.NotPanics(t, func() {
+		ok := VerifyMessageAuthenticator(truncated, "secret")
+		// Should safely return false.
+		assert.False(t, ok)
+	})
+}
+
+// Regression: VerifyMessageAuthenticator must return false (not panic) when
+// a malformed MA attribute has type=80 and len=18 but is positioned near
+// the end of the packet with fewer than 18 bytes remaining.
+func TestVerifyMessageAuthenticatorMalformedNearEnd(t *testing.T) {
+	// Build a valid Access-Request with a User-Name attribute.
+	auth := [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	packet := BuildAccessRequest(1, auth, []Attribute{
+		MakeStringAttribute(AttrUserName, "test"),
+	})
+	raw := packet.Encode()
+
+	// Manually append a MA-like attribute at the very end, claiming length=18
+	// but without enough bytes to back it up. This would previously cause
+	// VerifyMessageAuthenticator to panic on slice bounds.
+	malformed := append(raw, AttrMessageAuthenticator, 18)
+
+	assert.NotPanics(t, func() {
+		ok := VerifyMessageAuthenticator(malformed, "secret")
+		assert.False(t, ok)
+	})
+}
+
+// Regression: ParsePrivateKey must accept PKCS8-encoded keys (the default format
+// produced by most tools). Previously it only handled PKCS1.
+func TestParsePrivateKeyPKCS8(t *testing.T) {
+	key, err := generateRSAPrivateKey(2048)
+	require.NoError(t, err)
+
+	// Encode as PKCS8.
+	pkcs8Bytes, err := encodePKCS8(key)
+	require.NoError(t, err)
+
+	pemData := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: pkcs8Bytes})
+	parsed, err := ParsePrivateKey(pemData)
+	assert.NoError(t, err)
+	assert.NotNil(t, parsed)
+}
+
+// Regression: ParsePrivateKey must fall back to PKCS1 when PKCS8 fails.
+func TestParsePrivateKeyPKCS1Fallback(t *testing.T) {
+	key, err := generateRSAPrivateKey(2048)
+	require.NoError(t, err)
+
+	pkcs1Bytes := x509.MarshalPKCS1PrivateKey(key)
+	pemData := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: pkcs1Bytes})
+
+	parsed, err := ParsePrivateKey(pemData)
+	assert.NoError(t, err)
+	assert.NotNil(t, parsed)
 }
 
 func TestAddMessageAuthenticator(t *testing.T) {
@@ -370,7 +444,7 @@ func TestClientRadiusClientConstruction(t *testing.T) {
 	logger := slog.Default()
 
 	// Create client directly with mock transport.
-	c := &RadiusClient{
+	c := &Client{
 		config: Config{
 			ServerAddress:  "127.0.0.1",
 			ServerPort:     1812,
@@ -380,7 +454,7 @@ func TestClientRadiusClientConstruction(t *testing.T) {
 			ResponseWindow: 10 * time.Second,
 		},
 		transport: newMockTransport(),
-		logger:   logger,
+		logger:    logger,
 	}
 
 	assert.NotNil(t, c)
@@ -569,10 +643,19 @@ func generateRSAPrivateKey(bits int) (*rsa.PrivateKey, error) {
 func generateSelfSignedCert(key *rsa.PrivateKey) ([]byte, error) {
 	template := x509.Certificate{
 		SerialNumber: big.NewInt(1),
-		Subject: pkix.Name{CommonName: "test"},
-		NotBefore: time.Now(),
-		NotAfter:  time.Now().Add(time.Hour),
-		KeyUsage:  x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		Subject:      pkix.Name{CommonName: "test"},
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
 	}
 	return x509.CreateCertificate(rand.Reader, &template, &template, &key.PublicKey, key)
+}
+
+// encodePKCS8 encodes an RSA private key in PKCS8 format.
+func encodePKCS8(key *rsa.PrivateKey) ([]byte, error) {
+	pkcs8, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		return nil, err
+	}
+	return pkcs8, nil
 }

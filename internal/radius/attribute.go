@@ -12,63 +12,63 @@ import (
 const (
 	AttrUserName             = 1  // RFC 2865 §5.1
 	AttrUserPassword         = 2  // RFC 2865 §5.2
-	AttrNASIPAddress        = 4  // RFC 2865 §5.4
-	AttrNASPort             = 5  // RFC 2865 §5.5
-	AttrServiceType         = 6  // RFC 2865 §5.6
-	AttrReplyMessage        = 18 // RFC 2865 §5.3
-	AttrState               = 24 // RFC 2865 §5.24
-	AttrVendorSpecific      = 26 // RFC 2865 §5.26
-	AttrCalledStationId     = 30 // RFC 2865 §5.3
-	AttrCallingStationId    = 31 // RFC 2865 §5.3
-	AttrNASIdentifier       = 32 // RFC 2865 §5.3
-	AttrAcctSessionId       = 44 // RFC 2865 §5.3
-	AttrAcctStatusType      = 40 // RFC 2865 §5.3
-	AttrNASPortType         = 61 // RFC 2865 §5.5
-	AttrEAPMessage          = 79 // RFC 3579 §3.2
+	AttrNASIPAddress         = 4  // RFC 2865 §5.4
+	AttrNASPort              = 5  // RFC 2865 §5.5
+	AttrServiceType          = 6  // RFC 2865 §5.6
+	AttrReplyMessage         = 18 // RFC 2865 §5.3
+	AttrState                = 24 // RFC 2865 §5.24
+	AttrVendorSpecific       = 26 // RFC 2865 §5.26
+	AttrCalledStationID      = 30 // RFC 2865 §5.3
+	AttrCallingStationID     = 31 // RFC 2865 §5.3
+	AttrNASIdentifier        = 32 // RFC 2865 §5.3
+	AttrAcctSessionID        = 44 // RFC 2865 §5.3
+	AttrAcctStatusType       = 40 // RFC 2865 §5.3
+	AttrNASPortType          = 61 // RFC 2865 §5.5
+	AttrEAPMessage           = 79 // RFC 3579 §3.2
 	AttrMessageAuthenticator = 80 // RFC 3579 §3.2
-	AttrNASFeature          = 35 // 3GPP
+	AttrNASFeature           = 35 // 3GPP
 )
 
 // Service-Type values relevant to NSSAAF.
 const (
-	ServiceTypeLogin          = 1
-	ServiceTypeFramed         = 2
-	ServiceTypeCallCheck      = 10
-	ServiceTypeCallbackLogin  = 3
-	ServiceTypeCallbackFramed = 4
-	ServiceTypeOutbound       = 5
-	ServiceTypeAdministrative = 6
-	ServiceTypeNASPrompt      = 7
-	ServiceTypeAuthenticateOnly = 8
+	ServiceTypeLogin             = 1
+	ServiceTypeFramed            = 2
+	ServiceTypeCallCheck         = 10
+	ServiceTypeCallbackLogin     = 3
+	ServiceTypeCallbackFramed    = 4
+	ServiceTypeOutbound          = 5
+	ServiceTypeAdministrative    = 6
+	ServiceTypeNASPrompt         = 7
+	ServiceTypeAuthenticateOnly  = 8
 	ServiceTypeCallbackNASPrompt = 9
 	ServiceTypeCallAuthorization = 11 // 3GPP NSSAA
-	ServiceTypeVoice           = 12
-	ServiceTypeFax            = 13
-	ServiceTypeModemRelay     = 14
-	ServiceTypeIAPP           = 15
-	ServiceTypeHostLogin      = 17
+	ServiceTypeVoice             = 12
+	ServiceTypeFax               = 13
+	ServiceTypeModemRelay        = 14
+	ServiceTypeIAPP              = 15
+	ServiceTypeHostLogin         = 17
 )
 
 // NAS-Port-Type values.
 const (
-	NASPortTypeAsync     = 0
-	NASPortTypeSync      = 1
-	NASPortTypeISDN      = 2
-	NASPortTypeISDN_V120 = 3
-	NASPortTypeISDN_V110 = 4
-	NASPortTypeVirtual   = 5
-	NASPortTypePIAFS     = 6
-	NASPortTypeHDLC_Clear = 7
-	NASPortTypeSerial_Clear = 8
-	NASPortTypeFrame      = 9
-	NASPortTypeGPRS_PDP  = 14
-	NASPortTypeEPS      = 16
-	NASPortTypeVirtual_  = 19 // Virtual (used by NSSAAF)
+	NASPortTypeAsync       = 0
+	NASPortTypeSync        = 1
+	NASPortTypeISDN        = 2
+	NASPortTypeISDNV120    = 3
+	NASPortTypeISDNV110    = 4
+	NASPortTypeVirtual     = 5
+	NASPortTypePIAFS       = 6
+	NASPortTypeHDLCClear   = 7
+	NASPortTypeSerialClear = 8
+	NASPortTypeFrame       = 9
+	NASPortTypeGPRSPDP     = 14
+	NASPortTypeEPS         = 16
+	NASPortTypeVirtual     = 19 // Virtual (used by NSSAAF)
 )
 
 // Attribute types for NSSAA.
 const (
-	Attr3GPP_SNSSAI = 200 // 3GPP Vendor-Specific: S-NSSAI
+	Attr3GPPSNSSAI = 200 // 3GPP Vendor-Specific: S-NSSAI
 )
 
 // DecodeAttributes decodes all attributes from raw data.

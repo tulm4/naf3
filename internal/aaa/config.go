@@ -10,7 +10,7 @@ import (
 
 // Default port numbers.
 const (
-	DefaultRadiusPort    = 1812
+	DefaultRadiusPort   = 1812
 	DefaultDiameterPort = 3868
 )
 
@@ -60,9 +60,9 @@ func (c *Config) AddServer(sst uint8, sd, host string, port int, protocol Protoc
 	key := fmt.Sprintf("%d:%s", sst, sd)
 	c.Snssai[key] = &ServerConfig{
 		Protocol: protocol,
-		Host:    host,
-		Port:    port,
-		Timeout: 10 * time.Second,
+		Host:     host,
+		Port:     port,
+		Timeout:  10 * time.Second,
 	}
 }
 
@@ -89,7 +89,7 @@ func (c *Config) Lookup(sst uint8, sd string) *ServerConfig {
 func DefaultServerConfig() *ServerConfig {
 	return &ServerConfig{
 		Protocol: ProtocolRADIUS,
-		Port:    DefaultRadiusPort,
-		Timeout: 10 * time.Second,
+		Port:     DefaultRadiusPort,
+		Timeout:  10 * time.Second,
 	}
 }

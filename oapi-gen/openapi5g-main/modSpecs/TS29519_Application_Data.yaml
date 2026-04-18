@@ -1,0 +1,1645 @@
+# This is generated file.
+
+components: {}
+externalDocs:
+    description: 3GPP TS 29.519 V16.10.0; 5G System; Usage of the Unified Data Repository Service for Policy Data, Application Data and Structured Data for Exposure.
+    url: http://www.3gpp.org/ftp/Specs/archive/29_series/29.519/
+info:
+    description: |
+        The API version is defined in 3GPP TS 29.504
+        © 2022, 3GPP Organizational Partners (ARIB, ATIS, CCSA, ETSI, TSDSI, TTA, TTC).
+        All rights reserved.
+    title: Unified Data Repository Service API file for Application Data
+    version: '-'
+openapi: 3.0.0
+paths:
+    /application-data/bdtPolicyData:
+        get:
+            operationId: ReadBdtPolicyData
+            parameters:
+                - description: Each element identifies a service.
+                  in: query
+                  name: bdt-policy-ids
+                  required: false
+                  schema:
+                    items:
+                        type: string
+                    minItems: 1
+                    type: array
+                    x-go-type-skip-optional-pointer: true
+                - description: Each element identifies a group of users.
+                  in: query
+                  name: internal-group-ids
+                  required: false
+                  schema:
+                    items:
+                        $ref: TS29571_CommonData.yaml#/components/schemas/GroupId
+                    minItems: 1
+                    type: array
+                    x-go-type-skip-optional-pointer: true
+                - description: Each element identifies the user.
+                  in: query
+                  name: supis
+                  required: false
+                  schema:
+                    items:
+                        $ref: TS29571_CommonData.yaml#/components/schemas/Supi
+                    minItems: 1
+                    type: array
+                    x-go-type-skip-optional-pointer: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                items:
+                                    $ref: TS29571_CommonData.yaml#/components/schemas/BdtPolicyData
+                                type: array
+                    description: The applied BDT policy Data stored in the UDR are returned.
+                "400":
+                    $ref: TS29571_CommonData.yaml#/components/responses/400
+                "401":
+                    $ref: TS29571_CommonData.yaml#/components/responses/401
+                "403":
+                    $ref: TS29571_CommonData.yaml#/components/responses/403
+                "404":
+                    $ref: TS29571_CommonData.yaml#/components/responses/404
+                "406":
+                    $ref: TS29571_CommonData.yaml#/components/responses/406
+                "414":
+                    $ref: TS29571_CommonData.yaml#/components/responses/414
+                "429":
+                    $ref: TS29571_CommonData.yaml#/components/responses/429
+                "500":
+                    $ref: TS29571_CommonData.yaml#/components/responses/500
+                "503":
+                    $ref: TS29571_CommonData.yaml#/components/responses/503
+                default:
+                    $ref: TS29571_CommonData.yaml#/components/responses/default
+            summary: Retrieve applied BDT Policy Data
+            tags:
+                - BdtPolicy Data (Store)
+    /application-data/bdtPolicyData/{bdtPolicyId}:
+        put:
+            operationId: CreateIndividualAppliedBdtPolicyData
+            parameters:
+                - description: The Identifier of an Individual Applied BDT Policy Data to be created or updated. It shall apply the format of Data type string.
+                  in: path
+                  name: bdtPolicyId
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: TS29571_CommonData.yaml#/components/schemas/BdtPolicyData
+                required: true
+            responses:
+                "201":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: TS29571_CommonData.yaml#/components/schemas/BdtPolicyData
+                    description: The creation of an Individual Applied BDT Policy Data resource is confirmed and a representation of that resource is returned.
+                    headers:
+                        Location:
+                            description: 'Contains the URI of the newly created resource, according to the structure: {apiRoot}/nudr-dr/<apiVersion>/application-data/bdtPolicyData/{bdtPolicyId}'
+                            required: true
+                            schema:
+                                type: string
+                "400":
+                    $ref: TS29571_CommonData.yaml#/components/responses/400
+                "401":
+                    $ref: TS29571_CommonData.yaml#/components/responses/401
+                "403":
+                    $ref: TS29571_CommonData.yaml#/components/responses/403
+                "404":
+                    $ref: TS29571_CommonData.yaml#/components/responses/404
+                "411":
+                    $ref: TS29571_CommonData.yaml#/components/responses/411
+                "413":
+                    $ref: TS29571_CommonData.yaml#/components/responses/413
+                "414":
+                    $ref: TS29571_CommonData.yaml#/components/responses/414
+                "415":
+                    $ref: TS29571_CommonData.yaml#/components/responses/415
+                "429":
+                    $ref: TS29571_CommonData.yaml#/components/responses/429
+                "500":
+                    $ref: TS29571_CommonData.yaml#/components/responses/500
+                "503":
+                    $ref: TS29571_CommonData.yaml#/components/responses/503
+                default:
+                    $ref: TS29571_CommonData.yaml#/components/responses/default
+            summary: Create an individual applied BDT Policy Data resource
+            tags:
+                - Individual Applied BDT Policy Data (Document)
+        delete:
+            operationId: DeleteIndividualAppliedBdtPolicyData
+            parameters:
+                - description: The Identifier of an Individual Applied BDT Policy Data to be updated. It shall apply the format of Data type string.
+                  in: path
+                  name: bdtPolicyId
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "204":
+                    description: The Individual Applied BDT Policy Data was deleted successfully.
+                "400":
+                    $ref: TS29571_CommonData.yaml#/components/responses/400
+                "401":
+                    $ref: TS29571_CommonData.yaml#/components/responses/401
+                "403":
+                    $ref: TS29571_CommonData.yaml#/components/responses/403
+                "404":
+                    $ref: TS29571_CommonData.yaml#/components/responses/404
+                "429":
+                    $ref: TS29571_CommonData.yaml#/components/responses/429
+                "500":
+                    $ref: TS29571_CommonData.yaml#/components/responses/500
+                "503":
+                    $ref: TS29571_CommonData.yaml#/components/responses/503
+                default:
+                    $ref: TS29571_CommonData.yaml#/components/responses/default
+            summary: Delete an individual Applied BDT Policy Data resource
+            tags:
+                - Individual Applied BDT Policy Data (Document)
+        patch:
+            operationId: UpdateIndividualAppliedBdtPolicyData
+            parameters:
+                - description: The Identifier of an Individual Applied BDT Policy Data to be updated. It shall apply the format of Data type string.
+                  in: path
+                  name: bdtPolicyId
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/merge-patch+json:
+                        schema:
+                            $ref: TS29571_CommonData.yaml#/components/schemas/BdtPolicyDataPatch
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: TS29571_CommonData.yaml#/components/schemas/BdtPolicyData
+                    description: The update of an Individual Applied BDT Policy Data resource is confirmed and a response body containing Applied BDT Policy Data shall be returned.
+                "204":
+                    description: No content
+                "400":
+                    $ref: TS29571_CommonData.yaml#/components/responses/400
+                "401":
+                    $ref: TS29571_CommonData.yaml#/components/responses/401
+                "403":
+                    $ref: TS29571_CommonData.yaml#/components/responses/403
+                "404":
+                    $ref: TS29571_CommonData.yaml#/components/responses/404
+                "411":
+                    $ref: TS29571_CommonData.yaml#/components/responses/411
+                "413":
+                    $ref: TS29571_CommonData.yaml#/components/responses/413
+                "415":
+                    $ref: TS29571_CommonData.yaml#/components/responses/415
+                "429":
+                    $ref: TS29571_CommonData.yaml#/components/responses/429
+                "500":
+                    $ref: TS29571_CommonData.yaml#/components/responses/500
+                "503":
+                    $ref: TS29571_CommonData.yaml#/components/responses/503
+                default:
+                    $ref: TS29571_CommonData.yaml#/components/responses/default
+            summary: Modify part of the properties of an individual Applied BDT Policy Data resource
+            tags:
+                - Individual Applied BDT Policy Data (Document)
+    /application-data/influenceData:
+        get:
+            operationId: ReadInfluenceData
+            parameters:
+                - description: Each element identifies a service.
+                  in: query
+                  name: influence-Ids
+                  required: false
+                  schema:
+                    items:
+                        type: string
+                    minItems: 1
+                    type: array
+                    x-go-type-skip-optional-pointer: true
+                - description: Each element identifies a DNN.
+                  in: query
+                  name: dnns
+                  required: false
+                  schema:
+                    items:
+                        $ref: TS29571_CommonData.yaml#/components/schemas/Dnn
+                    minItems: 1
+                    type: array
+                    x-go-type-skip-optional-pointer: true
+                - content:
+                    application/json:
+                        schema:
+                            items:
+                                $ref: TS29571_CommonData.yaml#/components/schemas/Snssai
+                            minItems: 1
+                            type: array
+                            x-go-type-skip-optional-pointer: true
+                  description: Each element identifies a slice.
+                  in: query
+                  name: snssais
+                  required: false
+                - description: Each element identifies a group of users.
+                  in: query
+                  name: internal-Group-Ids
+                  required: false
+                  schema:
+                    items:
+                        $ref: TS29571_CommonData.yaml#/components/schemas/GroupId
+                    minItems: 1
+                    type: array
+                    x-go-type-skip-optional-pointer: true
+                - description: Each element identifies the user.
+                  in: query
+                  name: supis
+                  required: false
+                  schema:
+                    items:
+                        $ref: TS29571_CommonData.yaml#/components/schemas/Supi
+                    minItems: 1
+                    type: array
+                    x-go-type-skip-optional-pointer: true
+                - description: Supported Features
+                  in: query
+                  name: supp-feat
+                  required: false
+                  schema:
+                    $ref: TS29571_CommonData.yaml#/components/schemas/SupportedFeatures
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                items:
+                                    $ref: TS29571_CommonData.yaml#/components/schemas/TrafficInfluData
+                                type: array
+                    description: The Traffic Influence Data stored in the UDR are returned.
+                "400":
+                    $ref: TS29571_CommonData.yaml#/components/responses/400
+                "401":
+                    $ref: TS29571_CommonData.yaml#/components/responses/401
+                "403":
+                    $ref: TS29571_CommonData.yaml#/components/responses/403
+                "404":
+                    $ref: TS29571_CommonData.yaml#/components/responses/404
+                "406":
+                    $ref: TS29571_CommonData.yaml#/components/responses/406
+                "414":
+                    $ref: TS29571_CommonData.yaml#/components/responses/414
+                "429":
+                    $ref: TS29571_CommonData.yaml#/components/responses/429
+                "500":
+                    $ref: TS29571_CommonData.yaml#/components/responses/500
+                "503":
+                    $ref: TS29571_CommonData.yaml#/components/responses/503
+                default:
+                    $ref: TS29571_CommonData.yaml#/components/responses/default
+            summary: Retrieve Traffic Influence Data
+            tags:
+                - Influence Data (Store)
+    /application-data/influenceData/{influenceId}:
+        put:
+            operationId: CreateOrReplaceIndividualInfluenceData
+            parameters:
+                - description: The Identifier of an Individual Influence Data to be created or updated. It shall apply the format of Data type string.
+                  in: path
+                  name: influenceId
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: TS29571_CommonData.yaml#/components/schemas/TrafficInfluData
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: TS29571_CommonData.yaml#/components/schemas/TrafficInfluData
+                    description: The update of an Individual Traffic Influence Data resource is confirmed and a response body containing Traffic Influence Data shall be returned.
+                "201":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: TS29571_CommonData.yaml#/components/schemas/TrafficInfluData
+                    description: The creation of an Individual Traffic Influence Data resource is confirmed and a representation of that resource is returned.
+                    headers:
+                        Location:
+                            description: 'Contains the URI of the newly created resource, according to the structure: {apiRoot}/nudr-dr/<apiVersion>/application-data/influenceData/{influenceId}'
+                            required: true
+                            schema:
+                                type: string
+                "204":
+                    description: No content
+                "400":
+                    $ref: TS29571_CommonData.yaml#/components/responses/400
+                "401":
+                    $ref: TS29571_CommonData.yaml#/components/responses/401
+                "403":
+                    $ref: TS29571_CommonData.yaml#/components/responses/403
+                "404":
+                    $ref: TS29571_CommonData.yaml#/components/responses/404
+                "411":
+                    $ref: TS29571_CommonData.yaml#/components/responses/411
+                "413":
+                    $ref: TS29571_CommonData.yaml#/components/responses/413
+                "414":
+                    $ref: TS29571_CommonData.yaml#/components/responses/414
+                "415":
+                    $ref: TS29571_CommonData.yaml#/components/responses/415
+                "429":
+                    $ref: TS29571_CommonData.yaml#/components/responses/429
+                "500":
+                    $ref: TS29571_CommonData.yaml#/components/responses/500
+                "503":
+                    $ref: TS29571_CommonData.yaml#/components/responses/503
+                default:
+                    $ref: TS29571_CommonData.yaml#/components/responses/default
+            summary: Create or update an individual Influence Data resource
+            tags:
+                - Individual Influence Data (Document)
+        delete:
+            operationId: DeleteIndividualInfluenceData
+            parameters:
+                - description: The Identifier of an Individual Influence Data to be updated. It shall apply the format of Data type string.
+                  in: path
+                  name: influenceId
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "204":
+                    description: The Individual Influence Data was deleted successfully.
+                "400":
+                    $ref: TS29571_CommonData.yaml#/components/responses/400
+                "401":
+                    $ref: TS29571_CommonData.yaml#/components/responses/401
+                "403":
+                    $ref: TS29571_CommonData.yaml#/components/responses/403
+                "404":
+                    $ref: TS29571_CommonData.yaml#/components/responses/404
+                "429":
+                    $ref: TS29571_CommonData.yaml#/components/responses/429
+                "500":
+                    $ref: TS29571_CommonData.yaml#/components/responses/500
+                "503":
+                    $ref: TS29571_CommonData.yaml#/components/responses/503
+                default:
+                    $ref: TS29571_CommonData.yaml#/components/responses/default
+            summary: Delete an individual Influence Data resource
+            tags:
+                - Individual Influence Data (Document)
+        patch:
+            operationId: UpdateIndividualInfluenceData
+            parameters:
+                - description: The Identifier of an Individual Influence Data to be updated. It shall apply the format of Data type string.
+                  in: path
+                  name: influenceId
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/merge-patch+json:
+                        schema:
+                            $ref: TS29571_CommonData.yaml#/components/schemas/TrafficInfluDataPatch
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: TS29571_CommonData.yaml#/components/schemas/TrafficInfluData
+                    description: The update of an Individual Traffic Influence Data resource is confirmed and a response body containing Traffic Influence Data shall be returned.
+                "204":
+                    description: No content
+                "400":
+                    $ref: TS29571_CommonData.yaml#/components/responses/400
+                "401":
+                    $ref: TS29571_CommonData.yaml#/components/responses/401
+                "403":
+                    $ref: TS29571_CommonData.yaml#/components/responses/403
+                "404":
+                    $ref: TS29571_CommonData.yaml#/components/responses/404
+                "411":
+                    $ref: TS29571_CommonData.yaml#/components/responses/411
+                "413":
+                    $ref: TS29571_CommonData.yaml#/components/responses/413
+                "415":
+                    $ref: TS29571_CommonData.yaml#/components/responses/415
+                "429":
+                    $ref: TS29571_CommonData.yaml#/components/responses/429
+                "500":
+                    $ref: TS29571_CommonData.yaml#/components/responses/500
+                "503":
+                    $ref: TS29571_CommonData.yaml#/components/responses/503
+                default:
+                    $ref: TS29571_CommonData.yaml#/components/responses/default
+            summary: Modify part of the properties of an individual Influence Data resource
+            tags:
+                - Individual Influence Data (Document)
+    /application-data/influenceData/subs-to-notify:
+        get:
+            operationId: ReadInfluenceDataSubscriptions
+            parameters:
+                - description: Identifies a DNN.
+                  in: query
+                  name: dnn
+                  required: false
+                  schema:
+                    $ref: TS29571_CommonData.yaml#/components/schemas/Dnn
+                - content:
+                    application/json:
+                        schema:
+                            $ref: TS29571_CommonData.yaml#/components/schemas/Snssai
+                  description: Identifies a slice.
+                  in: query
+                  name: snssai
+                  required: false
+                - description: Identifies a group of users.
+                  in: query
+                  name: internal-Group-Id
+                  required: false
+                  schema:
+                    $ref: TS29571_CommonData.yaml#/components/schemas/GroupId
+                - description: Identifies a user.
+                  in: query
+                  name: supi
+                  required: false
+                  schema:
+                    $ref: TS29571_CommonData.yaml#/components/schemas/Supi
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                items:
+                                    $ref: TS29571_CommonData.yaml#/components/schemas/TrafficInfluSub
+                                minItems: 0
+                                type: array
+                    description: The subscription information as request in the request URI query parameter(s) are returned.
+                "400":
+                    $ref: TS29571_CommonData.yaml#/components/responses/400
+                "401":
+                    $ref: TS29571_CommonData.yaml#/components/responses/401
+                "403":
+                    $ref: TS29571_CommonData.yaml#/components/responses/403
+                "404":
+                    $ref: TS29571_CommonData.yaml#/components/responses/404
+                "406":
+                    $ref: TS29571_CommonData.yaml#/components/responses/406
+                "414":
+                    $ref: TS29571_CommonData.yaml#/components/responses/414
+                "429":
+                    $ref: TS29571_CommonData.yaml#/components/responses/429
+                "500":
+                    $ref: TS29571_CommonData.yaml#/components/responses/500
+                "503":
+                    $ref: TS29571_CommonData.yaml#/components/responses/503
+                default:
+                    $ref: TS29571_CommonData.yaml#/components/responses/default
+            summary: Read Influence Data Subscriptions
+            tags:
+                - Influence Data Subscriptions (Collection)
+        post:
+            callbacks:
+                trafficInfluenceDataChangeNotification:
+                    '{$request.body#/notificationUri}':
+                        post:
+                            requestBody:
+                                content:
+                                    application/json:
+                                        schema:
+                                            items:
+                                                oneOf:
+                                                    - $ref: TS29571_CommonData.yaml#/components/schemas/TrafficInfluData
+                                                    - $ref: TS29571_CommonData.yaml#/components/schemas/TrafficInfluDataNotif
+                                            minItems: 1
+                                            type: array
+                                            x-go-type-skip-optional-pointer: true
+                                required: true
+                            responses:
+                                "204":
+                                    description: No Content, Notification was successful
+                                "400":
+                                    $ref: TS29571_CommonData.yaml#/components/responses/400
+                                "403":
+                                    $ref: TS29122_CommonData.yaml#/components/responses/403
+                                "404":
+                                    $ref: TS29122_CommonData.yaml#/components/responses/404
+                                "411":
+                                    $ref: TS29571_CommonData.yaml#/components/responses/411
+                                "413":
+                                    $ref: TS29571_CommonData.yaml#/components/responses/413
+                                "415":
+                                    $ref: TS29571_CommonData.yaml#/components/responses/415
+                                "429":
+                                    $ref: TS29571_CommonData.yaml#/components/responses/429
+                                "500":
+                                    $ref: TS29571_CommonData.yaml#/components/responses/500
+                                "503":
+                                    $ref: TS29571_CommonData.yaml#/components/responses/503
+                                default:
+                                    $ref: TS29571_CommonData.yaml#/components/responses/default
+            operationId: CreateIndividualInfluenceDataSubscription
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: TS29571_CommonData.yaml#/components/schemas/TrafficInfluSub
+                required: true
+            responses:
+                "201":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: TS29571_CommonData.yaml#/components/schemas/TrafficInfluSub
+                    description: The subscription was created successfully.
+                    headers:
+                        Location:
+                            description: Contains the URI of the newly created resource
+                            required: true
+                            schema:
+                                type: string
+                "400":
+                    $ref: TS29571_CommonData.yaml#/components/responses/400
+                "401":
+                    $ref: TS29571_CommonData.yaml#/components/responses/401
+                "403":
+                    $ref: TS29571_CommonData.yaml#/components/responses/403
+                "404":
+                    $ref: TS29571_CommonData.yaml#/components/responses/404
+                "411":
+                    $ref: TS29571_CommonData.yaml#/components/responses/411
+                "413":
+                    $ref: TS29571_CommonData.yaml#/components/responses/413
+                "415":
+                    $ref: TS29571_CommonData.yaml#/components/responses/415
+                "429":
+                    $ref: TS29571_CommonData.yaml#/components/responses/429
+                "500":
+                    $ref: TS29571_CommonData.yaml#/components/responses/500
+                "503":
+                    $ref: TS29571_CommonData.yaml#/components/responses/503
+                default:
+                    $ref: TS29571_CommonData.yaml#/components/responses/default
+            summary: Create a new Individual Influence Data Subscription resource
+            tags:
+                - Influence Data Subscriptions (Collection)
+    /application-data/influenceData/subs-to-notify/{subscriptionId}:
+        get:
+            operationId: ReadIndividualInfluenceDataSubscription
+            parameters:
+                - description: String identifying a subscription to the Individual Influence Data Subscription
+                  in: path
+                  name: subscriptionId
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: TS29571_CommonData.yaml#/components/schemas/TrafficInfluSub
+                    description: The subscription information is returned.
+                "400":
+                    $ref: TS29571_CommonData.yaml#/components/responses/400
+                "401":
+                    $ref: TS29571_CommonData.yaml#/components/responses/401
+                "403":
+                    $ref: TS29571_CommonData.yaml#/components/responses/403
+                "404":
+                    $ref: TS29571_CommonData.yaml#/components/responses/404
+                "406":
+                    $ref: TS29571_CommonData.yaml#/components/responses/406
+                "414":
+                    $ref: TS29571_CommonData.yaml#/components/responses/414
+                "429":
+                    $ref: TS29571_CommonData.yaml#/components/responses/429
+                "500":
+                    $ref: TS29571_CommonData.yaml#/components/responses/500
+                "503":
+                    $ref: TS29571_CommonData.yaml#/components/responses/503
+                default:
+                    $ref: TS29571_CommonData.yaml#/components/responses/default
+            summary: Get an existing individual Influence Data Subscription resource
+            tags:
+                - Individual Influence Data Subscription (Document)
+        put:
+            operationId: ReplaceIndividualInfluenceDataSubscription
+            parameters:
+                - description: String identifying a subscription to the Individual Influence Data Subscription
+                  in: path
+                  name: subscriptionId
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: TS29571_CommonData.yaml#/components/schemas/TrafficInfluSub
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: TS29571_CommonData.yaml#/components/schemas/TrafficInfluSub
+                    description: The subscription was updated successfully.
+                "204":
+                    description: No content
+                "400":
+                    $ref: TS29571_CommonData.yaml#/components/responses/400
+                "401":
+                    $ref: TS29571_CommonData.yaml#/components/responses/401
+                "403":
+                    $ref: TS29571_CommonData.yaml#/components/responses/403
+                "404":
+                    $ref: TS29571_CommonData.yaml#/components/responses/404
+                "411":
+                    $ref: TS29571_CommonData.yaml#/components/responses/411
+                "413":
+                    $ref: TS29571_CommonData.yaml#/components/responses/413
+                "415":
+                    $ref: TS29571_CommonData.yaml#/components/responses/415
+                "429":
+                    $ref: TS29571_CommonData.yaml#/components/responses/429
+                "500":
+                    $ref: TS29571_CommonData.yaml#/components/responses/500
+                "503":
+                    $ref: TS29571_CommonData.yaml#/components/responses/503
+                default:
+                    $ref: TS29571_CommonData.yaml#/components/responses/default
+            summary: Modify an existing individual Influence Data Subscription resource
+            tags:
+                - Individual Influence Data Subscription (Document)
+        delete:
+            operationId: DeleteIndividualInfluenceDataSubscription
+            parameters:
+                - description: String identifying a subscription to the Individual Influence Data Subscription
+                  in: path
+                  name: subscriptionId
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "204":
+                    description: The subscription was terminated successfully.
+                "400":
+                    $ref: TS29571_CommonData.yaml#/components/responses/400
+                "401":
+                    $ref: TS29571_CommonData.yaml#/components/responses/401
+                "403":
+                    $ref: TS29571_CommonData.yaml#/components/responses/403
+                "404":
+                    $ref: TS29571_CommonData.yaml#/components/responses/404
+                "429":
+                    $ref: TS29571_CommonData.yaml#/components/responses/429
+                "500":
+                    $ref: TS29571_CommonData.yaml#/components/responses/500
+                "503":
+                    $ref: TS29571_CommonData.yaml#/components/responses/503
+                default:
+                    $ref: TS29571_CommonData.yaml#/components/responses/default
+            summary: Delete an individual Influence Data Subscription resource
+            tags:
+                - Individual Influence Data Subscription (Document)
+    /application-data/iptvConfigData:
+        get:
+            operationId: ReadIPTVCongifurationData
+            parameters:
+                - description: Each element identifies a configuration.
+                  in: query
+                  name: config-ids
+                  required: false
+                  schema:
+                    items:
+                        type: string
+                    minItems: 1
+                    type: array
+                    x-go-type-skip-optional-pointer: true
+                - description: Each element identifies a DNN.
+                  in: query
+                  name: dnns
+                  required: false
+                  schema:
+                    items:
+                        $ref: TS29571_CommonData.yaml#/components/schemas/Dnn
+                    minItems: 1
+                    type: array
+                    x-go-type-skip-optional-pointer: true
+                - content:
+                    application/json:
+                        schema:
+                            items:
+                                $ref: TS29571_CommonData.yaml#/components/schemas/Snssai
+                            minItems: 1
+                            type: array
+                            x-go-type-skip-optional-pointer: true
+                  description: Each element identifies a slice.
+                  in: query
+                  name: snssais
+                  required: false
+                - description: Each element identifies the user.
+                  in: query
+                  name: supis
+                  required: false
+                  schema:
+                    items:
+                        $ref: TS29571_CommonData.yaml#/components/schemas/Supi
+                    minItems: 1
+                    type: array
+                    x-go-type-skip-optional-pointer: true
+                - description: Each element identifies a group of users.
+                  in: query
+                  name: inter-group-ids
+                  required: false
+                  schema:
+                    items:
+                        $ref: TS29571_CommonData.yaml#/components/schemas/GroupId
+                    minItems: 1
+                    type: array
+                    x-go-type-skip-optional-pointer: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                items:
+                                    $ref: TS29571_CommonData.yaml#/components/schemas/IptvConfigData
+                                type: array
+                    description: The IPTV configuration data stored in the UDR are returned.
+                "400":
+                    $ref: TS29571_CommonData.yaml#/components/responses/400
+                "401":
+                    $ref: TS29571_CommonData.yaml#/components/responses/401
+                "403":
+                    $ref: TS29571_CommonData.yaml#/components/responses/403
+                "404":
+                    $ref: TS29571_CommonData.yaml#/components/responses/404
+                "406":
+                    $ref: TS29571_CommonData.yaml#/components/responses/406
+                "414":
+                    $ref: TS29571_CommonData.yaml#/components/responses/414
+                "429":
+                    $ref: TS29571_CommonData.yaml#/components/responses/429
+                "500":
+                    $ref: TS29571_CommonData.yaml#/components/responses/500
+                "503":
+                    $ref: TS29571_CommonData.yaml#/components/responses/503
+                default:
+                    $ref: TS29571_CommonData.yaml#/components/responses/default
+            summary: Retrieve IPTV configuration Data
+            tags:
+                - IPTV Configuration Data (Store)
+    /application-data/iptvConfigData/{configurationId}:
+        put:
+            operationId: CreateOrReplaceIndividualIPTVConfigurationData
+            parameters:
+                - description: The Identifier of an Individual IPTV Configuration Data to be created or updated. It shall apply the format of Data type string.
+                  in: path
+                  name: configurationId
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: TS29571_CommonData.yaml#/components/schemas/IptvConfigData
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: TS29571_CommonData.yaml#/components/schemas/IptvConfigData
+                    description: The update of an Individual IPTV configuration resource.
+                "201":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: TS29571_CommonData.yaml#/components/schemas/IptvConfigData
+                    description: The creation of an Individual IPTV Configuration Data resource is confirmed and a representation of that resource is returned.
+                    headers:
+                        Location:
+                            description: Contains the URI of the newly created resource
+                            required: true
+                            schema:
+                                type: string
+                "204":
+                    description: No content
+                "400":
+                    $ref: TS29571_CommonData.yaml#/components/responses/400
+                "401":
+                    $ref: TS29571_CommonData.yaml#/components/responses/401
+                "403":
+                    $ref: TS29571_CommonData.yaml#/components/responses/403
+                "404":
+                    $ref: TS29571_CommonData.yaml#/components/responses/404
+                "411":
+                    $ref: TS29571_CommonData.yaml#/components/responses/411
+                "413":
+                    $ref: TS29571_CommonData.yaml#/components/responses/413
+                "414":
+                    $ref: TS29571_CommonData.yaml#/components/responses/414
+                "415":
+                    $ref: TS29571_CommonData.yaml#/components/responses/415
+                "429":
+                    $ref: TS29571_CommonData.yaml#/components/responses/429
+                "500":
+                    $ref: TS29571_CommonData.yaml#/components/responses/500
+                "503":
+                    $ref: TS29571_CommonData.yaml#/components/responses/503
+                default:
+                    $ref: TS29571_CommonData.yaml#/components/responses/default
+            summary: Create or update an individual IPTV configuration resource
+            tags:
+                - Individual IPTV Configuration Data (Document)
+        delete:
+            operationId: DeleteIndividualIPTVConfigurationData
+            parameters:
+                - description: The Identifier of an Individual IPTV Configuration to be updated. It shall apply the format of Data type string.
+                  in: path
+                  name: configurationId
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "204":
+                    description: The resource was deleted successfully.
+                "400":
+                    $ref: TS29571_CommonData.yaml#/components/responses/400
+                "401":
+                    $ref: TS29571_CommonData.yaml#/components/responses/401
+                "403":
+                    $ref: TS29571_CommonData.yaml#/components/responses/403
+                "404":
+                    $ref: TS29571_CommonData.yaml#/components/responses/404
+                "429":
+                    $ref: TS29571_CommonData.yaml#/components/responses/429
+                "500":
+                    $ref: TS29571_CommonData.yaml#/components/responses/500
+                "503":
+                    $ref: TS29571_CommonData.yaml#/components/responses/503
+                default:
+                    $ref: TS29571_CommonData.yaml#/components/responses/default
+            summary: Delete an individual IPTV configuration resource
+            tags:
+                - Individual IPTV Configuration Data (Document)
+        patch:
+            operationId: PartialReplaceIndividualIPTVConfigurationData
+            parameters:
+                - description: The Identifier of an Individual IPTV Configuration Data to be updated. It shall apply the format of Data type string.
+                  in: path
+                  name: configurationId
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/merge-patch+json:
+                        schema:
+                            $ref: TS29571_CommonData.yaml#/components/schemas/IptvConfigDataPatch
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: TS29571_CommonData.yaml#/components/schemas/IptvConfigData
+                    description: The update of an Individual IPTV configuration resource.
+                "204":
+                    description: No content
+                "400":
+                    $ref: TS29571_CommonData.yaml#/components/responses/400
+                "401":
+                    $ref: TS29571_CommonData.yaml#/components/responses/401
+                "403":
+                    $ref: TS29571_CommonData.yaml#/components/responses/403
+                "404":
+                    $ref: TS29571_CommonData.yaml#/components/responses/404
+                "411":
+                    $ref: TS29571_CommonData.yaml#/components/responses/411
+                "413":
+                    $ref: TS29571_CommonData.yaml#/components/responses/413
+                "414":
+                    $ref: TS29571_CommonData.yaml#/components/responses/414
+                "415":
+                    $ref: TS29571_CommonData.yaml#/components/responses/415
+                "429":
+                    $ref: TS29571_CommonData.yaml#/components/responses/429
+                "500":
+                    $ref: TS29571_CommonData.yaml#/components/responses/500
+                "503":
+                    $ref: TS29571_CommonData.yaml#/components/responses/503
+                default:
+                    $ref: TS29571_CommonData.yaml#/components/responses/default
+            summary: Partial update an individual IPTV configuration resource
+            tags:
+                - Individual IPTV Configuration Data
+    /application-data/pfds:
+        get:
+            operationId: ReadPFDData
+            parameters:
+                - description: Contains the information of the application identifier(s) for the querying PFD Data resource. If none appId is included in the URI, it applies to all application identifier(s) for the querying PFD Data resource.
+                  in: query
+                  name: appId
+                  required: false
+                  schema:
+                    items:
+                        $ref: TS29571_CommonData.yaml#/components/schemas/ApplicationId
+                    minItems: 1
+                    type: array
+                    x-go-type-skip-optional-pointer: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                items:
+                                    $ref: TS29571_CommonData.yaml#/components/schemas/PfdDataForAppExt
+                                type: array
+                    description: A representation of PFDs for request applications is returned.
+                "400":
+                    $ref: TS29571_CommonData.yaml#/components/responses/400
+                "401":
+                    $ref: TS29571_CommonData.yaml#/components/responses/401
+                "403":
+                    $ref: TS29571_CommonData.yaml#/components/responses/403
+                "404":
+                    $ref: TS29571_CommonData.yaml#/components/responses/404
+                "406":
+                    $ref: TS29571_CommonData.yaml#/components/responses/406
+                "414":
+                    $ref: TS29571_CommonData.yaml#/components/responses/414
+                "429":
+                    $ref: TS29571_CommonData.yaml#/components/responses/429
+                "500":
+                    $ref: TS29571_CommonData.yaml#/components/responses/500
+                "503":
+                    $ref: TS29571_CommonData.yaml#/components/responses/503
+                default:
+                    $ref: TS29571_CommonData.yaml#/components/responses/default
+            summary: Retrieve PFDs for application identifier(s)
+            tags:
+                - PFD Data (Store)
+    /application-data/pfds/{appId}:
+        get:
+            operationId: ReadIndividualPFDData
+            parameters:
+                - description: Indicate the application identifier for the request pfd(s). It shall apply the format of Data type ApplicationId.
+                  in: path
+                  name: appId
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: TS29571_CommonData.yaml#/components/schemas/PfdDataForAppExt
+                    description: A representation of PFDs for the request application identified by the application identifier is returned.
+                "400":
+                    $ref: TS29571_CommonData.yaml#/components/responses/400
+                "401":
+                    $ref: TS29571_CommonData.yaml#/components/responses/401
+                "403":
+                    $ref: TS29571_CommonData.yaml#/components/responses/403
+                "404":
+                    $ref: TS29571_CommonData.yaml#/components/responses/404
+                "406":
+                    $ref: TS29571_CommonData.yaml#/components/responses/406
+                "429":
+                    $ref: TS29571_CommonData.yaml#/components/responses/429
+                "500":
+                    $ref: TS29571_CommonData.yaml#/components/responses/500
+                "503":
+                    $ref: TS29571_CommonData.yaml#/components/responses/503
+                default:
+                    $ref: TS29571_CommonData.yaml#/components/responses/default
+            summary: Retrieve the corresponding PFDs of the specified application identifier
+            tags:
+                - Individual PFD Data (Document)
+        put:
+            operationId: CreateOrReplaceIndividualPFDData
+            parameters:
+                - description: Indicate the application identifier for the request pfd(s). It shall apply the format of Data type ApplicationId.
+                  in: path
+                  name: appId
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: TS29571_CommonData.yaml#/components/schemas/PfdDataForAppExt
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: TS29571_CommonData.yaml#/components/schemas/PfdDataForAppExt
+                    description: Successful case. The upgrade of an Individual PFD Data resource related to the application identifier is confirmed and a representation of that resource is returned.
+                "201":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: TS29571_CommonData.yaml#/components/schemas/PfdDataForAppExt
+                    description: The creation of an Individual PFD Data resource related to the application-identifier is confirmed and a representation of that resource is returned.
+                    headers:
+                        Location:
+                            description: 'Contains the URI of the newly created resource, according to the structure: {apiRoot}/nudr-dr/<apiVersion>/application-data/pfds/{appId}'
+                            required: true
+                            schema:
+                                type: string
+                "204":
+                    description: No content
+                "400":
+                    $ref: TS29571_CommonData.yaml#/components/responses/400
+                "401":
+                    $ref: TS29571_CommonData.yaml#/components/responses/401
+                "403":
+                    $ref: TS29571_CommonData.yaml#/components/responses/403
+                "404":
+                    $ref: TS29571_CommonData.yaml#/components/responses/404
+                "411":
+                    $ref: TS29571_CommonData.yaml#/components/responses/411
+                "413":
+                    $ref: TS29571_CommonData.yaml#/components/responses/413
+                "414":
+                    $ref: TS29571_CommonData.yaml#/components/responses/414
+                "415":
+                    $ref: TS29571_CommonData.yaml#/components/responses/415
+                "429":
+                    $ref: TS29571_CommonData.yaml#/components/responses/429
+                "500":
+                    $ref: TS29571_CommonData.yaml#/components/responses/500
+                "503":
+                    $ref: TS29571_CommonData.yaml#/components/responses/503
+                default:
+                    $ref: TS29571_CommonData.yaml#/components/responses/default
+            summary: Create or update the corresponding PFDs for the specified application identifier
+            tags:
+                - Individual PFD Data (Document)
+        delete:
+            operationId: DeleteIndividualPFDData
+            parameters:
+                - description: Indicate the application identifier for the request pfd(s). It shall apply the format of Data type ApplicationId.
+                  in: path
+                  name: appId
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "204":
+                    description: Successful case. The Individual PFD Data resource related to the application identifier was deleted.
+                "400":
+                    $ref: TS29571_CommonData.yaml#/components/responses/400
+                "401":
+                    $ref: TS29571_CommonData.yaml#/components/responses/401
+                "403":
+                    $ref: TS29571_CommonData.yaml#/components/responses/403
+                "404":
+                    $ref: TS29571_CommonData.yaml#/components/responses/404
+                "429":
+                    $ref: TS29571_CommonData.yaml#/components/responses/429
+                "500":
+                    $ref: TS29571_CommonData.yaml#/components/responses/500
+                "503":
+                    $ref: TS29571_CommonData.yaml#/components/responses/503
+                default:
+                    $ref: TS29571_CommonData.yaml#/components/responses/default
+            summary: Delete the corresponding PFDs of the specified application identifier
+            tags:
+                - Individual PFD Data (Document)
+    /application-data/serviceParamData:
+        get:
+            operationId: ReadServiceParameterData
+            parameters:
+                - description: Each element identifies a service.
+                  in: query
+                  name: service-param-ids
+                  required: false
+                  schema:
+                    items:
+                        type: string
+                    minItems: 1
+                    type: array
+                    x-go-type-skip-optional-pointer: true
+                - description: Each element identifies a DNN.
+                  in: query
+                  name: dnns
+                  required: false
+                  schema:
+                    items:
+                        $ref: TS29571_CommonData.yaml#/components/schemas/Dnn
+                    minItems: 1
+                    type: array
+                    x-go-type-skip-optional-pointer: true
+                - content:
+                    application/json:
+                        schema:
+                            items:
+                                $ref: TS29571_CommonData.yaml#/components/schemas/Snssai
+                            minItems: 1
+                            type: array
+                            x-go-type-skip-optional-pointer: true
+                  description: Each element identifies a slice.
+                  in: query
+                  name: snssais
+                  required: false
+                - description: Each element identifies a group of users.
+                  in: query
+                  name: internal-group-ids
+                  required: false
+                  schema:
+                    items:
+                        $ref: TS29571_CommonData.yaml#/components/schemas/GroupId
+                    minItems: 1
+                    type: array
+                    x-go-type-skip-optional-pointer: true
+                - description: Each element identifies the user.
+                  in: query
+                  name: supis
+                  required: false
+                  schema:
+                    items:
+                        $ref: TS29571_CommonData.yaml#/components/schemas/Supi
+                    minItems: 1
+                    type: array
+                    x-go-type-skip-optional-pointer: true
+                - description: Each element identifies the user.
+                  in: query
+                  name: ue-ipv4s
+                  required: false
+                  schema:
+                    items:
+                        $ref: TS29571_CommonData.yaml#/components/schemas/Ipv4Addr
+                    minItems: 1
+                    type: array
+                    x-go-type-skip-optional-pointer: true
+                - description: Each element identifies the user.
+                  in: query
+                  name: ue-ipv6s
+                  required: false
+                  schema:
+                    items:
+                        $ref: TS29571_CommonData.yaml#/components/schemas/Ipv6Addr
+                    minItems: 1
+                    type: array
+                    x-go-type-skip-optional-pointer: true
+                - description: Each element identifies the user.
+                  in: query
+                  name: ue-macs
+                  required: false
+                  schema:
+                    items:
+                        $ref: TS29571_CommonData.yaml#/components/schemas/MacAddr48
+                    minItems: 1
+                    type: array
+                    x-go-type-skip-optional-pointer: true
+                - description: Supported Features
+                  in: query
+                  name: supp-feat
+                  required: false
+                  schema:
+                    $ref: TS29571_CommonData.yaml#/components/schemas/SupportedFeatures
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                items:
+                                    $ref: TS29571_CommonData.yaml#/components/schemas/ServiceParameterData
+                                type: array
+                    description: The Service Parameter Data stored in the UDR are returned.
+                "400":
+                    $ref: TS29571_CommonData.yaml#/components/responses/400
+                "401":
+                    $ref: TS29571_CommonData.yaml#/components/responses/401
+                "403":
+                    $ref: TS29571_CommonData.yaml#/components/responses/403
+                "404":
+                    $ref: TS29571_CommonData.yaml#/components/responses/404
+                "406":
+                    $ref: TS29571_CommonData.yaml#/components/responses/406
+                "414":
+                    $ref: TS29571_CommonData.yaml#/components/responses/414
+                "429":
+                    $ref: TS29571_CommonData.yaml#/components/responses/429
+                "500":
+                    $ref: TS29571_CommonData.yaml#/components/responses/500
+                "503":
+                    $ref: TS29571_CommonData.yaml#/components/responses/503
+                default:
+                    $ref: TS29571_CommonData.yaml#/components/responses/default
+            summary: Retrieve Service Parameter Data
+            tags:
+                - Service Parameter Data (Store)
+    /application-data/serviceParamData/{serviceParamId}:
+        put:
+            operationId: CreateOrReplaceServiceParameterData
+            parameters:
+                - description: The Identifier of an Individual Service Parameter Data to be created or updated. It shall apply the format of Data type string.
+                  in: path
+                  name: serviceParamId
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: TS29571_CommonData.yaml#/components/schemas/ServiceParameterData
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: TS29571_CommonData.yaml#/components/schemas/ServiceParameterData
+                    description: The update of an Individual Service Parameter Data resource is confirmed and a response body containing Service Parameter Data shall be returned.
+                "201":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: TS29571_CommonData.yaml#/components/schemas/ServiceParameterData
+                    description: The creation of an Individual Service Parameter Data resource is confirmed and a representation of that resource is returned.
+                    headers:
+                        Location:
+                            description: 'Contains the URI of the newly created resource, according to the structure: {apiRoot}/nudr-dr/<apiVersion>/application-data/serviceParamData/{serviceParamId}'
+                            required: true
+                            schema:
+                                type: string
+                "204":
+                    description: No content
+                "400":
+                    $ref: TS29571_CommonData.yaml#/components/responses/400
+                "401":
+                    $ref: TS29571_CommonData.yaml#/components/responses/401
+                "403":
+                    $ref: TS29571_CommonData.yaml#/components/responses/403
+                "404":
+                    $ref: TS29571_CommonData.yaml#/components/responses/404
+                "411":
+                    $ref: TS29571_CommonData.yaml#/components/responses/411
+                "413":
+                    $ref: TS29571_CommonData.yaml#/components/responses/413
+                "414":
+                    $ref: TS29571_CommonData.yaml#/components/responses/414
+                "415":
+                    $ref: TS29571_CommonData.yaml#/components/responses/415
+                "429":
+                    $ref: TS29571_CommonData.yaml#/components/responses/429
+                "500":
+                    $ref: TS29571_CommonData.yaml#/components/responses/500
+                "503":
+                    $ref: TS29571_CommonData.yaml#/components/responses/503
+                default:
+                    $ref: TS29571_CommonData.yaml#/components/responses/default
+            summary: Create or update an individual Service Parameter Data resource
+            tags:
+                - Individual Service Parameter Data (Document)
+        delete:
+            operationId: DeleteIndividualServiceParameterData
+            parameters:
+                - description: The Identifier of an Individual Service Parameter Data to be updated. It shall apply the format of Data type string.
+                  in: path
+                  name: serviceParamId
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "204":
+                    description: The Individual Service Parameter Data was deleted successfully.
+                "400":
+                    $ref: TS29571_CommonData.yaml#/components/responses/400
+                "401":
+                    $ref: TS29571_CommonData.yaml#/components/responses/401
+                "403":
+                    $ref: TS29571_CommonData.yaml#/components/responses/403
+                "404":
+                    $ref: TS29571_CommonData.yaml#/components/responses/404
+                "429":
+                    $ref: TS29571_CommonData.yaml#/components/responses/429
+                "500":
+                    $ref: TS29571_CommonData.yaml#/components/responses/500
+                "503":
+                    $ref: TS29571_CommonData.yaml#/components/responses/503
+                default:
+                    $ref: TS29571_CommonData.yaml#/components/responses/default
+            summary: Delete an individual Service Parameter Data resource
+            tags:
+                - Individual Service Parameter Data (Document)
+        patch:
+            operationId: UpdateIndividualServiceParameterData
+            parameters:
+                - description: The Identifier of an Individual Service Parameter Data to be updated. It shall apply the format of Data type string.
+                  in: path
+                  name: serviceParamId
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/merge-patch+json:
+                        schema:
+                            $ref: TS29571_CommonData.yaml#/components/schemas/ServiceParameterDataPatch
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: TS29571_CommonData.yaml#/components/schemas/ServiceParameterData
+                    description: The update of an Individual Service Parameter Data resource is confirmed and a response body containing Service Parameter Data shall be returned.
+                "204":
+                    description: No content
+                "400":
+                    $ref: TS29571_CommonData.yaml#/components/responses/400
+                "401":
+                    $ref: TS29571_CommonData.yaml#/components/responses/401
+                "403":
+                    $ref: TS29571_CommonData.yaml#/components/responses/403
+                "404":
+                    $ref: TS29571_CommonData.yaml#/components/responses/404
+                "411":
+                    $ref: TS29571_CommonData.yaml#/components/responses/411
+                "413":
+                    $ref: TS29571_CommonData.yaml#/components/responses/413
+                "415":
+                    $ref: TS29571_CommonData.yaml#/components/responses/415
+                "429":
+                    $ref: TS29571_CommonData.yaml#/components/responses/429
+                "500":
+                    $ref: TS29571_CommonData.yaml#/components/responses/500
+                "503":
+                    $ref: TS29571_CommonData.yaml#/components/responses/503
+                default:
+                    $ref: TS29571_CommonData.yaml#/components/responses/default
+            summary: Modify part of the properties of an individual Service Parameter Data resource
+            tags:
+                - Individual Service Parameter Data (Document)
+    /application-data/subs-to-notify:
+        get:
+            operationId: ReadApplicationDataChangeSubscriptions
+            parameters:
+                - content:
+                    application/json:
+                        schema:
+                            $ref: TS29571_CommonData.yaml#/components/schemas/DataFilter
+                  description: The data filter for the query.
+                  in: query
+                  name: data-filter
+                  required: false
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                items:
+                                    $ref: TS29571_CommonData.yaml#/components/schemas/ApplicationDataSubs
+                                minItems: 0
+                                type: array
+                    description: The subscription information as request in the request URI query parameter(s) are returned.
+                "400":
+                    $ref: TS29571_CommonData.yaml#/components/responses/400
+                "401":
+                    $ref: TS29571_CommonData.yaml#/components/responses/401
+                "403":
+                    $ref: TS29571_CommonData.yaml#/components/responses/403
+                "404":
+                    $ref: TS29571_CommonData.yaml#/components/responses/404
+                "406":
+                    $ref: TS29571_CommonData.yaml#/components/responses/406
+                "414":
+                    $ref: TS29571_CommonData.yaml#/components/responses/414
+                "429":
+                    $ref: TS29571_CommonData.yaml#/components/responses/429
+                "500":
+                    $ref: TS29571_CommonData.yaml#/components/responses/500
+                "503":
+                    $ref: TS29571_CommonData.yaml#/components/responses/503
+                default:
+                    $ref: TS29571_CommonData.yaml#/components/responses/default
+            summary: Read Application Data change Subscriptions
+            tags:
+                - ApplicationDataSubscriptions (Collection)
+        post:
+            callbacks:
+                applicationDataChangeNotif:
+                    '{$request.body#/notificationUri}':
+                        post:
+                            requestBody:
+                                content:
+                                    application/json:
+                                        schema:
+                                            items:
+                                                $ref: TS29571_CommonData.yaml#/components/schemas/ApplicationDataChangeNotif
+                                            minItems: 1
+                                            type: array
+                                            x-go-type-skip-optional-pointer: true
+                                required: true
+                            responses:
+                                "204":
+                                    description: No Content, Notification was successful
+                                "400":
+                                    $ref: TS29571_CommonData.yaml#/components/responses/400
+                                "401":
+                                    $ref: TS29571_CommonData.yaml#/components/responses/401
+                                "403":
+                                    $ref: TS29571_CommonData.yaml#/components/responses/403
+                                "404":
+                                    $ref: TS29571_CommonData.yaml#/components/responses/404
+                                "411":
+                                    $ref: TS29571_CommonData.yaml#/components/responses/411
+                                "413":
+                                    $ref: TS29571_CommonData.yaml#/components/responses/413
+                                "415":
+                                    $ref: TS29571_CommonData.yaml#/components/responses/415
+                                "429":
+                                    $ref: TS29571_CommonData.yaml#/components/responses/429
+                                "500":
+                                    $ref: TS29571_CommonData.yaml#/components/responses/500
+                                "503":
+                                    $ref: TS29571_CommonData.yaml#/components/responses/503
+                                default:
+                                    $ref: TS29571_CommonData.yaml#/components/responses/default
+            operationId: CreateIndividualApplicationDataSubscription
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: TS29571_CommonData.yaml#/components/schemas/ApplicationDataSubs
+                required: true
+            responses:
+                "201":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: TS29571_CommonData.yaml#/components/schemas/ApplicationDataSubs
+                    description: Upon success, a response body containing a representation of each Individual subscription resource shall be returned.
+                    headers:
+                        Location:
+                            description: Contains the URI of the newly created resource
+                            required: true
+                            schema:
+                                type: string
+                "400":
+                    $ref: TS29571_CommonData.yaml#/components/responses/400
+                "401":
+                    $ref: TS29571_CommonData.yaml#/components/responses/401
+                "403":
+                    $ref: TS29571_CommonData.yaml#/components/responses/403
+                "404":
+                    $ref: TS29571_CommonData.yaml#/components/responses/404
+                "411":
+                    $ref: TS29571_CommonData.yaml#/components/responses/411
+                "413":
+                    $ref: TS29571_CommonData.yaml#/components/responses/413
+                "415":
+                    $ref: TS29571_CommonData.yaml#/components/responses/415
+                "429":
+                    $ref: TS29571_CommonData.yaml#/components/responses/429
+                "500":
+                    $ref: TS29571_CommonData.yaml#/components/responses/500
+                "503":
+                    $ref: TS29571_CommonData.yaml#/components/responses/503
+                default:
+                    $ref: TS29571_CommonData.yaml#/components/responses/default
+            summary: Create a subscription to receive notification of application data changes
+            tags:
+                - ApplicationDataSubscriptions (Collection)
+    /application-data/subs-to-notify/{subsId}:
+        parameters:
+            - in: path
+              name: subsId
+              required: true
+              schema:
+                type: string
+        get:
+            operationId: ReadIndividualApplicationDataSubscription
+            parameters:
+                - description: String identifying a subscription to the Individual Application Data Subscription
+                  in: path
+                  name: subsId
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: TS29571_CommonData.yaml#/components/schemas/ApplicationDataSubs
+                    description: The subscription information is returned.
+                "400":
+                    $ref: TS29571_CommonData.yaml#/components/responses/400
+                "401":
+                    $ref: TS29571_CommonData.yaml#/components/responses/401
+                "403":
+                    $ref: TS29571_CommonData.yaml#/components/responses/403
+                "404":
+                    $ref: TS29571_CommonData.yaml#/components/responses/404
+                "406":
+                    $ref: TS29571_CommonData.yaml#/components/responses/406
+                "414":
+                    $ref: TS29571_CommonData.yaml#/components/responses/414
+                "429":
+                    $ref: TS29571_CommonData.yaml#/components/responses/429
+                "500":
+                    $ref: TS29571_CommonData.yaml#/components/responses/500
+                "503":
+                    $ref: TS29571_CommonData.yaml#/components/responses/503
+                default:
+                    $ref: TS29571_CommonData.yaml#/components/responses/default
+            summary: Get an existing individual Application Data Subscription resource
+            tags:
+                - IndividualApplicationDataSubscription (Document)
+        put:
+            operationId: ReplaceIndividualApplicationDataSubscription
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: TS29571_CommonData.yaml#/components/schemas/ApplicationDataSubs
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: TS29571_CommonData.yaml#/components/schemas/ApplicationDataSubs
+                    description: The individual subscription resource was updated successfully.
+                "204":
+                    description: The individual subscription resource was updated successfully and no additional content is to be sent in the response message.
+                "400":
+                    $ref: TS29571_CommonData.yaml#/components/responses/400
+                "401":
+                    $ref: TS29571_CommonData.yaml#/components/responses/401
+                "403":
+                    $ref: TS29571_CommonData.yaml#/components/responses/403
+                "404":
+                    $ref: TS29571_CommonData.yaml#/components/responses/404
+                "411":
+                    $ref: TS29571_CommonData.yaml#/components/responses/411
+                "413":
+                    $ref: TS29571_CommonData.yaml#/components/responses/413
+                "415":
+                    $ref: TS29571_CommonData.yaml#/components/responses/415
+                "429":
+                    $ref: TS29571_CommonData.yaml#/components/responses/429
+                "500":
+                    $ref: TS29571_CommonData.yaml#/components/responses/500
+                "503":
+                    $ref: TS29571_CommonData.yaml#/components/responses/503
+                default:
+                    $ref: TS29571_CommonData.yaml#/components/responses/default
+            summary: Modify a subscription to receive notification of application data changes
+            tags:
+                - IndividualApplicationDataSubscription (Document)
+        delete:
+            operationId: DeleteIndividualApplicationDataSubscription
+            responses:
+                "204":
+                    description: Upon success, an empty response body shall be returned.
+                "400":
+                    $ref: TS29571_CommonData.yaml#/components/responses/400
+                "401":
+                    $ref: TS29571_CommonData.yaml#/components/responses/401
+                "403":
+                    $ref: TS29571_CommonData.yaml#/components/responses/403
+                "404":
+                    $ref: TS29571_CommonData.yaml#/components/responses/404
+                "429":
+                    $ref: TS29571_CommonData.yaml#/components/responses/429
+                "500":
+                    $ref: TS29571_CommonData.yaml#/components/responses/500
+                "503":
+                    $ref: TS29571_CommonData.yaml#/components/responses/503
+                default:
+                    $ref: TS29571_CommonData.yaml#/components/responses/default
+            summary: Delete the individual Application Data subscription
+            tags:
+                - IndividualApplicationDataSubscription (Document)

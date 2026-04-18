@@ -3,6 +3,8 @@
 package diameter
 
 import (
+	"fmt"
+
 	"github.com/fiorix/go-diameter/v4/diam"
 	"github.com/fiorix/go-diameter/v4/diam/datatype"
 )
@@ -15,7 +17,7 @@ const (
 	// AVP code for Result-Code (RFC 6733).
 	AVPCodeResultCode uint32 = 268
 	// AVP code for Auth-Application-Id (RFC 6733).
-	AVPCodeAuthApplicationId uint32 = 258
+	AVPCodeAuthApplicationID uint32 = 258
 	// AVP code for 3GPP-S-NSSAI (TS 29.571 §5.4.4.60).
 	AVPCodeSNSSAI uint32 = 310
 	// AVP code for Slice/Service Type (child of SNSSAI).
@@ -27,12 +29,17 @@ const (
 // DecodeEapPayloadAVP decodes an EAP-Payload AVP from a Diameter message.
 // Spec: RFC 4072
 func DecodeEapPayloadAVP(m *diam.Message) ([]byte, error) {
-	avps, err := m.FindAVPs(AVPCodeEAPPayload, 0)
-	if err != nil || len(avps) == 0 {
-		return nil, nil
-	}
-	if os, ok := avps[0].Data.(datatype.OctetString); ok {
-		return []byte(os), nil
+	// FindAVPs uses the dictionary and may fail for non-standard AVP codes
+	// (e.g. EAP-Payload, code 209, is not in dict.Default). Fall back to
+	// direct iteration so we can always find it regardless of dictionary coverage.
+	for _, avp := range m.AVP {
+		if avp.Code == AVPCodeEAPPayload && avp.VendorID == 0 {
+			os, ok := avp.Data.(datatype.OctetString)
+			if !ok {
+				return nil, fmt.Errorf("diameter: EAP-Payload AVP has unexpected type %T", avp.Data)
+			}
+			return []byte(os), nil
+		}
 	}
 	return nil, nil
 }
@@ -42,8 +49,11 @@ func DecodeEapPayloadAVP(m *diam.Message) ([]byte, error) {
 // Spec: TS 29.571 §5.4.4.60
 func DecodeSnssaiAVP(m *diam.Message) (sst uint8, sd string, err error) {
 	avps, err := m.FindAVPs(AVPCodeSNSSAI, VendorID3GPP)
-	if err != nil || len(avps) == 0 {
-		return 0, "", nil
+	if err != nil {
+		return 0, "", fmt.Errorf("diameter: FindAVPs failed: %w", err)
+	}
+	if len(avps) == 0 {
+		return 0, "", nil // not found — not an error
 	}
 
 	// 3GPP-S-NSSAI is a grouped AVP.
@@ -53,7 +63,7 @@ func DecodeSnssaiAVP(m *diam.Message) (sst uint8, sd string, err error) {
 		if os, ok := avps[0].Data.(datatype.OctetString); ok && len(os) >= 1 {
 			return uint8(os[0]), "", nil
 		}
-		return 0, "", nil
+		return 0, "", fmt.Errorf("diameter: 3GPP-S-NSSAI AVP has unexpected type %T", avps[0].Data)
 	}
 
 	for _, child := range g.AVP {
@@ -95,9 +105,9 @@ func DecodeResultCodeAVP(m *diam.Message) uint32 {
 	return 0
 }
 
-// DecodeAuthApplicationId extracts the Auth-Application-Id AVP value from a message.
-func DecodeAuthApplicationId(m *diam.Message) uint32 {
-	avps, err := m.FindAVPs(AVPCodeAuthApplicationId, 0)
+// DecodeAuthApplicationID extracts the Auth-Application-Id AVP value from a message.
+func DecodeAuthApplicationID(m *diam.Message) uint32 {
+	avps, err := m.FindAVPs(AVPCodeAuthApplicationID, 0)
 	if err != nil || len(avps) == 0 {
 		return 0
 	}

@@ -54,6 +54,16 @@ func (e *ValidationError) Error() string {
 
 // ToProblemDetails converts the ValidationError to an RFC 7807 ProblemDetails.
 func (e *ValidationError) ToProblemDetails() *common.ProblemDetails {
+	if e.Cause != "" && e.Cause != "VALIDATION_ERROR" {
+		// Return the specific cause from the ValidationError
+		return &common.ProblemDetails{
+			Type:   "https://nssAAF.operator.com/probs/validation-error",
+			Title:  "Input Validation Failed",
+			Status: e.HTTPStatus,
+			Detail: e.Field + ": " + e.Reason,
+			Cause:  e.Cause,
+		}
+	}
 	return common.ValidationProblem(e.Field, e.Reason)
 }
 

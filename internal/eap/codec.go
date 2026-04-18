@@ -59,9 +59,9 @@ func Parse(data []byte) (*Packet, error) {
 	}
 
 	p := &Packet{
-		Code:   code,
-		Id:     id,
-		Length: length,
+		Code:    code,
+		Id:      id,
+		Length:  length,
 		RawData: data,
 	}
 

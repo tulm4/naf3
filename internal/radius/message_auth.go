@@ -20,7 +20,8 @@ const MessageAuthenticatorSize = 16
 // Spec: RFC 3579 §3.2
 //
 // The Message-Authenticator is computed as:
-//   HMAC-MD5(Code + ID + Length + Request Authenticator + Attributes + Shared Secret)
+//
+//	HMAC-MD5(Code + ID + Length + Request Authenticator + Attributes + Shared Secret)
 //
 // where:
 //   - Code, ID, Length, Request Authenticator are from the original Access-Request
@@ -28,9 +29,10 @@ const MessageAuthenticatorSize = 16
 //   - Shared Secret is a shared secret between NSSAAF and AAA-S
 //
 // RFC 3579 §3.2:
-//   The Message-Authenticator attribute is set to the HMAC-MD5 hash of the entire
-//   Access-Request packet, including the User-Password attribute (encrypted),
-//   but with the Message-Authenticator field set to 16 zero octets.
+//
+//	The Message-Authenticator attribute is set to the HMAC-MD5 hash of the entire
+//	Access-Request packet, including the User-Password attribute (encrypted),
+//	but with the Message-Authenticator field set to 16 zero octets.
 func ComputeMessageAuthenticator(packet []byte, secret string) []byte {
 	// Create a mutable copy of the packet.
 	p := make([]byte, len(packet))
@@ -51,7 +53,8 @@ func ComputeMessageAuthenticator(packet []byte, secret string) []byte {
 // Spec: RFC 3579 §3.2
 //
 // For Access-Accept/Access-Reject/Access-Challenge responses:
-//   Expected = HMAC-MD5(ResponseCode + ResponseID + ResponseLength + ResponseVector + Attributes + Secret)
+//
+//	Expected = HMAC-MD5(ResponseCode + ResponseID + ResponseLength + ResponseVector + Attributes + Secret)
 //
 // where ResponseVector is the Request Authenticator from the original Access-Request
 // (for Access-Challenge) or a specially computed one (for Access-Accept/Reject).
@@ -62,12 +65,17 @@ func VerifyMessageAuthenticator(packet []byte, secret string) bool {
 		return false
 	}
 
-	// Extract the received MA.
-	received := packet[offset : offset+18]
+	// Guard against truncated packets: MA attribute must have at least 18 bytes (type+len+16-byte value).
+	if offset+2+MessageAuthenticatorSize > len(packet) {
+		return false
+	}
+
+	// Extract the received MA (skip Type and Length bytes).
+	received := packet[offset+2 : offset+2+MessageAuthenticatorSize]
 	expected := ComputeMessageAuthenticator(packet, secret)
 
 	// Constant-time comparison.
-	return hmac.Equal(received[2:], expected)
+	return hmac.Equal(received, expected)
 }
 
 // zeroMessageAuthenticator finds the Message-Authenticator attribute in a RADIUS packet
@@ -113,7 +121,8 @@ func findMessageAuthenticator(packet []byte) int {
 // ResponseAuth = MD5(Code+ID+Length+RequestAuth+Attributes+Secret)
 //
 // For Access-Accept/Reject responses, the Response Authenticator is:
-//   MD5(Code + ID + Length + Request Authenticator + Attributes + Secret)
+//
+//	MD5(Code + ID + Length + Request Authenticator + Attributes + Secret)
 //
 // For Access-Challenge, the Request Authenticator from the original request is used.
 func ComputeResponseAuthenticator(code, id uint8, length uint16, requestAuth [16]byte, attrs []byte, secret string) [16]byte {

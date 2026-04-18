@@ -10,11 +10,11 @@ import (
 // RADIUS packet codes as defined in RFC 2865.
 // Spec: RFC 2865 §3
 const (
-	CodeAccessRequest      uint8 = 1
-	CodeAccessAccept       uint8 = 2
-	CodeAccessReject       uint8 = 3
-	CodeAccessChallenge    uint8 = 11
-	CodeDisconnectRequest  uint8 = 40
+	CodeAccessRequest     uint8 = 1
+	CodeAccessAccept      uint8 = 2
+	CodeAccessReject      uint8 = 3
+	CodeAccessChallenge   uint8 = 11
+	CodeDisconnectRequest uint8 = 40
 	CodeDisconnectACK     uint8 = 41
 	CodeDisconnectNAK     uint8 = 42
 )
@@ -22,18 +22,18 @@ const (
 // Packet represents a RADIUS packet as defined in RFC 2865.
 // Spec: RFC 2865 §3
 type Packet struct {
-	Code    uint8
-	Id      uint8
-	Length  uint16
-	Vector  [16]byte // Authenticator or Response Authenticator
+	Code       uint8
+	Id         uint8
+	Length     uint16
+	Vector     [16]byte // Authenticator or Response Authenticator
 	Attributes []Attribute
 }
 
 // Attribute represents a RADIUS attribute (TLV format).
 // Spec: RFC 2865 §5
 type Attribute struct {
-	Type   uint8
-	Value  []byte
+	Type  uint8
+	Value []byte
 }
 
 // DecodePacket decodes a raw RADIUS packet from wire format.
@@ -64,10 +64,10 @@ func DecodePacket(data []byte) (*Packet, error) {
 	}
 
 	return &Packet{
-		Code:      code,
-		Id:        id,
-		Length:    length,
-		Vector:    vector,
+		Code:       code,
+		Id:         id,
+		Length:     length,
+		Vector:     vector,
 		Attributes: attrs,
 	}, nil
 }
@@ -93,10 +93,10 @@ func (p *Packet) Encode() []byte {
 // Spec: RFC 2865 §3.1
 func BuildAccessRequest(id uint8, authenticator [16]byte, attrs []Attribute) *Packet {
 	return &Packet{
-		Code:      CodeAccessRequest,
-		Id:        id,
-		Length:    20,
-		Vector:    authenticator,
+		Code:       CodeAccessRequest,
+		Id:         id,
+		Length:     20,
+		Vector:     authenticator,
 		Attributes: attrs,
 	}
 }
@@ -105,10 +105,10 @@ func BuildAccessRequest(id uint8, authenticator [16]byte, attrs []Attribute) *Pa
 // Spec: RFC 2865 §3.2
 func BuildAccessAccept(id uint8, responseAuth [16]byte, attrs []Attribute) *Packet {
 	return &Packet{
-		Code:      CodeAccessAccept,
-		Id:        id,
-		Length:    20,
-		Vector:    responseAuth,
+		Code:       CodeAccessAccept,
+		Id:         id,
+		Length:     20,
+		Vector:     responseAuth,
 		Attributes: attrs,
 	}
 }
@@ -117,10 +117,10 @@ func BuildAccessAccept(id uint8, responseAuth [16]byte, attrs []Attribute) *Pack
 // Spec: RFC 2865 §3.3
 func BuildAccessReject(id uint8, responseAuth [16]byte, attrs []Attribute) *Packet {
 	return &Packet{
-		Code:      CodeAccessReject,
-		Id:        id,
-		Length:    20,
-		Vector:    responseAuth,
+		Code:       CodeAccessReject,
+		Id:         id,
+		Length:     20,
+		Vector:     responseAuth,
 		Attributes: attrs,
 	}
 }
@@ -129,10 +129,10 @@ func BuildAccessReject(id uint8, responseAuth [16]byte, attrs []Attribute) *Pack
 // Spec: RFC 2865 §3.4
 func BuildAccessChallenge(id uint8, responseAuth [16]byte, attrs []Attribute) *Packet {
 	return &Packet{
-		Code:      CodeAccessChallenge,
-		Id:        id,
-		Length:    20,
-		Vector:    responseAuth,
+		Code:       CodeAccessChallenge,
+		Id:         id,
+		Length:     20,
+		Vector:     responseAuth,
 		Attributes: attrs,
 	}
 }

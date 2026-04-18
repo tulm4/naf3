@@ -15,7 +15,7 @@ import (
 var (
 	ErrTimeout         = errors.New("radius: response timeout")
 	ErrInvalidResponse = errors.New("radius: invalid response")
-	ErrIdMismatch     = errors.New("radius: response ID mismatch")
+	ErrIDMismatch      = errors.New("radius: response ID mismatch")
 )
 
 // Default configuration values.
@@ -28,26 +28,26 @@ const (
 // Config holds RADIUS client configuration.
 type Config struct {
 	ServerAddress  string
-	ServerPort    int
-	SharedSecret  string
-	Timeout       time.Duration
-	MaxRetries    int
+	ServerPort     int
+	SharedSecret   string
+	Timeout        time.Duration
+	MaxRetries     int
 	ResponseWindow time.Duration
-	Transport     string // "UDP" or "DTLS"
-	LocalBindAddr string
+	Transport      string // "UDP" or "DTLS"
+	LocalBindAddr  string
 }
 
-// RadiusClient is the main RADIUS client for NSSAAF.
-type RadiusClient struct {
-	config   Config
+// Client is the main RADIUS client for NSSAAF.
+type Client struct {
+	config    Config
 	transport Client
-	packetID uint8
-	mu       sync.Mutex
-	logger   *slog.Logger
+	packetID  uint8
+	mu        sync.Mutex
+	logger    *slog.Logger
 }
 
 // NewRadiusClient creates a new RADIUS client.
-func NewRadiusClient(cfg Config, logger *slog.Logger) (*RadiusClient, error) {
+func NewRadiusClient(cfg Config, logger *slog.Logger) (*Client, error) {
 	if cfg.ServerPort == 0 {
 		cfg.ServerPort = DefaultServerPort
 	}
@@ -68,21 +68,21 @@ func NewRadiusClient(cfg Config, logger *slog.Logger) (*RadiusClient, error) {
 		return nil, fmt.Errorf("radius: failed to create UDP transport: %w", err)
 	}
 
-	return &RadiusClient{
-		config:   cfg,
+	return &Client{
+		config:    cfg,
 		transport: transport,
-		logger:   logger,
+		logger:    logger,
 	}, nil
 }
 
 // Close shuts down the client.
-func (c *RadiusClient) Close() error {
+func (c *Client) Close() error {
 	return c.transport.Close()
 }
 
 // SendAccessRequest sends an Access-Request and waits for a response.
 // Spec: RFC 2865 §3.1
-func (c *RadiusClient) SendAccessRequest(ctx context.Context, attrs []Attribute) ([]byte, error) {
+func (c *Client) SendAccessRequest(ctx context.Context, attrs []Attribute) ([]byte, error) {
 	// Acquire next packet ID.
 	c.mu.Lock()
 	id := c.packetID
@@ -151,13 +151,13 @@ func (c *RadiusClient) SendAccessRequest(ctx context.Context, attrs []Attribute)
 }
 
 // validateResponse validates a RADIUS response packet.
-func (c *RadiusClient) validateResponse(data []byte, requestID uint8) error {
+func (c *Client) validateResponse(data []byte, requestID uint8) error {
 	if len(data) < 20 {
 		return fmt.Errorf("radius: response too short: %d bytes", len(data))
 	}
 
 	if data[1] != requestID {
-		return fmt.Errorf("%w: expected %d, got %d", ErrIdMismatch, requestID, data[1])
+		return fmt.Errorf("%w: expected %d, got %d", ErrIDMismatch, requestID, data[1])
 	}
 
 	code := data[0]
@@ -179,12 +179,12 @@ func (c *RadiusClient) validateResponse(data []byte, requestID uint8) error {
 
 // SendEAP forwards an EAP payload within a RADIUS Access-Request.
 // This is the primary method used by the EAP engine.
-func (c *RadiusClient) SendEAP(ctx context.Context, gpsi string, eapPayload []byte, snssaiSst uint8, snssaiSd string) ([]byte, error) {
+func (c *Client) SendEAP(ctx context.Context, gpsi string, eapPayload []byte, snssaiSst uint8, snssaiSd string) ([]byte, error) {
 	attrs := []Attribute{
 		MakeStringAttribute(AttrUserName, gpsi),
-		MakeStringAttribute(AttrCallingStationId, gpsi),
+		MakeStringAttribute(AttrCallingStationID, gpsi),
 		MakeIntegerAttribute(AttrServiceType, ServiceTypeAuthenticateOnly),
-		MakeIntegerAttribute(AttrNASPortType, NASPortTypeVirtual_),
+		MakeIntegerAttribute(AttrNASPortType, NASPortTypeVirtual),
 		Make3GPPSNSSAIAttribute(snssaiSst, snssaiSd),
 	}
 
@@ -198,23 +198,23 @@ func (c *RadiusClient) SendEAP(ctx context.Context, gpsi string, eapPayload []by
 }
 
 // Stats returns client statistics.
-func (c *RadiusClient) Stats() ClientStats {
+func (c *Client) Stats() ClientStats {
 	c.mu.Lock()
 	id := c.packetID
 	c.mu.Unlock()
 
 	return ClientStats{
-		PacketIDNext:   id,
+		PacketIDNext:  id,
 		ServerAddress: c.config.ServerAddress,
-		ServerPort:   c.config.ServerPort,
+		ServerPort:    c.config.ServerPort,
 	}
 }
 
 // ClientStats holds operational statistics.
 type ClientStats struct {
-	PacketIDNext uint8
+	PacketIDNext  uint8
 	ServerAddress string
-	ServerPort   int
+	ServerPort    int
 }
 
 // FragmentEAPMessage fragments an EAP message into chunks suitable for RADIUS.

@@ -11,27 +11,27 @@ import (
 
 // Session lifecycle errors.
 var (
-	ErrSessionNotFound       = errors.New("eap: session not found")
-	ErrSessionAlreadyDone    = errors.New("eap: session already completed")
-	ErrEapIdMismatch        = errors.New("eap: ID mismatch")
-	ErrMaxRoundsExceeded    = errors.New("eap: maximum rounds exceeded")
-	ErrSessionTimeout       = errors.New("eap: session timeout")
+	ErrSessionNotFound        = errors.New("eap: session not found")
+	ErrSessionAlreadyDone     = errors.New("eap: session already completed")
+	ErrEapIDMismatch          = errors.New("eap: ID mismatch")
+	ErrMaxRoundsExceeded      = errors.New("eap: maximum rounds exceeded")
+	ErrSessionTimeout         = errors.New("eap: session timeout")
 	ErrInvalidStateTransition = errors.New("eap: invalid state transition")
-	ErrMissingAuthCtxId     = errors.New("eap: missing auth context ID")
+	ErrMissingAuthCtxID       = errors.New("eap: missing auth context ID")
 )
 
 // Default session limits.
 const (
 	DefaultMaxRounds    = 20
 	DefaultRoundTimeout = 30 * time.Second
-	DefaultSessionTTL  = 10 * time.Minute
+	DefaultSessionTTL   = 10 * time.Minute
 )
 
 // Session represents the state of an ongoing EAP authentication session.
 // Spec: RFC 3748 §3, TS 33.501 §16.3
 type Session struct {
 	// Identity (immutable)
-	AuthCtxId string // NSSAAF session identifier (maps to SliceAuthContext authCtxId)
+	AuthCtxID string // NSSAAF session identifier (maps to SliceAuthContext authCtxID)
 	Gpsi      string // GPSI of the subscriber
 	Supi      string // SUPI of the subscriber (optional, for logging only)
 
@@ -50,7 +50,7 @@ type Session struct {
 	ExpectedId uint8 // Next expected EAP ID for incoming Response
 
 	// Cached response for idempotent retries
-	LastNonce    []byte   // SHA-256 hash of last processed EAP message
+	LastNonce      []byte // SHA-256 hash of last processed EAP message
 	CachedResponse []byte // Raw EAP response for retry deduplication
 
 	// Timing
@@ -70,7 +70,7 @@ const (
 	SessionStateIdle SessionState = iota
 	SessionStateInit
 	SessionStateEapExchange // multi-round EAP authentication
-	SessionStateCompleting // waiting for final AAA-S response
+	SessionStateCompleting  // waiting for final AAA-S response
 	SessionStateDone
 	SessionStateFailed
 	SessionStateTimeout
@@ -104,10 +104,10 @@ func (s SessionState) IsTerminal() bool {
 }
 
 // NewSession creates a new EAP session with default limits.
-func NewSession(authCtxId, gpsi string) *Session {
+func NewSession(authCtxID, gpsi string) *Session {
 	now := time.Now()
 	return &Session{
-		AuthCtxId:    authCtxId,
+		AuthCtxID:    authCtxID,
 		Gpsi:         gpsi,
 		State:        SessionStateInit,
 		MaxRounds:    DefaultMaxRounds,
@@ -191,8 +191,8 @@ func (s *Session) IsTimedOut() bool {
 
 // String implements fmt.Stringer.
 func (s *Session) String() string {
-	return fmt.Sprintf("EapSession{AuthCtxId=%s, State=%s, Method=%s, Rounds=%d/%d}",
-		s.AuthCtxId, s.State, s.Method, s.Rounds, s.MaxRounds)
+	return fmt.Sprintf("EapSession{AuthCtxID=%s, State=%s, Method=%s, Rounds=%d/%d}",
+		s.AuthCtxID, s.State, s.Method, s.Rounds, s.MaxRounds)
 }
 
 // TLSSessionState holds EAP-TLS specific state.

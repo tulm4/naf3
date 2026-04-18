@@ -1,0 +1,10 @@
+# oapi-codegen config for NSSAAF AIW API
+# Generates spec-compliant types and chi-server HTTP handlers.
+# Spec: TS 29.526 v18.x
+package: aiw
+output: gen/aiw/aiw.gen.go
+generate:
+  - types
+  - chi-server
+import-mapping:
+  TS29571_CommonData.yaml: github.com/operator/nssAAF/oapi-gen/gen/specs
