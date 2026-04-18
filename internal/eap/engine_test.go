@@ -375,7 +375,7 @@ func TestProcessEAPFailure(t *testing.T) {
 	require.NoError(t, decodeErr, "eapMsg should contain valid base64")
 	eapPkt, parseErr := Parse(eapBytes)
 	require.NoError(t, parseErr)
-	assert.Equal(t, CodeFailure, eapPkt.Code)
+	assert.Equal(t, EapCodeFailure, eapPkt.Code)
 }
 
 // ---------------------------------------------------------------------------

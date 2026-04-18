@@ -63,7 +63,6 @@ const (
 	NASPortTypeFrame       = 9
 	NASPortTypeGPRSPDP     = 14
 	NASPortTypeEPS         = 16
-	NASPortTypeVirtual     = 19 // Virtual (used by NSSAAF)
 )
 
 // Attribute types for NSSAA.

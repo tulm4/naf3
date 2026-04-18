@@ -22,11 +22,11 @@ type UDPConfig struct {
 	DialTimeout time.Duration
 }
 
-// Client is the interface for RADIUS transport clients.
-type Client interface {
+// Transport is the interface for low-level RADIUS packet transport (UDP or DTLS).
+type Transport interface {
 	// Send sends a RADIUS packet and returns the response.
 	Send(ctx context.Context, packet []byte, server string) ([]byte, error)
-	// Close closes the client.
+	// Close closes the transport.
 	Close() error
 	// Addr returns the local address.
 	Addr() net.Addr
@@ -98,7 +98,7 @@ type udpClient struct {
 }
 
 // NewUDPClient creates a UDP-based RADIUS client transport.
-func NewUDPClient(cfg UDPConfig) (Client, error) {
+func NewUDPClient(cfg UDPConfig) (Transport, error) {
 	bindAddr := cfg.LocalBindAddr
 	if bindAddr == "" {
 		bindAddr = ":0"
@@ -120,7 +120,7 @@ func NewUDPClient(cfg UDPConfig) (Client, error) {
 	}, nil
 }
 
-// Send implements Client.
+// Send implements Transport.
 func (c *udpClient) Send(ctx context.Context, packet []byte, server string) ([]byte, error) {
 	addr, err := net.ResolveUDPAddr("udp", server)
 	if err != nil {
@@ -153,12 +153,12 @@ func (c *udpClient) Send(ctx context.Context, packet []byte, server string) ([]b
 	return buf[:m], nil
 }
 
-// Close implements Client.
+// Close implements Transport.
 func (c *udpClient) Close() error {
 	return c.conn.Close()
 }
 
-// Addr implements Client.
+// Addr implements Transport.
 func (c *udpClient) Addr() net.Addr {
 	return c.conn.LocalAddr()
 }

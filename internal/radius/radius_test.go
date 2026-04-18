@@ -496,7 +496,7 @@ func TestFullPacketRoundTrip(t *testing.T) {
 	packet := BuildAccessRequest(1, auth, []Attribute{
 		MakeStringAttribute(AttrUserName, "alice@example.com"),
 		MakeIntegerAttribute(AttrServiceType, ServiceTypeAuthenticateOnly),
-		MakeIntegerAttribute(AttrNASPortType, NASPortTypeNASVirtual),
+		MakeIntegerAttribute(AttrNASPortType, NASPortTypeVirtual),
 		MakeStringAttribute(AttrCallingStationID, "alice@example.com"),
 		Make3GPPSNSSAIAttribute(1, "ABCDEF"),
 		MakeAttribute(AttrEAPMessage, []byte("eap-data")),

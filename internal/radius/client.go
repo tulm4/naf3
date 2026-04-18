@@ -40,7 +40,7 @@ type Config struct {
 // Client is the main RADIUS client for NSSAAF.
 type Client struct {
 	config    Config
-	transport Client
+	transport Transport
 	packetID  uint8
 	mu        sync.Mutex
 	logger    *slog.Logger
