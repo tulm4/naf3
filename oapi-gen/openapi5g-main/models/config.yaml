@@ -1,8 +1,0 @@
-# This is generated file, DO NOT EDIT.
-package: models
-generate:
-  models: true
-  strict-server: true
-output-options:
-  skip-prune: true
-output: models.go
