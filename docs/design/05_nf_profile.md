@@ -342,11 +342,11 @@ func (c *NRFDiscoveryCache) Get(ctx context.Context, key string) (interface{}, e
 
 ```go
 // NSSAAF FQDN → IP resolution via Kubernetes DNS
-// nssAAF.operator.com → ClusterIP → Envoy sidecar
+// nssAAF.operator.com → LoadBalancer → HTTP Gateway pods
 
 // For multi-pod: Kubernetes Headless Service
 // nssAAF.operator.com → all pod IPs (A records)
-// Client-side load balancing by Envoy sidecar
+// Client-side load balancing by NSSAAF HTTP Gateway (not Envoy sidecar)
 
 // Service URL construction:
 func BuildServiceURL(baseURL, service, version string) string {

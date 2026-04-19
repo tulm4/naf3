@@ -308,13 +308,35 @@ redis:
     size: 10Gi
     storageClass: nssAAF-local-storage
 
-# Istio integration
-istio:
+# HTTP Gateway (separate Deployment, N replicas)
+httpGateway:
   enabled: true
-  mtls:
-    mode: STRICT
-  host: nssAAF.operator.com
-  gateway: nssAAF-gateway
+  replicas: 3
+  bindPodIP: true  # Each replica binds its own pod IP for external interface
+
+# Biz Pod (separate Deployment, N replicas — stateless)
+biz:
+  enabled: true
+  replicas: 5
+
+# AAA Gateway (separate Deployment, 2 replicas, active-standby)
+aaaGateway:
+  enabled: true
+  replicas: 2  # hard maximum — 1 active, 1 standby
+  strategy: Recreate
+  keepalived:
+    enabled: true
+    vip: "10.1.100.200"    # Stable VIP seen by AAA-S
+    interface: "net0"       # Multus CNI bridge VLAN interface
+    virtualRouterId: 60
+  multus:
+    enabled: true
+    networkAttachment: "aaa-bridge-vlan"
+
+# Internal communication
+internal:
+  bizServiceURL: "http://svc-nssaa-biz:8080"
+  aaaGatewayURL: "http://svc-nssaa-aaa:9090"
 ```
 
 ---
@@ -344,7 +366,7 @@ spec:
         {{- include "nssAAF.labels" . | nindent 8 }}
         app: {{ include "nssAAF.name" . }}
         app.kubernetes.io/component: nssAAF
-        sidecar.istio.io/inject: "true"
+        # No Istio sidecar injection — NSSAAF uses its own HTTP Gateway for TLS termination
     spec:
       {{- with .Values.priorityClassName }}
       priorityClassName: {{ . | quote }}
@@ -493,4 +515,4 @@ spec:
 | AC4 | Helm chart với production values | values-production.yaml |
 | AC5 | ArgoCD GitOps deployment | ArgoCD Application |
 | AC6 | Prometheus ServiceMonitor | Prometheus Operator CRD |
-| AC7 | Istio sidecar injection enabled | sidecar.istio.io/inject: "true" |
+| AC7 | 3-component deployment: HTTP GW (N replicas), Biz (N replicas), AAA GW (2 replicas active-standby) | 3 Helm charts, keepalived VIP, Multus CNI |

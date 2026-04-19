@@ -151,6 +151,8 @@ PUT /nnssaaf-aiw/v1/authentications/{authCtxId}
 
 Wires the chi router, applies global middleware, handles graceful shutdown.
 
+**Note:** This entry point runs all components in a single process for local development only. For production Kubernetes deployment, see Phase R (3-Component Refactor): `cmd/biz/`, `cmd/http-gateway/`, `cmd/aaa-gateway/`.
+
 ---
 
 ## Implementation Order
@@ -163,10 +165,13 @@ Wires the chi router, applies global middleware, handles graceful shutdown.
 5. cd oapi-gen && make          ← Generate nssaa.gen.go, aiw.gen.go
 6. internal/types/              ← Already exists, no changes needed
 7. internal/api/common/         ← Already exists, no changes needed
-8. internal/api/nssaa/         ← New: handler.go, router.go, handler_test.go
-9. internal/api/aiw/           ← New: handler.go, router.go, handler_test.go
+8. internal/api/nssaa/         ← handler.go, router.go, handler_test.go
+9. internal/api/aiw/           ← handler.go, router.go, handler_test.go
 10. cmd/nssAAF/main.go         ← Updated to wire new handlers
 11. go mod tidy
+```
+
+**Post-Phase-R note:** After completing Phase R (3-Component Refactor), the same handlers are wired into `cmd/biz/main.go` instead. The `internal/api/nssaa/` and `internal/api/aiw/` packages are not modified — they are reused across both the monolithic dev binary and the Biz Pod binary.
 ```
 
 ---

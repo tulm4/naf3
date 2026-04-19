@@ -26,6 +26,7 @@
 | 5 | Security | `internal/auth/`, `internal/crypto/` | P1 | 1 week |
 | 6 | Integration | `internal/nrf/`, `internal/udm/` | P1 | 1 week |
 | 7 | Kubernetes | `deployments/` | P1 | 1 week |
+| **R** | **3-Component Refactor** | `internal/proto/`, `cmd/biz/`, `cmd/http-gateway/`, `cmd/aaa-gateway/`, `internal/aaa/gateway/` | **P0** | **4 weeks** |
 
 ---
 
@@ -53,6 +54,7 @@
 | Phase 5: Security | ⏳ PENDING | `internal/auth/`, `internal/crypto/` |
 | Phase 6: Integration | ⏳ PENDING | `internal/nrf/`, `internal/udm/`, `internal/amf/` |
 | Phase 7: Kubernetes | ⏳ PENDING | — |
+| **Phase R: 3-Component Refactor** | 🔄 PENDING | — |
 
 ---
 
@@ -61,6 +63,11 @@
 | Module | Design Doc | Phase |
 |--------|-----------|-------|
 | `cmd/nssAAF/` | `docs/design/01_service_model.md` | 0 |
+| `cmd/biz/` | `docs/design/01_service_model.md` §5.4 | R |
+| `cmd/http-gateway/` | `docs/design/01_service_model.md` §5.4.4 | R |
+| `cmd/aaa-gateway/` | `docs/design/01_service_model.md` §5.4.5 | R |
+| `internal/proto/` | `docs/design/01_service_model.md` §5.4.6 | R |
+| `internal/aaa/gateway/` | `docs/design/01_service_model.md` §5.4.5 | R |
 | `internal/api/common/` | `docs/design/02_nssaa_api.md` §Common | 1 |
 | `internal/api/nssaa/` | `docs/design/02_nssaa_api.md` | 1 |
 | `internal/api/aiw/` | `docs/design/03_aiw_api.md` | 1 |
@@ -96,28 +103,37 @@
 
 ```
 nssAAF/
-├── cmd/nssAAF/           # Entry point
-├── internal/             # Private packages
-│   ├── api/            # HTTP handlers
-│   ├── types/          # Data types
-│   ├── eap/            # EAP engine
-│   ├── radius/         # RADIUS client
-│   ├── diameter/       # Diameter client
-│   ├── storage/        # PostgreSQL
-│   ├── cache/         # Redis
-│   ├── nrf/           # NRF client
-│   ├── udm/           # UDM client
-│   ├── auth/           # Authentication
-│   └── resilience/     # HA patterns
-├── pkg/                # Public packages
-├── deployments/        # K8s manifests
-├── test/               # Integration/E2E
-├── scripts/            # Build tools
+├── cmd/
+│   ├── nssAAF/            # All-in-one binary (DEPRECATED, dev mode only)
+│   ├── biz/               # Business Logic Pod binary (Phase R)
+│   ├── http-gateway/      # HTTP Gateway Pod binary (Phase R)
+│   └── aaa-gateway/      # AAA Gateway Pod binary (Phase R)
+├── internal/
+│   ├── proto/             # Internal component communication contracts (Phase R) [NEW]
+│   ├── aaa/
+│   │   └── gateway/       # AAA Gateway library (Phase R) [NEW]
+│   ├── api/               # HTTP handlers
+│   ├── types/             # Data types
+│   ├── eap/               # EAP engine
+│   ├── radius/            # RADIUS encode/decode (used by Biz Pod)
+│   ├── diameter/          # Diameter encode/decode (used by Biz Pod)
+│   ├── storage/           # PostgreSQL
+│   ├── cache/             # Redis
+│   ├── nrf/               # NRF client
+│   ├── udm/               # UDM client
+│   ├── auth/               # Authentication
+│   └── resilience/         # HA patterns
+├── pkg/                   # Public packages
+├── deployments/            # K8s manifests (Phase R: 3-component charts)
+├── test/                   # Integration/E2E
+├── scripts/                # Build tools
 └── docs/
-    ├── roadmap/         # ← YOU ARE HERE
-    ├── design/         # Design documents
-    └── 3gppfilter/    # Filtered specs
+    ├── roadmap/            # ← Roadmap files
+    ├── design/             # Design documents
+    └── 3gppfilter/        # Filtered specs
 ```
+
+**Note:** After Phase R, `internal/radius/` and `internal/diameter/` are used only by the Biz Pod. The AAA Gateway (`cmd/aaa-gateway/`) uses raw sockets only and does not depend on these packages.
 
 ---
 

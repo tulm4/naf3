@@ -27,37 +27,42 @@
 │                          │                                              │
 │                          ▼                                              │
 │  ┌─────────────────────────────────────────────────────┐               │
-│  │              NSSAAF MICROSERVICE CLUSTER             │               │
-│  │   ┌───────────┐  ┌───────────┐  ┌───────────┐       │               │
-│  │   │ NSSAAF    │  │ NSSAAF    │  │ NSSAAF    │       │               │
-│  │   │ Instance 1│  │ Instance 2│  │ Instance N│       │               │
-│  │   │ (Pod)     │  │ (Pod)     │  │ (Pod)     │       │               │
-│  │   └─────┬─────┘  └─────┬─────┘  └─────┬─────┘       │               │
-│  │         └──────────────┼──────────────┘              │               │
-│  │                        ▼                               │               │
-│  │              ┌─────────────────┐                      │               │
-│  │              │  Service Mesh   │                      │               │
-│  │              │ (Istio/Envoy)   │                      │               │
-│  │              └────────┬────────┘                      │               │
-│  │                       │                               │               │
-│  │         ┌─────────────┼─────────────┐                │               │
-│  │         ▼             ▼             ▼                │               │
-│  │  ┌────────────┐ ┌───────────┐ ┌───────────┐         │               │
-│  │  │ SBI GW     │ │ AAA Proxy │ │ State     │         │               │
-│  │  │ (HTTP/2)   │ │ (R/D)     │ │ Store     │         │               │
-│  │  └────────────┘ └───────────┘ └───────────┘         │               │
-│  └─────────────────────────────────────────────────────┘               │
-│                          │                                              │
-│                          ▼                                              │
+│  │              NSSAAF 3-COMPONENT CLUSTER               │               │
+│  │                                                        │               │
+│  │  ┌───────────────────────────────────────────────┐    │               │
+│  │  │    HTTP Gateway (N replicas, Envoy)           │    │               │
+│  │  │    TLS 1.3 termination, routes to Biz Pods  │    │               │
+│  │  │    Binds to pod IP on external interface     │    │               │
+│  │  └───────────────────────────────────────────────┘    │               │
+│  │                          │                               │               │
+│  │                          ▼                               │               │
+│  │  ┌───────────────────────────────────────────────┐    │               │
+│  │  │    Biz Pods (N replicas, stateless)          │    │               │
+│  │  │    SBI Handlers · EAP Engine · Session State │    │               │
+│  │  │    RADIUS/Diameter encode/decode              │    │               │
+│  │  │    Communicates with AAA GW via HTTP          │    │               │
+│  │  └───────────────────────────────────────────────┘    │               │
+│  │                          │                               │               │
+│  │                          ▼                               │               │
+│  │  ┌───────────────────────────────────────────────┐    │               │
+│  │  │    AAA Gateway (2 replicas: active+standby)  │    │               │
+│  │  │    keepalived VIP (Multus CNI bridge VLAN)   │    │               │
+│  │  │    FORWARDS raw transport — no encode/decode│    │               │
+│  │  └───────────────────────────────────────────────┘    │               │
+│  │                          │                               │               │
+│  └──────────────────────────┼───────────────────────────────┘               │
+│                             │                                              │
+│                             ▼                                              │
 │  ┌─────────────────────────────────────────────────────┐               │
 │  │              THIRD-PARTY / H-PLMN                   │               │
 │  │   ┌───────────┐  ┌───────────┐  ┌───────────┐      │               │
-│  │   │  AAA-P    │  │  AAA-S    │  │ NSS-AAA   │      │               │
-│  │   │ (Proxy)   │  │(Enterprise│  │ (Third-   │      │               │
-│  │   │           │  │ Operator) │  │  Party)   │      │               │
+│  │   │  AAA-S    │  │  AAA-S    │  │ NSS-AAA   │      │               │
+│  │   │(Enterprise │  │(Enterprise │  │ (Third-   │      │               │
+│  │   │ Operator)  │  │ Operator)  │  │  Party)   │      │               │
 │  │   └───────────┘  └───────────┘  └───────────┘      │               │
 │  └─────────────────────────────────────────────────────┘               │
 └─────────────────────────────────────────────────────────────────────────┘
+See docs/design/01_service_model.md §5.4 for full deployment details.
 ```
 
 ---
@@ -73,7 +78,7 @@ Nội dung:
 - NSSAAF vs các NF khác: AMF, AUSF, UDM, NRF
 - SBA Interface: N58 (Nnssaaf_NSSAA), N60 (Nnssaaf_AIW), N59 (Nudm_UECM_Get)
 - NF Profile đăng ký với NRF
-- Service mesh: sidecar pattern (Envoy/Istio)
+- 3-component architecture: HTTP Gateway + Biz Pods + AAA Gateway (see docs/design/01_service_model.md §5.4)
 - Multi-tenancy: PLMN isolation, slice isolation
 - Release version: 18.7.0
 ```
@@ -263,10 +268,10 @@ Mục tiêu: Horizontal scaling không cần session affinity
 
 Nội dung:
 - All session state in external store (PostgreSQL + Redis)
-- NSSAAF instances are stateless:
-  · No in-memory EAP session state
-  · No local connection pools
-  · All state via service mesh sidecar
+- NSSAAF Biz Pods are stateless:
+  · No in-memory EAP session state (Redis)
+  · No local connection pools (pooled connections to PostgreSQL)
+  · All state via Redis pub/sub for cross-pod routing
 - Horizontal Pod Autoscaler (HPA):
   · Metrics: CPU > 60%, memory > 70%, RPS > 10k
   · Min replicas: 3 per AZ

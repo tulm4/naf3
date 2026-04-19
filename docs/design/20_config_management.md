@@ -292,7 +292,7 @@ func (r *ConfigReloader) Start(ctx context.Context) error {
     return nil
 }
 
-// Kubernetes configmap reload via sidecar
+// Kubernetes configmap reload via in-process watcher
 // Or: Kubernetes API watch on ConfigMap
 func (r *ConfigReloader) WatchConfigMap(ctx context.Context, cmName, ns string) error {
     clientset, _ := kubernetes.NewForConfig(nil)

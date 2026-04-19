@@ -4,6 +4,8 @@
 
 Phase 6 tích hợp với các NF khác: NRF, UDM, AMF.
 
+**Note:** Integration with AMF (Re-Auth, Revocation notifications) is wired into the Biz Pod (`cmd/biz/`). The AMF notifier calls back via HTTP Gateway. See `docs/roadmap/PHASE_Refactor_3Component.md` for the 3-component architecture context.
+
 ## Modules to Implement
 
 ### 1. `internal/nrf/` — NRF Client

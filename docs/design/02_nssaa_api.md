@@ -498,13 +498,16 @@ POST https://amf1.operator.com:8080/namf-comm/v1/subscriptions
 ### 3.1 Request Handling Pipeline
 
 ```
-HTTP/2 Connection (TLS 1.3 terminated at Istio sidecar)
+HTTP/2 Connection (TLS 1.3 terminated at HTTP Gateway — separate Deployment)
          │
          ▼
-Istio Sidecar (mTLS, rate limiting, observability)
+NSSAAF HTTP Gateway (Envoy, separate Deployment, N replicas)
+  · TLS 1.3 termination
+  · Routes N58/N60 to Biz Pods via ClusterIP
+  · Rate limiting, circuit breaking, observability
          │
          ▼
-NSSAAF SBI Gateway (Java/Go/Rust)
+NSSAAF Biz Pod (Go, N replicas — stateless)
   │
   ├─ Request Validation Layer
   │    ├─ OAuth2 token validation (JWT)
@@ -518,7 +521,7 @@ NSSAAF SBI Gateway (Java/Go/Rust)
   ├─ Business Logic Layer
   │    ├─ AaaConfigResolver
   │    ├─ EapSessionManager
-  │    ├─ AaaProtocolEncoder
+  │    ├─ AaaProtocolEncoder (RADIUS/Diameter — encode/decode here)
   │    └─ NotificationDispatcher
   │
   └─ Persistence Layer
@@ -529,13 +532,14 @@ NSSAAF SBI Gateway (Java/Go/Rust)
          ▼
 Async: EapRoundProcessor (background)
   │
-  ├─ AaaClient (RADIUS/Diameter)
-  │    ├─ RADIUS: async UDP
-  │    └─ Diameter: async SCTP/TCP
+  ├─ AaaClient (HTTP to AAA Gateway)
+  │    └─ POST /aaa/forward → AAA Gateway → RADIUS/Diameter to AAA-S
   │
   └─ SessionStateUpdater
        ├─ Write to PostgreSQL
        └─ Update Redis cache
+
+**Note:** After Phase R (3-Component Refactor), the "AaaClient" is an HTTP client that forwards raw transport bytes to the AAA Gateway. The AAA Gateway (separate Deployment, 2 replicas, active-standby) handles the raw socket I/O to AAA-S. See `docs/design/01_service_model.md` §5.4 and `docs/roadmap/PHASE_Refactor_3Component.md`.
 ```
 
 ### 3.2 Database Schema (PostgreSQL)

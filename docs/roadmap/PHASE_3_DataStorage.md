@@ -80,7 +80,10 @@ nssaa:idempotency:{ctxId}:{msgHash} → String JSON (1 hour TTL)
 nssaa:ratelimit:gpsi:{gpsiHash} → Counter (1 min TTL)
 nssaa:ratelimit:amf:{amfId} → Counter (5 sec TTL)
 nssaa:lock:session:{authCtxId} → String NX (30 sec TTL)
+nssaa:session-corr:{sessionId} → Hash (authCtxID, podID, snssai) (5 min TTL)
 ```
+
+**Note (Phase R):** The `nssaa:session-corr:{sessionId}` key is used for routing AAA-S responses back to the correct Biz Pod via Redis pub/sub. See `docs/roadmap/PHASE_Refactor_3Component.md` Phase 1 for details.
 
 ## Validation Checklist
 

@@ -5,6 +5,11 @@
 | Module | Design Doc | Phase | Status |
 |--------|-----------|-------|--------|
 | `cmd/nssAAF/` | `docs/design/01_service_model.md` | 0 | READY |
+| `cmd/biz/` | `docs/design/01_service_model.md` §5.4 | R | TBD |
+| `cmd/http-gateway/` | `docs/design/01_service_model.md` §5.4.4 | R | TBD |
+| `cmd/aaa-gateway/` | `docs/design/01_service_model.md` §5.4.5 | R | TBD |
+| `internal/proto/` | `docs/design/01_service_model.md` §5.4.6 | R | TBD |
+| `internal/aaa/gateway/` | `docs/design/01_service_model.md` §5.4.5 | R | TBD |
 | `internal/api/common/` | `docs/design/02_nssaa_api.md` | 1 | READY |
 | `internal/types/` | `docs/design/04_data_model.md` | 1 | READY |
 | `internal/api/nssaa/` | `docs/design/02_nssaa_api.md` | 1 | READY |
@@ -16,9 +21,9 @@
 | `internal/aaa/` | `docs/design/09_aaa_proxy.md` | 2 | READY |
 | `internal/storage/postgres/` | `docs/design/11_database_ha.md` | 3 | READY |
 | `internal/cache/redis/` | `docs/design/12_redis_ha.md` | 3 | READY |
-| `internal/resilience/` | `docs/design/10_ha_architecture.md` | 4 | READY |
-| `internal/auth/` | `docs/design/15_sbi_security.md`, `docs/design/16_aaa_security.md` | 5 | READY |
-| `internal/crypto/` | `docs/design/17_crypto.md`, `docs/design/16_aaa_security.md` | 5 | READY |
+| `internal/resilience/` | `docs/design/10_ha_architecture.md` | 4 | TBD |
+| `internal/auth/` | `docs/design/15_sbi_security.md`, `docs/design/16_aaa_security.md` | 5 | TBD |
+| `internal/crypto/` | `docs/design/17_crypto.md`, `docs/design/16_aaa_security.md` | 5 | TBD |
 | `internal/nrf/` | `docs/design/05_nf_profile.md` | 6 | READY |
 | `internal/udm/` | `docs/design/22_udm_integration.md` | 6 | READY |
 | `internal/amf/` | `docs/design/21_amf_integration.md` | 6 | READY |
@@ -29,6 +34,10 @@
 | *(cross-cutting)* | `docs/design/24_test_strategy.md` | ALL | TBD |
 | `deployments/helm/` | `docs/design/25_kubeadm_setup.md` | 7 | READY |
 
+
+| `deployments/helm/nssaa-biz/` | `docs/design/01_service_model.md` §5.4.5 | R | TBD |
+| `deployments/helm/nssaa-http-gateway/` | `docs/design/01_service_model.md` §5.4.4 | R | TBD |
+| `deployments/helm/nssaa-aaa-gateway/` | `docs/design/01_service_model.md` §5.4.5 | R | TBD |
 ## Dependency Graph
 
 ```

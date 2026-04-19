@@ -1,5 +1,21 @@
 # NSSAAF Quick Reference
 
+## Architecture
+
+NSSAAF uses a **3-component model** for production Kubernetes deployments:
+
+```
+AMF/AUSF → HTTP Gateway (N replicas) → Biz Pods (N replicas) → AAA Gateway (2 replicas, active-standby) → AAA-S
+```
+
+| Component | Replicas | Protocol |
+|---|---|---|
+| HTTP Gateway | N (stateless) | HTTPS/443 → HTTP/ClusterIP |
+| Biz Pod | N (stateless) | HTTP/9090 → AAA Gateway |
+| AAA Gateway | 2 (active-standby) | RADIUS UDP :1812 / Diameter TCP :3868 |
+
+See `docs/design/01_service_model.md` §5.4 for full details.
+
 ## Critical Facts (MUST KNOW)
 
 ### Key Data Types
@@ -115,6 +131,14 @@ eap:
 aaa:
   responseTimeoutMs: 10000  # 10 seconds
   maxRetries: 3
+
+# Internal communication (Phase R: 3-component)
+biz:
+  aaaGatewayUrl: "http://svc-nssaa-aaa:9090"  # Biz Pod → AAA Gateway
+aaaGateway:
+  listenRadius: ":1812"
+  listenDiameter: ":3868"
+  bizServiceUrl: "http://svc-nssaa-biz:8080"   # AAA Gateway → Biz Pod
 
 # Rate Limiting
 rateLimit:

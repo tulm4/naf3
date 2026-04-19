@@ -352,58 +352,67 @@ Tenant-Routed Handler
 
 ### 5.1 Component Architecture
 
+The NSSAAF is structured as a **3-component model** for Kubernetes production deployments:
+
+1. **HTTP Gateway**: Go stdlib `net/http` with TLS 1.3 termination. Each replica binds its own pod IP for external interfaces. Envoy migration is planned for a future phase (see `docs/roadmap/PHASE_Refactor_3Component.md` §7).
+2. **AAA Gateway**: Custom Go UDP/TCP server. 2 replicas in active-standby, sharing a VIP via keepalived + Multus CNI bridge VLAN. Forwards raw transport to Business Logic. Envoy migration for AAA proxy is also planned for the future.
+3. **Business Logic Pods**: NSSAAF application (EAP engine, session state). No direct external connectivity. Communicates with AAA Gateway via internal HTTP.
+
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                      NSSAAF Service                          │
-│                                                               │
-│  ┌────────────────────────────────────────────────────────┐  │
-│  │                    SBI Gateway                          │  │
-│  │  ┌──────────────┐  ┌──────────────┐  ┌────────────┐ │  │
-│  │  │ N58 Handler  │  │ N60 Handler  │  │ N59 Client │ │  │
-│  │  │ (Nnssaaf_    │  │ (Nnssaaf_    │  │ (UDM UECM) │ │  │
-│  │  │  NSSAA)      │  │  AIW)        │  │            │ │  │
-│  │  └──────────────┘  └──────────────┘  └────────────┘ │  │
-│  └────────────────────────┬─────────────────────────────────┘  │
-│                           │                                    │
-│  ┌────────────────────────▼─────────────────────────────────┐  │
-│  │                    EAP Engine                             │  │
-│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │  │
-│  │  │ EAP-TLS      │  │ EAP-TTLS     │  │ EAP-AKA'     │  │  │
-│  │  │ Handler      │  │ Handler      │  │ Handler      │  │  │
-│  │  └──────────────┘  └──────────────┘  └──────────────┘  │  │
-│  │                                                          │  │
-│  │  ┌──────────────────────────────────────────────────┐   │  │
-│  │  │ Session State Machine                             │   │  │
-│  │  │ IDLE→INIT→EAP_EXCHANGE→COMPLETING→DONE          │   │  │
-│  │  └──────────────────────────────────────────────────┘   │  │
-│  └────────────────────────┬─────────────────────────────────┘  │
-│                           │                                    │
-│  ┌────────────────────────▼─────────────────────────────────┐  │
-│  │                   AAA Protocol Layer                      │  │
-│  │  ┌──────────────────────┐  ┌──────────────────────────┐  │  │
-│  │  │    RADIUS Client     │  │    Diameter Client       │  │  │
-│  │  │    (RFC 2865)        │  │    (RFC 7155)           │  │  │
-│  │  │    • Access-Request  │  │    • DER/DEA             │  │  │
-│  │  │    • Access-Challenge│  │    • STR/STA             │  │  │
-│  │  │    • Access-Accept   │  │    • CER/CEA             │  │  │
-│  │  └──────────────────────┘  └──────────────────────────┘  │  │
-│  │                                                          │  │
-│  │  ┌──────────────────────────────────────────────────┐   │  │
-│  │  │ AAA Proxy Client (optional)                      │   │  │
-│  │  │ • Protocol passthrough                          │   │  │
-│  │  │ • S-NSSAI → ENSI translation                   │   │  │
-│  │  └──────────────────────────────────────────────────┘   │  │
-│  └────────────────────────┬─────────────────────────────────┘  │
-│                           │                                    │
-│  ┌────────────────────────▼─────────────────────────────────┐  │
-│  │                External Integrations                      │  │
-│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │  │
-│  │  │ NRF Client   │  │ UDM Client   │  │ Config Store │  │  │
-│  │  └──────────────┘  └──────────────┘  └──────────────┘  │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                                                               │
-└───────────────────────────────────────────────────────────────┘
++=============================================================================================================+
+|                                    NSSAAF Service (3-Component Model)                                      |
+|                                                                                                            |
+|  +======================================================================================================+  |
+|  ||                              HTTP Gateway (Deployment, N replicas)                               ||  |
+|  ||  +----------------------------------------------------------------------------------------+    ||  |
+|  ||  | Go stdlib net/http (TLS 1.3)                                                           |    ||  |
+|  ||  |  * TLS 1.3 termination                                                                  |    ||  |
+|  ||  |  * Routes N58/N60 to Business Logic pods via ClusterIP                                 |    ||  |
+|  ||  |  * Routes to Business Logic pods via ClusterIP                                       |    ||  |
+|  ||  |  * Binds to pod IP on external interface                                              |    ||  |
+|  ||  +----------------------------------------------------------------------------------------+    ||  |
+|  +======================================================================================================+  |
+|                                              |                                                                 |
+|                                              v                                                                 |
+|  +======================================================================================================+  |
+|  ||                          Business Logic Pods (Deployment, N replicas)                           ||  |
+|  ||  +=========================================================================================+    ||  |
+|  ||  | NSSAAF Application                                                                       |    ||  |
+|  ||  |  +----------------------+  +----------------------+  +------------------------+  |    ||  |
+|  ||  |  | EAP-TLS Handler     |  | EAP-TTLS Handler   |  | EAP-AKA' Handler       |  |    ||  |
+|  ||  |  +----------------------+  +----------------------+  +------------------------+  |    ||  |
+|  ||  |  +----------------------------------------------------------------------------------------+ |    ||  |
+|  ||  |  | Session State Machine (PostgreSQL + Redis)                                    |    ||  |
+|  ||  |  | IDLE->INIT->EAP_EXCHANGE->COMPLETING->DONE                                  |    ||  |
+|  ||  |  +----------------------------------------------------------------------------------------+ |    ||  |
+|  ||  |  | HTTP Client: sends/receives raw AAA transport via internal HTTP                  |    ||  |
+|  ||  |  | No direct external connectivity                                                    |    ||  |
+|  ||  +=========================================================================================+    ||  |
+|  +======================================================================================================+  |
+|                                              |                                                                 |
+|                                              v                                                                 |
+|  +======================================================================================================+  |
+|  ||              AAA Gateway (Deployment, 2 replicas: active + standby)                            ||  |
+|  ||  +=========================================================================================+    ||  |
+|  ||  | Go Custom UDP/TCP Server                                                              |    ||  |
+|  ||  |  * RADIUS UDP listener (:1812)                                                           |    ||  |
+|  ||  |  * Diameter TCP/SCTP listener (:3868)                                                     |    ||  |
+|  ||  |  * FORWARDS raw transport to Business Logic -- no encode/decode                         |    ||  |
+|  ||  +=========================================================================================+    ||  |
+|  ||  keepalived (VIP on Multus CNI bridge VLAN interface)                                         ||  |
+|  ||  1 active + 1 standby  |  VIP = stable source IP for AAA-S                                  ||  |
+|  +======================================================================================================+  |
+|                                                                                                            |
+|  +======================================================================================================+  |
+|  ||                               External Integrations                                             ||  |
+|  ||  +---------------+  +---------------+  +---------------+  +------------------------+        ||  |
+|  ||  | NRF Client    |  | UDM Client    |  | PostgreSQL    |  | Redis (Session Cache)  |        ||  |
+|  ||  +---------------+  +---------------+  +---------------+  +------------------------+        ||  |
+|  +======================================================================================================+  |
++=============================================================================================================+
 ```
+
+**Note on development mode:** In single-pod / development mode, all three components (HTTP Gateway, AAA Gateway, Business Logic) run as a single process. The 3-component separation is required for production multi-pod Kubernetes deployments. See §5.4 for full details.
 
 ### 5.2 Data Flow per Request Type
 
@@ -523,7 +532,342 @@ Main Event Loop:
         └── Audit log flusher    (batch: every 5s)
 ```
 
----
+### 5.4 Multi-Pod Kubernetes Deployment
+
+#### 5.4.1 The Source-IP Problem
+
+In a multi-pod Kubernetes deployment, each pod has its own ephemeral IP. Consumer NFs and AAA servers need a **single, stable address** to reach NSSAAF regardless of which pod handles a request:
+
+| Protocol | Transport | Consumer perspective | IP stability needed |
+|---|---|---|---|
+| HTTP/2 (SBI N58/N60) | TCP/443 | AMF/AUSF discover via NRF with FQDN | No — TLS cert bound to FQDN |
+| RADIUS | UDP/1812 | AAA-S uses source IP for shared-secret validation | **Yes — stable IP required** |
+| Diameter | TCP/SCTP/3868 | AAA-S uses source IP for connection authorization | **Yes — stable IP required** |
+
+Embedding RADIUS/Diameter clients directly in each NSSAAF app pod fails because AAA-S would see different source IPs from different pods, breaking shared-secret validation and connection authorization.
+
+#### 5.4.2 Architecture: 3-Component Model
+
+The production deployment follows a **3-component model**, each deployed as a separate Kubernetes Deployment:
+
+1. **HTTP Gateway**: Go stdlib `net/http` with TLS 1.3. Each replica binds its own pod IP for external interfaces. Envoy migration planned (see `docs/roadmap/PHASE_Refactor_3Component.md` §7).
+2. **AAA Gateway**: Custom Go UDP/TCP server. **2 replicas: 1 active + 1 standby**, sharing a **Virtual IP (VIP)** via **keepalived**. The VIP floats over a **Multus CNI bridge VLAN** interface, giving AAA-S a single consistent IP regardless of which replica is active.
+3. **Business Logic Pods**: NSSAAF application code. No direct external connectivity. Receives and sends AAA traffic via HTTP through the AAA Gateway.
+
+**Implementation:** Initial deployment uses Go stdlib for HTTP Gateway and a custom Go UDP/TCP server for AAA Gateway.
+
+```
++=============================================================================================================+
+||                                       Operator Network                                                     ||
+||                                                                                                            ||
+||   +---------+  +---------+            +---------------------------------------+      +---------------+      ||
+||   |   AMF   |  |  AUSF   |            |             AAA-S Server             |      |     NRF       |      ||
+||   | (N58)  |  |  (N60)  |            |  * RADIUS: shared-secret by IP     |      |               |      ||
+||   +----+----+  +----+----+            |  * Diameter: CER/CEA by source IP   |      +-------+-------+      ||
+||        |            |                            +----------------+----------------+            |             ||
+||        | HTTPS/443 | HTTPS/443                  | UDP:1812 / TCP:3868            |            |             ||
+||        v            v                              +--------------------------------v-+          |             ||
+||   +====================================+              |                            |          |             ||
+||   ||  HTTP Gateway (N replicas)       ||              |                            |          |             ||
+||   ||  Go stdlib net/http (TLS 1.3)       ||              |                            |          |             ||
+||   ||  * TLS 1.3 termination          ||              |                            |          |             ||
+||   ||  * Routes N58/N60 to Biz pods   ||              |                            |          |             ||
+||   ||  * Stable FQDN: nssaa-gw.operator.com        ||              |                            |          |             ||
+||   ||  * Binds to pod IP on external iface ||              |                            |          |             ||
+||   +====================================+              |                            |          |             ||
+||                 | ClusterIP                            |                            |          |             ||
+||   +=============+====================================+                            |          |             ||
+||   ||                         Business Logic Pods (N replicas)                  ||                            |             ||
+||   ||  +===========================================================+           ||                            |             ||
+||   ||  | NSSAAF Business Logic                                  |           ||                            |             ||
+||   ||  |  * SBI Handlers (N58/N60/N59)                        |           ||                            |             ||
+||   ||  |  * EAP Engine                                         |           ||                            |             ||
+||   ||  |  * Session State (PostgreSQL + Redis)                 |           ||                            |             ||
+||   ||  |  * No direct external connectivity                     |           ||                            |             ||
+||   ||  |  * Receives/transmits AAA via HTTP to AAA Gateway    |           ||                            |             ||
+||   ||  +===========================================================+           ||                            |             ||
+||   +=================================================================+                            |             ||
+||                            | HTTP/8080                              |                            |             ||
+||   +========================+========================================+                            |             ||
+||   ||                    AAA Gateway (2 replicas: 1 active + 1 standby)         ||                            |             ||
+||   ||  +=========================================================+             ||                            |             ||
+||   ||  | Go Custom UDP/TCP Server                            |             ||                            |             ||
+||   ||  |  * RADIUS UDP listener (:1812)                              |             ||                            |             ||
+||   ||  |  * Diameter TCP/SCTP listener (:3868)                        |             ||                            |             ||
+||   ||  |  * FORWARDS raw transport to/from Business Logic via HTTP   |             ||                            |             ||
+||   ||  |  * No encode/decode -- pass-through                        |             ||                            |             ||
+||   ||  +=========================================================+             ||                            |             ||
+||   ||  Multus CNI Bridge VLAN Interface                              |             ||                            |             ||
+||   ||  +=========================================================+             ||                            |             ||
+||   ||  | keepalived: 1 active + 1 standby                          |             ||                            |             ||
+||   ||  | Virtual IP (VIP) = stable AAA-S facing IP                 |             ||                            |             ||
+||   ||  +=========================================================+             ||                            |             ||
+||   +==================================================================+                            |             ||
+||                                  | VIP (keepalived)                                              |             ||
+||                                  +---------------------------------------------------------------v-------------+
++=============================================================================================================+
+```
+
+#### 5.4.3 Component Responsibilities
+
+**HTTP Gateway (N replicas, Go stdlib):**
+- Terminates TLS 1.3 for AMF/AUSF SBI traffic
+- Routes N58 and N60 requests to Business Logic pods via internal ClusterIP
+- Applies rate limiting, circuit breaking, observability
+- NRF registration: the HTTP Gateway's FQDN/IP is the SBI contact address. NRF registration is performed by Biz Pod, not the HTTP Gateway itself (see §5.4.8)
+- Each replica binds its own pod IP on the external interface — no VIP needed for HTTP
+
+**AAA Gateway (2 replicas: active + standby, Go UDP/TCP + keepalived):**
+- Terminates RADIUS (UDP/1812) and Diameter (TCP/SCTP/3868) from AAA-S
+- **No encode/decode** — forwards raw RADIUS/Diameter transport messages to the Business Logic pod via internal HTTP
+- Forwards raw response messages from Business Logic back to AAA-S
+- The Virtual IP (VIP) from keepalived is the **single stable source IP** seen by AAA-S
+- **Active-standby failover**: if the active pod dies, keepalived migrates the VIP to the standby within seconds; AAA-S sees no address change
+
+**Business Logic Pods (N replicas, NSSAAF app):**
+- Receives raw AAA transport from AAA Gateway via internal HTTP
+- Performs full EAP encode/decode, EAP state machine, session management
+- Sends encoded EAP responses back to AAA Gateway for transmission to AAA-S
+- No direct external connectivity — purely internal HTTP communication
+
+**Why no encode/decode in AAA Gateway?**
+- Separation of concerns: AAA Gateway handles only transport; Business Logic handles EAP semantics
+- AAA Gateway can be updated (protocol tweaks, TLS cert rotation) without affecting EAP session state
+- RADIUS/Diameter library changes do not require redeploying the Business Logic pod
+- Protocol translation (e.g., RADIUS <-> Diameter bridging) can be added in the Business Logic layer, not the gateway
+
+#### 5.4.4 HTTP Gateway: Pod IP Binding
+
+Each HTTP Gateway replica binds its **own pod IP** on the external interface. AMF/AUSF discover NSSAAF via NRF using an FQDN, which resolves to the LoadBalancer IP or the individual pod IPs. The Go stdlib HTTP server handles TLS termination and routes HTTP/2 requests to Business Logic pods.
+
+Key deployment parameters:
+
+```yaml
+# http-gateway/deployment.yaml
+spec:
+  replicas: 3                    # scale horizontally
+  template:
+    spec:
+      containers:
+        - name: http-gw
+          env:
+            - name: BIND_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          args:
+            - "$(BIND_IP)"      # Go HTTP server binds to pod IP
+```
+
+**Why bind pod IP for HTTP?** AMF via NRF uses FQDN-based discovery — no hardcoded IP needed. TLS certificates are bound to the FQDN, not the pod IP. The LoadBalancer routes traffic to the pod IPs automatically. This eliminates the need for keepalived on the HTTP side.
+
+#### 5.4.5 AAA Gateway: HA with Keepalived + Multus CNI
+
+The AAA Gateway is deployed with **2 replicas** in an **active-standby** configuration using keepalived to manage a shared Virtual IP (VIP). This ensures HA without requiring the AAA-S to re-establish connections on failover.
+
+```
+                                    +------------------+
+  AAA-S ──────────────────────────► |   VIP (floating) |  <-- keepalived managed
+                                    +--------+---------+
+                                             |
+                            +----------------+--------------------+
+                            |                                     |
+                       [ACTIVE]                              [STANDBY]
+                       pod-1                                   pod-2
+                     :1812 UDP                               :1812 UDP
+                     :3868 TCP/SCTP                         :3868 TCP/SCTP
+                     pod IP: 10.244.1.10                  pod IP: 10.244.2.10
+                            |                                     |
+                     Multus Bridge VLAN                   Multus Bridge VLAN
+                     net0: vlan-100                        net0: vlan-100
+                     IP: 10.1.100.x                        IP: 10.1.100.x
+                            |                                     |
+                     Physical NIC                           Physical NIC
+                            +-------------------------------------+
+                                             |
+                                       To AAA-S
+```
+
+**Multus CNI Bridge VLAN:**
+- Each AAA Gateway pod attaches to a secondary interface via Multus CNI
+- The interface is a **bridge VLAN** (`vlan-100`) that routes traffic over the physical network
+- Both replicas have interfaces on the same VLAN subnet
+- keepalived binds the VIP to this interface; the standby monitors the active via VRRP
+- When the active pod dies, keepalived on the standby promotes its interface to take the VIP
+
+```yaml
+# aaa-gateway/deployment.yaml
+spec:
+  replicas: 2                      # 1 active + 1 standby; NEVER scale beyond 2
+  strategy:
+    type: Recreate                # prevents two active pods during rolling update
+  template:
+    spec:
+      containers:
+        - name: aaa-gw
+          securityContext:
+            capabilities:
+              add: ["NET_ADMIN"]  # needed for keepalived to manage VIP
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+      # Multus CNI: secondary interface on bridge VLAN
+      annotations:
+        k8s.v1.cni.cncf.io/networks: |
+          [{
+            "name": "aaa-bridge-vlan",
+            "interface": "net0",
+            "ips": ["$(POD_IP)/24"],
+            "gateway": ["10.1.100.1"]
+          }]
+```
+
+**keepalived configuration:**
+
+```ini
+# /etc/keepalived/keepalived.conf (in ConfigMap)
+vrrp_instance vi_aaa {
+    state BACKUP           # both start as BACKUP; one wins priority election
+    interface net0         # Multus CNI interface, not the default eth0
+    virtual_router_id 60   # must be unique per cluster
+    priority 100           # active = 100, standby = 90
+    advert_int 1
+    unicast_peer {
+        10.1.100.11        # standby pod IP (injected via downward API)
+    }
+    virtual_ipaddress {
+        10.1.100.200/24    # VIP: stable IP seen by AAA-S
+    }
+    track_script {
+        chk_aaa_gw          # check aaa-gw container process is healthy
+    }
+}
+```
+
+**Critical constraints:**
+- `replicas: 2` is a hard maximum — never scale beyond 2. Diameter (RFC 6733) and RADIUS source-IP secrets require exactly one active connection at a time.
+- `strategy: Recreate` prevents rolling updates that could briefly create two actives
+- The Multus bridge VLAN must be configured on the switch/physical network to allow both nodes to send traffic with the same VIP as source IP
+- Both nodes must be on the same L2 broadcast domain for VRRP to work (same VLAN, same subnet)
+
+#### 5.4.6 Internal Communication
+
+```
+AMF                    HTTP GW              Biz Pod              AAA GW (active)           AAA-S
+  |                      |                   |                       |                      |
+  | HTTPS/443           |                   |                       |                      |
+  | POST /slice-auth    |                   |                       |                      |
+  |─────────────────────►│                   |                       |                      |
+  |                      │ HTTP/8080         |                       |                      |
+  |                      │ POST /slice-auth  |                       |                      |
+  |                      │───────────────────►│                       |                      |
+  |                      |                   |                       |                      |
+  |                      |                   | 1. Create session     |                      |
+  |                      |                   | 2. Encode EAP         |                      |
+  |                      |                   |                       |                      |
+  |                      |                   | HTTP/9090             | UDP:1812             |
+  |                      |                   | POST /aaa/forward     │ UDP/TCP payload      |
+  |                      |                   |──────────────────────►│─────────────────────►│
+  |                      |                   |                       |                      |
+  |                      |                   |                       |    RADIUS/Diameter   |
+  |                      |                   |                       │◄────────────────────│
+  |                      |                   |                       |                      |
+  |                      |                   | HTTP/9090             |                      |
+  |                      |                   │◄──────────────────────│                      |
+  |                      |                   │ 200 OK (raw response)  |                      |
+  |                      |                   │                       |                      |
+  |                      │                   │ 3. Decode EAP         |                      |
+  |                      │                   │ 4. Advance state       |                      |
+  |                      │                   │                       |                      |
+  |                      │                   │ 201 Created           |                      |
+  |                      │                   │ (EAP message, authCtxId)                      |
+  |                      │ HTTP/8080         │                       |                      |
+  | 201 Created         │◄──────────────────│                       |                      |
+  │ (EAP message,       │                   |                       |                      |
+  │  authCtxId)         │                   |                       |                      |
+  │◄────────────────────│                   |                       |                      |
+```
+
+**Service discovery for internal communication:**
+- HTTP Gateway → Business Logic: `svc-nssaa-biz:8080` (ClusterIP)
+- Business Logic → AAA Gateway: `svc-nssaa-aaa:9090` (ClusterIP, routes to whichever pod holds the VIP)
+- The ClusterIP for AAA Gateway resolves to both replicas; the active pod handles the traffic
+
+**Session routing:** Business Logic pods store EAP session state in Redis. When the AAA Gateway forwards a response from AAA-S, it includes a session correlation ID in the HTTP request, allowing any Business Logic pod to retrieve the session from Redis and advance the state machine.
+
+#### 5.4.7 Kubernetes Manifest Structure
+
+```
+nssAAF/
+├── kustomization.yaml
+├── http-gateway/
+│   ├── deployment.yaml          # Go stdlib HTTP gateway (Deployment, N replicas)
+│   ├── service.yaml             # LoadBalancer / ClusterIP
+│   └── configmap.yaml           # Go server config (no Envoy bootstrap needed)
+├── biz/
+│   ├── deployment.yaml          # NSSAAF Business Logic (Deployment, N replicas)
+│   ├── service.yaml             # ClusterIP (:8080) for internal SBI
+│   └── configmap.yaml           # NSSAAF config
+└── aaa-gateway/
+    ├── deployment.yaml          # AAA Gateway (Deployment, replicas=2, strategy=Recreate)
+    ├── service.yaml             # ClusterIP (:9090) for biz pods
+    ├── configmap.yaml           # Go stdlib + custom UDP/TCP server bootstrap
+    ├── keepalived.conf          # ConfigMap: keepalived VRRP configuration
+    └── network-attachments.yaml  # Multus CNI CRD for bridge VLAN interface
+```
+
+#### 5.4.8 NF Profile Registration (NRF)
+
+Biz Pod registers the HTTP Gateway's FQDN/IP with NRF. The AAA Gateway VIP is **not** registered in NRF — it is an internal address used only for NSSAAF-to-AAA-S communication:
+
+```json
+{
+  "nfInstanceId": "nssAAF-instance-001",
+  "nfType": "NSSAAF",
+  "nfServices": [
+    {
+      "serviceName": "nnssaaf-nssaa",
+      "fqdn": "nssaa-gw.operator.com",
+      "ipEndPoints": [
+        { "ipv4Address": "203.0.113.10", "port": 443, "transport": "TCP" }
+      ]
+    },
+    {
+      "serviceName": "nnssaaf-aiw",
+      "fqdn": "nssaa-gw.operator.com",
+      "ipEndPoints": [
+        { "ipv4Address": "203.0.113.10", "port": 443, "transport": "TCP" }
+      ]
+    }
+  ],
+  "customInfo": {
+    "aaaGateway": {
+      "replicas": 2,
+      "haMode": "active-standby",
+      "vip": "10.1.100.200",
+      "interface": "net0",
+      "virtualRouterId": 60,
+      "aaaProtocolBinding": {
+        "RADIUS": { "port": 1812, "transport": "UDP", "vipRef": "aaa-gw-vip" },
+        "Diameter": { "port": 3868, "transport": "SCTP", "vipRef": "aaa-gw-vip" }
+      }
+    }
+  }
+}
+```
+
+#### 5.4.9 Deployment Scale Tiers
+
+| Tier | HTTP GW | Biz Pods | AAA Gateway | Use Case |
+|------|---------|----------|-------------|----------|
+| **Development** | Embedded | Embedded | Embedded | Single-node |
+| **Small** | 2 replicas | 2 replicas | 2 replicas (active-standby) | Multi-node, single AZ |
+| **Production** | 3+ replicas | 5+ replicas | 2 replicas (active-standby) | Multi-AZ, HA |
+| **Carrier-grade** | 5+ replicas | 10+ replicas | 2 replicas per AAA-S cluster | Full redundancy, multi-PLMN |
+
+**Key scaling principle:** HTTP Gateway and Business Logic pods scale horizontally independently. The AAA Gateway **never exceeds 2 replicas** — this is a hard constraint: Diameter requires a single active connection, and RADIUS source-IP secrets require a single active IP. Adding a second AAA-S (for HA or per-PLMN) means adding a **second pair of AAA Gateway replicas** with their own VIP, not scaling the existing pair.
 
 ## 6. NF Profile Specification
 
@@ -535,12 +879,14 @@ nfType: NSSAAF
 nfStatus: REGISTERED
 
 # Identity
+# In multi-pod deployments, these are HTTP Gateway IPs (see §5.4)
+# The HTTP Gateway uses a stable IP/FQDN that NRF and consumers reference.
 nodeId:
- Fqdn: "nssAAF-operator-1.operator.com"
- nodeIpList:
-    - "10.0.1.50"    # AZ1
-    - "10.0.2.50"    # AZ2
-    - "10.0.3.50"    # AZ3
+  Fqdn: "nssaa-gw.operator.com"
+  nodeIpList:
+    - "203.0.113.10"    # AZ1 HTTP gateway
+    - "203.0.113.11"    # AZ2 HTTP gateway (HA pair)
+    - "203.0.113.12"    # AZ3 HTTP gateway (HA pair)
 
 # PLMN Coverage
 plmnList:
@@ -554,13 +900,17 @@ plmnList:
         sd: "000001"    # URLLC slice
 
 # Services
+# All services point to the HTTP Gateway (see §5.4.2), which routes to NSSAAF app pods internally.
 nfServices:
   nnssaaf-nssaa:
     version: "v1"
-    fqdn: "nssAAF.operator.com"
-    apiPrefix: "https://nssAAF.operator.com/nnssaaf-nssaa"
+    fqdn: "nssaa-gw.operator.com"
+    apiPrefix: "https://nssaa-gw.operator.com/nnssaaf-nssaa"
     ipEndPoints:
-      - ipv4Address: "10.0.1.50"
+      - ipv4Address: "203.0.113.10"
+        port: 443
+        transport: "TCP"
+      - ipv4Address: "203.0.113.11"
         port: 443
         transport: "TCP"
     securityMethods: ["TLS 1.3"]
@@ -568,11 +918,15 @@ nfServices:
 
   nnssaaf-aiw:
     version: "v1"
-    fqdn: "nssAAF.operator.com"
-    apiPrefix: "https://nssAAF.operator.com/nnssaaf-aiw"
+    fqdn: "nssaa-gw.operator.com"
+    apiPrefix: "https://nssaa-gw.operator.com/nnssaaf-aiw"
     ipEndPoints:
-      - ipv4Address: "10.0.1.50"
+      - ipv4Address: "203.0.113.10"
         port: 443
+        transport: "TCP"
+      - ipv4Address: "203.0.113.11"
+        port: 443
+        transport: "TCP"
 
 # NSSAAF-specific info (per TS 28.541 §5.3.146)
 nssaaInfo:
@@ -600,6 +954,22 @@ customInfo:
   supportedAaaProtocols: ["RADIUS", "DIAMETER"]
   maxEapRounds: 20
   eapTimeoutSeconds: 30
+  # AAA Gateway configuration (see §5.4)
+  # These are NOT registered in NRF — used internally for NSSAAF-to-AAA-S communication.
+  aaaGateway:
+    replicas: 2                       # 1 active + 1 standby via keepalived
+    haMode: "active-standby"        # keepalived VRRP, VIP floats between replicas
+    vip: "10.1.100.200"             # Virtual IP seen by AAA-S (Multus CNI bridge VLAN)
+    interface: "net0"                # Multus CNI secondary interface on bridge VLAN
+    virtualRouterId: 60              # VRRP group ID (unique per cluster)
+    radiusGateway:
+      port: 1812
+      transport: "UDP"
+      forwardOnly: true              # No encode/decode in gateway -- raw transport forwarded to Biz
+    diameterGateway:
+      port: 3868
+      transport: "SCTP"
+      forwardOnly: true              # No encode/decode in gateway -- raw transport forwarded to Biz
 ```
 
 ---
