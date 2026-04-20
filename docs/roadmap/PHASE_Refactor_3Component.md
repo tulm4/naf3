@@ -28,7 +28,6 @@ AAA-S (RADIUS UDP :1812 / Diameter TCP :3868)
 - Current codebase: single-process binary — `internal/radius/` and `internal/diameter/` are present but **not yet wired into the API handlers** (EAP engine is in Phase 1 echo mode; no real AAA communication exists)
 - Problem: when multiple NSSAAF app pods are deployed, each opens its own connection to AAA-S, breaking Diameter RFC 6733 (single active connection requirement) and RADIUS source-IP shared-secret validation
 - Solution: separate AAA Gateway (1 active connection per AAA-S cluster) from Business Logic (scales horizontally)
-- Note: the 3-component separation is a prerequisite for Kubernetes production deployment; local development can continue using the all-in-one binary
 
 **Design Doc:** `docs/design/01_service_model.md` §5.4
 
@@ -440,7 +439,7 @@ func (g *Gateway) subscribeResponses()
 
 ---
 
-## 3. Split `cmd/nssAAF/main.go` into 3 Binaries
+## 3. Three Binaries
 
 **Priority:** P0
 **Dependencies:** Phase 1 (`internal/proto/`), Phase 2 (`internal/aaa/gateway/`)
@@ -448,7 +447,7 @@ func (g *Gateway) subscribeResponses()
 
 ### 3.1 `cmd/biz/main.go` — NEW
 
-Business Logic Pod binary. Replaces the current `cmd/nssAAF/main.go` for production.
+Business Logic Pod binary. The production entry point.
 
 ```go
 func main() {
@@ -509,51 +508,72 @@ func main() {
 }
 ```
 
-### 3.4 `cmd/nssAAF/main.go` — REFACTOR into all-in-one dev mode
+### 3.4 Local Development Setup — `compose/dev.yaml`
 
-The current `cmd/nssAAF/main.go` is refactored to run all three components in a single process for **local development only**. Production always deploys the three separate binaries.
+Dev mode runs the three components as separate processes via Docker Compose. This mirrors production topology: HTTP Gateway → Biz Pod → AAA Gateway → Redis → AAA-S mock. All `internal/proto/` interfaces are exercised end-to-end.
 
-**What stays in `cmd/nssAAF/main.go`:**
-- All-in-one wiring (HTTP handlers + EAP engine + AAA router + RADIUS/Diameter clients)
-- This mode skips `internal/proto/` — the components communicate via function calls, not HTTP
-- Config flag `--component=all-in-one` (default when no `--component` is specified)
+```yaml
+# compose/dev.yaml
+services:
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
 
-**What moves:**
-- `internal/proto/` → shared library used by all three component binaries
-- `internal/aaa/gateway/` → new package, imported only by `cmd/aaa-gateway/`
-- RADIUS/Diameter encoding logic (`internal/radius/`, `internal/diameter/`) → **moves into Biz Pod**, where it encodes/decodes EAP but does NOT open sockets
-- The socket-open logic is removed from Biz Pod; it lives only in AAA Gateway
+  mock-aaa-s:
+    image: nssAAF-mock-aaa-s:latest
+    ports: ["1812:1812/udp", "3868:3868"]
 
-**What gets deleted:** None. All existing code is either moved or retained.
+  aaa-gateway:
+    image: nssAAF-aaa-gw:latest
+    depends_on: [redis, mock-aaa-s]
+    environment:
+      REDIS_ADDR: redis:6379
+      AAA_S_RADIUS_ADDR: mock-aaa-s:1812
+      AAA_S_DIAMETER_ADDR: mock-aaa-s:3868
+      BIZ_URL: http://biz:8080
+    ports: ["9090:9090"]
+    network_mode: host  # needed for keepalived to manage VIP in dev
 
-```go
-// cmd/nssAAF/main.go (development only)
-//
-// Deprecated for production: use cmd/biz, cmd/http-gateway, cmd/aaa-gateway.
-// This entry point runs all three components in a single process for local development.
-// All-in-one mode bypasses internal/proto/ — components communicate via function calls.
+  biz:
+    image: nssAAF-biz:latest
+    depends_on: [redis, aaa-gateway]
+    environment:
+      REDIS_ADDR: redis:6379
+      AAA_GW_URL: http://localhost:9090  # or http://aaa-gateway:9090 if not host network
+      DB_HOST: localhost
+    ports: ["8080:8080"]
 
-func main() {
-    flag.Parse()
-    cfg, err := config.Load(*configPath)
-    if cfg.Component == config.ComponentAllInOne || flag.Arg(0) == "" {
-        runAllInOne(cfg)
-    } else {
-        runComponent(cfg)
-    }
-}
+  http-gateway:
+    image: nssAAF-http-gw:latest
+    depends_on: [biz]
+    environment:
+      BIZ_SERVICE_URL: http://localhost:8080  # or http://biz:8080
+    ports: ["8443:443"]
+```
 
-// runComponent starts a single component based on cfg.Component.
-// runAllInOne wires all three components in-process (dev mode only).
+**Startup order:**
+1. `redis` → `mock-aaa-s`
+2. `aaa-gateway` → `biz` → `http-gateway`
 
-### 3.5 Validation Checklist
+**Key difference from Kubernetes production:**
+- `network_mode: host` on `aaa-gateway` so keepalived can bind the VIP in dev
+- `biz` uses `localhost:8080` when host networking, or `biz:8080` with bridge networking
+- For local testing without Multus, the AAA Gateway can bind directly to a physical IP instead of a VIP
+
+**`mock-aaa-s`** is a test AAA server (e.g. a FreeRADIUS in test mode or a custom Go mock) that accepts EAP-TLS exchanges. It must support both RADIUS and Diameter.
+
+### 3.5 `cmd/nssAAF/main.go` — DELETE
+
+The all-in-one binary is deleted. Dev mode uses Docker Compose (§3.4). The three components are always separate processes.
+
+### 3.6 Validation Checklist
 
 - [ ] `go build ./cmd/biz/...` compiles
 - [ ] `go build ./cmd/aaa-gateway/...` compiles
 - [ ] `go build ./cmd/http-gateway/...` compiles
-- [ ] `go build ./cmd/nssAAF/...` still works (dev mode)
 - [ ] All three binaries start and communicate via `internal/proto/` interfaces
 - [ ] `go test ./...` passes for all packages
+- [ ] `docker compose -f compose/dev.yaml up` brings up all components successfully
 
 ---
 
@@ -575,7 +595,6 @@ const (
     ComponentHTTPGateway Component = "http-gateway"
     ComponentBiz         Component = "biz"
     ComponentAAAGateway  Component = "aaa-gateway"
-    ComponentAllInOne    Component = "all-in-one" // development only
 )
 
 // Config is the root configuration struct.
@@ -647,7 +666,7 @@ deployments/
 │   │   ├── biz/
 │   │   └── aaa-gateway/
 │   └── overlays/
-│       ├── development/       # All-in-one or minimal
+│       ├── development/       # 3-component Docker Compose setup
 │       ├── production/        # 3-component, keepalived
 │       └── carrier/          # Multi-AZ, Multus CNI
 └── README.md
@@ -1030,7 +1049,7 @@ Phase 1 (Interface Contracts + §1.4 NRF + §1.5 Versioning)
 - [ ] `go build ./cmd/...` — all three binaries compile
 - [ ] `go test ./...` — all tests pass
 - [ ] `golangci-lint run ./...` — no linter errors
-- [ ] Development mode (`cmd/nssAAF`) still works
+- [ ] `docker compose -f compose/dev.yaml up` succeeds — all three components communicate
 - [ ] `internal/radius/` and `internal/diameter/` are NOT imported by `cmd/aaa-gateway/`
 - [ ] `cmd/biz/` does NOT open raw UDP/TCP sockets for RADIUS/Diameter
 - [ ] `internal/proto/` has zero dependencies on `internal/radius/`, `internal/diameter/`, `internal/eap/`
