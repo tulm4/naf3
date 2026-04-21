@@ -9,8 +9,20 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// ComponentType identifies which binary is being run.
+type ComponentType string
+
+const (
+	ComponentBiz         ComponentType = "biz"
+	ComponentAAAGateway ComponentType = "aaa-gateway"
+	ComponentHTTPGateway ComponentType = "http-gateway"
+)
+
 // Config holds all runtime configuration for nssAAF.
 type Config struct {
+	Component ComponentType `yaml:"component"`
+	Version   string       `yaml:"version"`
+
 	Server    ServerConfig    `yaml:"server"`
 	Database  DatabaseConfig  `yaml:"database"`
 	Redis     RedisConfig     `yaml:"redis"`
@@ -19,8 +31,46 @@ type Config struct {
 	RateLimit RateLimitConfig `yaml:"rateLimit"`
 	Logging   LoggingConfig   `yaml:"logging"`
 	Metrics   MetricsConfig   `yaml:"metrics"`
-	NRF       NRFConfig       `yaml:"nrf"`
-	UDM       UDMConfig       `yaml:"udm"`
+	NRF       NRFConfig     `yaml:"nrf"`
+	UDM       UDMConfig     `yaml:"udm"`
+
+	// Per-component config (only one is non-nil based on Component field)
+	Biz     *BizConfig     `yaml:"biz,omitempty"`
+	AAAgw   *AAAgwConfig   `yaml:"aaaGateway,omitempty"`
+	HTTPgw  *HTTPgwConfig  `yaml:"httpGateway,omitempty"`
+}
+
+// TLSConfig holds TLS certificate configuration.
+type TLSConfig struct {
+	Cert string `yaml:"cert"`
+	Key  string `yaml:"key"`
+	CA   string `yaml:"ca"`
+}
+
+// BizConfig holds Biz Pod configuration.
+type BizConfig struct {
+	AAAGatewayURL string     `yaml:"aaaGatewayUrl"` // http://svc-nssaa-aaa:9090
+	UseMTLS      bool       `yaml:"useMTLS"`
+	TLSCert      string     `yaml:"tlsCert"`
+	TLSKey       string     `yaml:"tlsKey"`
+	TLSCA        string     `yaml:"tlsCa"`
+	TLS          *TLSConfig `yaml:"tls,omitempty"`
+}
+
+// AAAgwConfig holds AAA Gateway configuration.
+type AAAgwConfig struct {
+	BizServiceURL      string `yaml:"bizServiceUrl"`       // http://svc-nssaa-biz:8080
+	ListenRADIUS      string `yaml:"listenRadius"`        // ":1812"
+	ListenDIAMETER    string `yaml:"listenDiameter"`      // ":3868"
+	DiameterProtocol   string `yaml:"diameterProtocol"`    // "tcp" or "sctp"
+	RedisMode         string `yaml:"redisMode"`          // "standalone" or "sentinel"
+	KeepalivedStatePath string `yaml:"keepalivedStatePath"` // "/var/run/keepalived/state"
+}
+
+// HTTPgwConfig holds HTTP Gateway configuration.
+type HTTPgwConfig struct {
+	BizServiceURL string     `yaml:"bizServiceUrl"` // http://svc-nssaa-biz:8080
+	TLS           *TLSConfig `yaml:"tls,omitempty"`
 }
 
 // ServerConfig holds HTTP server settings.
@@ -46,6 +96,7 @@ type DatabaseConfig struct {
 
 // RedisConfig holds Redis cluster settings.
 type RedisConfig struct {
+	Addr     string   `yaml:"addr"` // Single address for Biz Pod / AAA Gateway (e.g., "redis:6379")
 	Addrs    []string `yaml:"addrs"`
 	Password string   `yaml:"password"`
 	DB       int      `yaml:"db"`
@@ -173,5 +224,32 @@ func applyDefaults(cfg *Config) {
 
 	if cfg.Redis.PoolSize == 0 {
 		cfg.Redis.PoolSize = 50
+	}
+
+	// Redis Addr default
+	if cfg.Redis.Addr == "" && len(cfg.Redis.Addrs) > 0 {
+		cfg.Redis.Addr = cfg.Redis.Addrs[0]
+	}
+	if cfg.Redis.Addr == "" {
+		cfg.Redis.Addr = "localhost:6379"
+	}
+
+	// AAA Gateway defaults
+	if cfg.AAAgw != nil {
+		if cfg.AAAgw.ListenRADIUS == "" {
+			cfg.AAAgw.ListenRADIUS = ":1812"
+		}
+		if cfg.AAAgw.ListenDIAMETER == "" {
+			cfg.AAAgw.ListenDIAMETER = ":3868"
+		}
+		if cfg.AAAgw.DiameterProtocol == "" {
+			cfg.AAAgw.DiameterProtocol = "tcp"
+		}
+		if cfg.AAAgw.RedisMode == "" {
+			cfg.AAAgw.RedisMode = "standalone"
+		}
+		if cfg.AAAgw.KeepalivedStatePath == "" {
+			cfg.AAAgw.KeepalivedStatePath = "/var/run/keepalived/state"
+		}
 	}
 }
