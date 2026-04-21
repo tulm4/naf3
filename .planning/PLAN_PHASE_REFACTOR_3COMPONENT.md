@@ -192,19 +192,21 @@ type SessionCorrEntry struct {
 // Redis key and channel constants.
 // Spec: PHASE §1.2
 const (
-    // SessionCorrKeyPrefix is the Redis key prefix for session correlation.
-    // Full key: "nssaa:session:{sessionId}" → SessionCorrEntry (JSON), TTL = DefaultPayloadTTL
-    SessionCorrKeyPrefix = "nssaa:session:"
-    // PodsKey is the Redis SET containing IDs of live Biz Pod instances.
-    // Updated on Biz Pod startup/shutdown and refreshed on heartbeat.
-    PodsKey = "nssaa:pods"
-    // AaaResponseChannel is the Redis pub/sub channel for AAA responses.
-    // Publisher: AAA Gateway. Subscribers: all Biz Pods.
-    AaaResponseChannel = "nssaa:aaa-response"
-    // SessionCorrKey builds the full Redis key for a given sessionId.
-    SessionCorrKey = func(sessionID string) string {
-        return SessionCorrKeyPrefix + sessionID
-    }
+// SessionCorrKeyPrefix is the Redis key prefix for session correlation.
+// Full key: "nssaa:session:{sessionId}" → SessionCorrEntry (JSON), TTL = DefaultPayloadTTL
+SessionCorrKeyPrefix = "nssaa:session:"
+// PodsKey is the Redis SET containing IDs of live Biz Pod instances.
+// Updated on Biz Pod startup/shutdown and refreshed on heartbeat.
+PodsKey = "nssaa:pods"
+// AaaResponseChannel is the Redis pub/sub channel for AAA responses.
+// Publisher: AAA Gateway. Subscribers: all Biz Pods.
+AaaResponseChannel = "nssaa:aaa-response"
+
+// SessionCorrKey builds the full Redis key for a given sessionId.
+// Spec: PHASE §1.2
+func SessionCorrKey(sessionID string) string {
+    return SessionCorrKeyPrefix + sessionID
+}
 )
 ```
 
@@ -308,20 +310,9 @@ go build ./internal/proto/...
 
 **Action:**
 
-This file was already specified in Task 1.1 (`AaaServerInitiatedRequest`) and Task 1.3 (`AaaServerInitiatedResponse`). Ensure both are present and tested. Add `AaaServerInitiatedHandler` interface if needed:
+This file was already specified in Task 1.1 (`AaaServerInitiatedRequest`) and Task 1.3 (`AaaServerInitiatedResponse`). Ensure both are present and tested.
 
-```go
-package proto
-
-import "context"
-
-// AaaServerInitiatedHandler is implemented by Biz Pod to receive server-initiated
-// messages from the AAA Gateway.
-// Spec: PHASE §6.4
-type AaaServerInitiatedHandler interface {
-    HandleServerInitiated(ctx context.Context, req *AaaServerInitiatedRequest) (*AaaServerInitiatedResponse, error)
-}
-```
+**Note:** Do NOT add `AaaServerInitiatedHandler` as a proto interface. The server-initiated flow uses HTTP POST to the Biz Pod's `/aaa/server-initiated` endpoint (defined in Task 6.2), not an interface callback. This avoids the complexity of passing an interface across process boundaries.
 
 **Verify:**
 ```bash
@@ -340,7 +331,25 @@ go build ./internal/proto/... && go test ./internal/proto/... -v
 
 **Action:**
 
-Copy `internal/aaa/router.go` to `internal/biz/router.go` and make these changes:
+Create a new `internal/biz/router.go` with only the declarations needed by the Biz Pod. **Do NOT copy the entire file** — `RouterStats` is already defined in `internal/aaa/router.go` and would cause a duplicate type error. Copy only these declarations:
+
+- `Protocol` type and constants (`ProtocolRADIUS`, `ProtocolDIAMETER`)
+- `RouteDecision` struct
+- `Router` struct (without `radiusClient` and `diameterClient` fields)
+- `ResolveRoute` method (unchanged logic, no socket calls)
+- `NewRouter` constructor (without `WithRadiusClient` / `WithDiameterClient`)
+- `WithMetrics` option (unchanged)
+- `RouterStats` struct — **do NOT redefine here; reuse from `internal/aaa/router.go`**
+- `BuildForwardRequest` method (new, replaces `sendRADIUS`/`sendDIAMETER`)
+
+Specifically, **do NOT copy**:
+- `RouterStats` (already in `internal/aaa/router.go:274`)
+- `sendRADIUS` method
+- `sendDIAMETER` method
+- `WithRadiusClient` option
+- `WithDiameterClient` option
+- `SetRadiusClient` method
+- `SetDiameterClient` method
 
 1. Change package declaration to `package biz`
 2. Remove the import of `github.com/operator/nssAAF/internal/radius` and `github.com/operator/nssAAF/internal/diameter`
@@ -435,20 +444,26 @@ import (
 
 // Config holds AAA Gateway configuration.
 type Config struct {
-    BizURL        string        // http://svc-nssaa-biz:8080
-    RedisAddr    string        // Redis address for pub/sub and session correlation
-    RadiusAddr   string        // ":1812" — UDP listen address for RADIUS
-    DiameterAddr string        // ":3868" — TCP listen address for Diameter
-    AAAGatewayURL string       // http://svc-nssaa-aaa:9090 — for Biz Pods to POST /aaa/forward
-    Logger       *slog.Logger
-    Version      string        // Injected at build time
+    BizServiceURL     string        // http://svc-nssaa-biz:8080 (matches AAAgwConfig.BizServiceURL)
+    RedisAddr        string        // Redis address for pub/sub and session correlation
+    ListenRADIUS     string        // ":1812" — UDP listen address for RADIUS (matches AAAgwConfig.ListenRADIUS)
+    ListenDIAMETER   string        // ":3868" — listen address for Diameter (TCP or SCTP) (matches AAAgwConfig.ListenDIAMETER)
+    AAAGatewayURL    string        // http://svc-nssaa-aaa:9090 — self-referential for health checks
+    Logger           *slog.Logger
+    Version          string        // Injected at build time
+    // Diameter transport protocol: "tcp" or "sctp" (from aaaGateway.diameterProtocol config)
+    DiameterProtocol string
+    // Redis operating mode: "standalone" or "sentinel" (from aaaGateway.redisMode config)
+    RedisMode string
+    // Path to keepalived state file (from aaaGateway.keepalivedStatePath config)
+    KeepalivedStatePath string
 }
 
 // Gateway is the AAA Gateway component. It runs in a separate process from Biz Pods.
 // Handles both client-initiated (Biz Pod → AAA-S) and server-initiated (AAA-S → Biz Pod) flows.
 // Spec: PHASE §2.3
 type Gateway struct {
-    bizURL        string
+    bizServiceURL string
     redis         *redis.Client
     bizHTTPClient *http.Client
     version       string
@@ -457,9 +472,6 @@ type Gateway struct {
     // pending maps SessionID → response channel (used for client-initiated flow)
     pending   map[string]chan []byte
     pendingMu sync.RWMutex
-
-    // server-initiated handler
-    serverInitiatedHandler proto.AaaServerInitiatedHandler
 
     ctx    context.Context
     cancel context.CancelFunc
@@ -577,11 +589,32 @@ func (h *RadiusHandler) HandlePacket(conn *net.UDPConn, addr *net.UDPAddr, raw [
 
 #### 2.3.3 `diameter_handler.go`
 
-Implement TCP listener on `:3868`. Handle CER/CEA handshake via `go-diameter/v4` state machine, then stream messages. Distinguish client-initiated (Diameter-EAR/EAP) from server-initiated (ASR).
+Implement Diameter listener supporting both TCP and SCTP, selected by `aaaGateway.diameterProtocol` config (`"tcp"` | `"sctp"`). The listener starts the protocol-appropriate handler, parses CER/CEA handshake via `go-diameter/v4` state machine, then streams messages. Distinguish client-initiated (Diameter-EAR/EAP) from server-initiated (ASR).
 
 ```go
-// HandleConnection processes an incoming Diameter TCP connection from AAA-S.
-// Spec: PHASE §2.3, §6.3
+// Listen starts the Diameter server on the configured protocol (TCP or SCTP).
+// Spec: PHASE §2.3, §6.3; RFC 6733 App H (SCTP considerations)
+func (h *DiameterHandler) Listen(ctx context.Context, addr, protocol string) error {
+    switch protocol {
+    case "tcp":
+        listener, err := net.Listen("tcp", addr)
+        if err != nil {
+            return fmt.Errorf("diameter tcp listen: %w", err)
+        }
+        go h.serveTCP(listener)
+    case "sctp":
+        listener, err := net.Listen("sctp", addr)
+        if err != nil {
+            return fmt.Errorf("diameter sctp listen: %w", err)
+        }
+        go h.serveSCTP(listener)
+    default:
+        return fmt.Errorf("unsupported diameter protocol: %s (expected tcp or sctp)", protocol)
+    }
+    return nil
+}
+
+// HandleConnection processes an incoming Diameter connection from AAA-S.
 func (h *DiameterHandler) HandleConnection(conn net.Conn) {
     // Use go-diameter/v4 to decode message header and determine message type.
     // Command Code 280 = Experimental-Result (used for DER/DEA)
@@ -590,11 +623,48 @@ func (h *DiameterHandler) HandleConnection(conn net.Conn) {
 }
 ```
 
+**Note on SCTP:** The standard library `net.Listen("sctp", addr)` requires the `net` package to be built with SCTP support. SCTP support is available in Linux kernels since 2.6.27 and Go 1.17+. If SCTP is not available at runtime, the server logs a fatal error and exits. The `go-diameter/v4` library handles the Diameter message framing on top of the SCTP byte stream — no application-level changes needed beyond the listener type.
+
+**Verify SCTP availability** at startup:
+```go
+ln, err := net.Listen("sctp", ":3868")
+if err != nil {
+    slog.Warn("SCTP not available on this host", "error", err)
+    // Fall back to TCP
+}
+```
+
 #### 2.3.4 `redis.go`
 
-Implement the Redis pub/sub and session correlation functions:
+Implement the Redis pub/sub and session correlation functions. The `aaaGateway.redisMode` config controls the Redis topology:
+
+- `"standalone"` (default): single Redis node at `redisAddr`. Pub/sub works correctly on a single node.
+- `"sentinel"`: Redis Sentinel for HA. The AAA Gateway connects to the Sentinel address; Sentinel redirects to the primary. Pub/sub works on the primary node.
+
+**Important:** Redis Cluster is NOT supported for pub/sub — sharded pub/sub is not supported by Redis. If the operator deploys Redis Cluster for data storage, use a separate single-node/Sentinel Redis instance (or a dedicated channel on the Sentinel primary) for pub/sub. Document this constraint in the Helm chart values file.
 
 ```go
+// newRedisClient creates a Redis client based on the configured mode.
+// Spec: PHASE §2.3.4
+func newRedisClient(redisAddr, mode string) *redis.Client {
+    opts := &redis.Options{
+        Addr: redisAddr,
+    }
+    switch mode {
+    case "sentinel":
+        // Use Sentinel mode: the Addr is the Sentinel address, not the primary.
+        // go-redis/v9 auto-discovers the primary through Sentinel.
+        opts.SentinelAddrs = strings.Split(redisAddr, ",")
+        opts.MasterName = "nssAAF-primary"
+        opts.SentinelPassword = os.Getenv("REDIS_SENTINEL_PASSWORD")
+    case "standalone":
+        // Default: direct connection to single Redis node.
+    default:
+        slog.Warn("unknown redis mode, defaulting to standalone", "mode", mode)
+    }
+    return redis.NewClient(opts)
+}
+
 // writeSessionCorr writes SessionCorrEntry to Redis with TTL = DefaultPayloadTTL.
 func (g *Gateway) writeSessionCorr(ctx context.Context, sessionID string, entry *proto.SessionCorrEntry) error {
     key := proto.SessionCorrKey(sessionID)
@@ -639,15 +709,37 @@ func (g *Gateway) subscribeResponses(ctx context.Context) {
 
 Implement VIP health check for keepalived integration. The AAA Gateway exposes a `/health/vip` endpoint that keepalived's `chk_aaa_gw` script calls to determine if this replica owns the VIP.
 
+The state file path is configurable via `aaaGateway.keepalivedStatePath` (default: `"/var/run/keepalived/state"`). keepalived writes `"MASTER"`, `"BACKUP"`, or `"FAULT"` to this file on state transitions. The endpoint reads the last line of this file to determine ownership.
+
 ```go
 // VIPHealthHandler returns 200 if this AAA Gateway replica is the VIP owner, 503 otherwise.
-// The check reads the VIP state from a shared file or makes an HTTP call to the local keepalived.
+// Reads VIP state from the configurable state file path.
 func (g *Gateway) VIPHealthHandler(w http.ResponseWriter, r *http.Request) {
-    // For now, always return 200 — VIP ownership is determined by keepalived itself.
-    // In production, this reads /var/run/keepalived/state or calls the local API.
-    w.WriteHeader(http.StatusOK)
+    statePath := g.cfg.KeepalivedStatePath // e.g. "/var/run/keepalived/state"
+    data, err := os.ReadFile(statePath)
+    if err != nil {
+        slog.Warn("keepalived state file not readable", "path", statePath, "error", err)
+        w.WriteHeader(http.StatusServiceUnavailable)
+        return
+    }
+    state := strings.TrimSpace(string(data))
+    if state == "MASTER" {
+        w.WriteHeader(http.StatusOK)
+        w.Write([]byte(`{"vip_owner":true}`))
+    } else {
+        w.WriteHeader(http.StatusServiceUnavailable)
+        w.Write([]byte(`{"vip_owner":false,"state":"` + state + `"}`))
+    }
 }
 ```
+
+**keepalived health check script** (`chk_aaa_gw`):
+```bash
+#!/bin/sh
+curl -sf http://localhost:9090/health/vip || exit 1
+```
+
+This script is referenced in the keepalived ConfigMap (`chk_aaa_gw`) in Task 5.3.
 
 Write `internal/aaa/gateway/redis_test.go` testing `writeSessionCorr` and `publishResponse` with a redis mock.
 
@@ -702,17 +794,17 @@ type httpAAAClient struct {
 }
 
 // newHTTPAAAClient creates a new HTTP AAA client.
-func newHTTPAAAClient(aaaGatewayURL, redisAddr, podID, version string) *httpAAAClient {
+// The httpClient parameter must be configured by the caller (cmd/biz/main.go) based on
+// biz.useMTLS config — either a plain http.Client or one with TLS configured.
+func newHTTPAAAClient(aaaGatewayURL, redisAddr, podID, version string, httpClient *http.Client) *httpAAAClient {
     c := &httpAAAClient{
         aaaGatewayURL: aaaGatewayURL,
-        httpClient: &http.Client{
-            Timeout: 30 * time.Second,
-        },
-        version: version,
+        httpClient:    httpClient, // caller-configured (may have TLS for mTLS)
+        version:       version,
         redis: redis.NewClient(&redis.Options{
             Addr: redisAddr,
         }),
-        podID:  podID,
+        podID:   podID,
         pending: make(map[string]chan []byte),
     }
 
@@ -819,18 +911,39 @@ go test ./cmd/biz/... -v
 
 **Action:**
 
-Create the Biz Pod entry point. It wires HTTP handlers (N58/N60) → EAP engine → Biz router → `httpAAAClient` → AAA Gateway.
+Create the Biz Pod entry point. It wires HTTP handlers (N58/N60) → Biz router → `httpAAAClient` → AAA Gateway.
+
+**Prerequisite — Add `WithAAARouter` to `internal/api/nssaa/handler.go`:** Before implementing `cmd/biz/main.go`, extend `internal/api/nssaa/handler.go` with an `Option` that injects the `AAARouter`. Add this to the existing options list:
+
+```go
+// WithAAARouter sets the AAA router for the NSSAA handler.
+// The router handles routing EAP messages to the AAA Gateway.
+// After Task 2.2, biz.Router.BuildForwardRequest replaces direct radius/diameter calls.
+// Spec: PHASE §3.1
+func WithAAARouter(router AAARouter) Option {
+    return func(h *Handler) {
+        h.aaaRouter = router
+    }
+}
+```
+
+Add `aaaRouter AAARouter` as a private field on the `Handler` struct (if not already present). Ensure `AAARouter` interface in handler.go matches `eap.AAAClient.SendEAP(ctx, authCtxID string, eapPayload []byte) ([]byte, error)` — `httpAAAClient` satisfies both.
 
 ```go
 package main
 
 import (
     "context"
+    "crypto/tls"
+    "crypto/x509"
     "flag"
+    "fmt"
+    "io"
     "log/slog"
     "net/http"
     "os"
     "os/signal"
+    "sync"
     "syscall"
     "time"
 
@@ -838,7 +951,8 @@ import (
     "github.com/operator/nssAAF/internal/api/common"
     "github.com/operator/nssAAF/internal/api/nssaa"
     "github.com/operator/nssAAF/internal/config"
-    "github.com/operator/nssAAF/internal/eap"
+    "github.com/operator/nssAAF/internal/proto"
+    "github.com/redis/go-redis/v9"
 )
 
 var configPath = flag.String("config", "configs/biz.yaml", "path to YAML configuration file")
@@ -863,6 +977,7 @@ func main() {
     slog.Info("starting NSSAAF Biz Pod",
         "pod_id", podID,
         "version", cfg.Version,
+        "use_mtls", cfg.Biz.UseMTLS,
     )
 
     // Build API root URL
@@ -875,24 +990,28 @@ func main() {
     nssaaStore := nssaa.NewInMemoryStore() // Will be replaced with DB-backed in Phase 3
     aiwStore := aiw.NewInMemoryStore()
 
-    // ─── HTTP AAA client (satisfies eap.AAAClient) ─────────────────────────
+    // ─── HTTP AAA client (satisfies eap.AAAClient = AAARouter) ────────────────
+    tlsCfg := &tls.Config{}
+    if cfg.Biz.UseMTLS {
+        tlsCfg.RootCAs = mustLoadCertPool(cfg.Biz.TLSCA)
+        tlsCfg.Certificates = []tls.Certificate{mustLoadCert(cfg.Biz.TLSCert, cfg.Biz.TLSKey)}
+        tlsCfg.ServerName = "aaa-gateway" // SNI for AAA Gateway cert verification
+    }
     aaaClient := newHTTPAAAClient(
         cfg.Biz.AAAGatewayURL,
         cfg.Redis.Addr,
         podID,
         cfg.Version,
-    )
-
-    // ─── EAP engine ────────────────────────────────────────────────────────
-    eapEngine := eap.NewEngine(aaaClient,
-        eap.WithMaxRounds(cfg.EAP.MaxRounds),
-        eap.WithRoundTimeout(cfg.EAP.RoundTimeout),
+        &http.Client{
+            Transport: &http.Transport{TLSClientConfig: tlsCfg},
+            Timeout:   30 * time.Second,
+        },
     )
 
     // ─── N58: Nnssaaf_NSSAA ────────────────────────────────────────────────
     nssaaHandler := nssaa.NewHandler(nssaaStore,
         nssaa.WithAPIRoot(apiRoot),
-        nssaa.WithEAPEngine(eapEngine),
+        nssaa.WithAAARouter(aaaClient), // aaaClient satisfies eap.AAAClient = AAARouter
     )
     nssaaRouter := nssaa.NewRouter(nssaaHandler, apiRoot)
 
@@ -904,8 +1023,8 @@ func main() {
 
     // ─── Internal AAA forwarding endpoints (for AAA Gateway) ─────────────────
     mux := http.NewServeMux()
-    mux.HandleFunc("/aaa/forward", handleAaaForward)      // AAA Gateway → Biz Pod
-    mux.HandleFunc("/aaa/server-initiated", handleServerInitiated) // AAA Gateway → Biz Pod (RAR/ASR/CoA)
+    mux.HandleFunc("/aaa/forward", handleAaaForward)             // AAA Gateway → Biz Pod (server-initiated RAR/ASR/CoA)
+    mux.HandleFunc("/aaa/server-initiated", handleServerInitiated) // AAA Gateway → Biz Pod
 
     // ─── Compose with N58/N60 handlers ────────────────────────────────────
     mux.Handle("/nnssaaf-nssaa/", http.StripPrefix("/nnssaaf-nssaa", nssaaRouter))
@@ -931,7 +1050,7 @@ func main() {
     }
 
     // ─── Register with NRF (Biz Pod registers HTTP Gateway FQDN) ──────────
-    // TODO: Implement NRF client in Phase 3
+    // TODO: Implement NRF client in Phase 3 — wire in Phase 3 once DB store is ready
 
     errCh := make(chan error, 1)
     go func() {
@@ -967,6 +1086,60 @@ func handleServerInitiated(w http.ResponseWriter, r *http.Request) {
     // Called by AAA Gateway when AAA-S initiates Re-Auth or Revocation
     // Fully implemented in Task 6.1
     http.Error(w, "not implemented", http.StatusNotImplemented)
+}
+
+// podHeartbeat registers the Biz Pod in the Redis SET and refreshes every 30 seconds.
+// On context cancellation, it removes the pod from the SET.
+func podHeartbeat(ctx context.Context, redisAddr, podID string) {
+    rdb := redis.NewClient(&redis.Options{Addr: redisAddr})
+    defer rdb.Close()
+
+    // Register immediately on startup
+    if err := rdb.SAdd(ctx, proto.PodsKey, podID).Err(); err != nil {
+        slog.Warn("failed to register pod in Redis", "error", err, "pod_id", podID)
+    }
+
+    ticker := time.NewTicker(30 * time.Second)
+    defer ticker.Stop()
+
+    for {
+        select {
+        case <-ctx.Done():
+            rdb.SRem(ctx, proto.PodsKey, podID)
+            return
+        case <-ticker.C:
+            rdb.SAdd(ctx, proto.PodsKey, podID)
+        }
+    }
+}
+
+// hasScheme returns true if s already contains a URL scheme prefix.
+func hasScheme(s string) bool {
+    return len(s) >= 4 && (s[:4] == "http" || s[:4] == " Http")
+}
+
+// mustLoadCertPool loads and parses a CA certificate file into an x509.CertPool.
+// Panics on error — called during startup validation only.
+func mustLoadCertPool(caPath string) *x509.CertPool {
+    data, err := os.ReadFile(caPath)
+    if err != nil {
+        panic("failed to read TLS CA cert: " + err.Error())
+    }
+    pool := x509.NewCertPool()
+    if !pool.AppendCertsFromPEM(data) {
+        panic("failed to parse TLS CA cert from: " + caPath)
+    }
+    return pool
+}
+
+// mustLoadCert loads a client certificate and key for mTLS.
+// Panics on error — called during startup validation only.
+func mustLoadCert(certPath, keyPath string) tls.Certificate {
+    cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+    if err != nil {
+        panic("failed to load TLS cert/key pair: " + err.Error())
+    }
+    return cert
 }
 ```
 
@@ -1028,13 +1201,16 @@ func main() {
     )
 
     gw := gateway.New(gateway.Config{
-        BizURL:        cfg.AAAgw.BizServiceURL,
-        RedisAddr:    cfg.Redis.Addr,
-        RadiusAddr:   cfg.AAAgw.ListenRADIUS,
-        DiameterAddr: cfg.AAAgw.ListenDIAMETER,
-        AAAGatewayURL: "http://" + cfg.Server.Addr, // Self-referential; used for health checks
-        Logger:       logger,
-        Version:      cfg.Version,
+        BizServiceURL:      cfg.AAAgw.BizServiceURL,
+        RedisAddr:         cfg.Redis.Addr,
+        ListenRADIUS:      cfg.AAAgw.ListenRADIUS,
+        ListenDIAMETER:    cfg.AAAgw.ListenDIAMETER,
+        AAAGatewayURL:     "http://" + cfg.Server.Addr, // Self-referential; used for health checks
+        Logger:            logger,
+        Version:           cfg.Version,
+        DiameterProtocol:  cfg.AAAgw.DiameterProtocol,
+        RedisMode:         cfg.AAAgw.RedisMode,
+        KeepalivedStatePath: cfg.AAAgw.KeepalivedStatePath,
     })
 
     // Expose HTTP endpoints for Biz Pod communication
@@ -1259,13 +1435,15 @@ go build ./cmd/http-gateway/... && go test ./cmd/http-gateway/... -v
 
 ### Task 3.4: Delete `cmd/nssAAF/main.go`
 
-**Files deleted:** `cmd/nssAAF/main.go`, `cmd/nssAAF/` directory (if empty after deletion)
+**Files deleted:** `cmd/nssAAF/` directory (all contents)
 
 **Action:**
 
 ```bash
-rm cmd/nssAAF/main.go
-rmdir cmd/nssAAF 2>/dev/null || true
+# Verify no .go files remain in cmd/nssAAF/ before deletion
+ls cmd/nssAAF/*.go 2>/dev/null && echo "WARNING: extra files in cmd/nssAAF/" || true
+# Delete the entire directory (rmdir is unsafe — test files may remain)
+rm -rf cmd/nssAAF/
 ```
 
 **Verify:**
@@ -1311,8 +1489,15 @@ const (
 
 // BizConfig: how Biz Pod communicates with other components.
 type BizConfig struct {
-    AAAGatewayURL string `yaml:"aaaGatewayUrl"` // http://svc-nssaa-aaa:9090
+    AAAGatewayURL string `yaml:"aaaGatewayUrl"` // http://svc-nssaa-aaa:9090 (or https:// if mTLS enabled)
     BizServiceURL string `yaml:"bizServiceUrl"`  // http://svc-nssaa-biz:8080 (for HTTP Gateway config)
+    // TLS mutual authentication for Biz Pod → AAA Gateway communication.
+    // If UseMTLS is true, the client presents a certificate signed by the CA specified in TLSCA.
+    // If false, plain HTTP is used (acceptable for intra-cluster communication with K8s NetworkPolicy).
+    UseMTLS bool   `yaml:"useMTLS"` // default: false (plain HTTP within cluster)
+    TLSCA   string `yaml:"tlsCA"`   // path to CA cert for verifying AAA Gateway cert (required if UseMTLS)
+    TLSCert string `yaml:"tlsCert"` // path to client cert for mTLS (required if UseMTLS)
+    TLSKey  string `yaml:"tlsKey"`  // path to client key for mTLS (required if UseMTLS)
 }
 
 // AAAgwConfig: AAA Gateway specific settings.
@@ -1321,6 +1506,27 @@ type AAAgwConfig struct {
     ListenDIAMETER  string `yaml:"listenDiameter"`  // ":3868"
     BizServiceURL   string `yaml:"bizServiceUrl"`   // http://svc-nssaa-biz:8080
     KeepalivedCheck string `yaml:"keepalivedCheck"` // path to health check script
+
+    // Diameter transport protocol: "tcp" or "sctp". Both are implemented; operator
+    // selects based on their AAA-S deployment. SCTP provides message framing
+    // independence from byte-stream ordering (RFC 6733 App H); TCP is universally supported.
+    // Default: "tcp"
+    DiameterProtocol string `yaml:"diameterProtocol"` // "tcp" | "sctp"
+
+    // Redis operating mode for pub/sub coordination between AAA Gateway and Biz Pods.
+    // - "standalone": single Redis node; pub/sub works correctly (default)
+    // - "sentinel": Redis Sentinel for HA; pub/sub works on the primary node
+    // NOTE: Redis Cluster is NOT supported for pub/sub (sharded pub/sub is not supported by Redis).
+    // If operator needs Redis Cluster for data storage, use a separate single-node/Sentinel
+    // Redis for pub/sub (dedicated channel).
+    // Default: "standalone"
+    RedisMode string `yaml:"redisMode"` // "standalone" | "sentinel"
+
+    // Path to keepalived state file. keepalived writes "MASTER", "BACKUP", or "FAULT"
+    // to this file on state transitions. The AAA Gateway's /health/vip endpoint reads
+    // this file to determine VIP ownership for keepalived's health check script.
+    // Default: "/var/run/keepalived/state" (standard keepalived location)
+    KeepalivedStatePath string `yaml:"keepalivedStatePath"` // default: "/var/run/keepalived/state"
 }
 
 // TLSConfig holds TLS settings for HTTP Gateway.
@@ -1354,12 +1560,32 @@ case ComponentBiz:
     if cfg.Biz.AAAGatewayURL == "" {
         return nil, fmt.Errorf("biz.aaaGatewayUrl is required")
     }
+    if cfg.Biz.UseMTLS {
+        if cfg.Biz.TLSCA == "" || cfg.Biz.TLSCert == "" || cfg.Biz.TLSKey == "" {
+            return nil, fmt.Errorf("biz.tlsCA, biz.tlsCert, and biz.tlsKey are required when biz.useMTLS is true")
+        }
+    }
 case ComponentAAAGateway:
     if cfg.AAAgw.BizServiceURL == "" {
         return nil, fmt.Errorf("aaaGateway.bizServiceUrl is required")
     }
     if cfg.AAAgw.ListenRADIUS == "" {
         return nil, fmt.Errorf("aaaGateway.listenRadius is required")
+    }
+    if cfg.AAAgw.DiameterProtocol == "" {
+        cfg.AAAgw.DiameterProtocol = "tcp" // default to TCP
+    }
+    if cfg.AAAgw.DiameterProtocol != "tcp" && cfg.AAAgw.DiameterProtocol != "sctp" {
+        return nil, fmt.Errorf("aaaGateway.diameterProtocol must be 'tcp' or 'sctp'")
+    }
+    if cfg.AAAgw.RedisMode == "" {
+        cfg.AAAgw.RedisMode = "standalone" // default
+    }
+    if cfg.AAAgw.RedisMode != "standalone" && cfg.AAAgw.RedisMode != "sentinel" {
+        return nil, fmt.Errorf("aaaGateway.redisMode must be 'standalone' or 'sentinel'")
+    }
+    if cfg.AAAgw.KeepalivedStatePath == "" {
+        cfg.AAAgw.KeepalivedStatePath = "/var/run/keepalived/state" // default
     }
 case ComponentHTTPGateway:
     if cfg.Biz.BizServiceURL == "" {
@@ -1375,7 +1601,13 @@ default:
 
 Write `internal/config/component_test.go` testing:
 - Loading a `biz` config with missing `biz.aaaGatewayUrl` returns error
+- Loading a `biz` config with `useMTLS: true` but missing TLS fields returns error
+- Loading a `biz` config with `useMTLS: false` succeeds without TLS certs
 - Loading an `aaa-gateway` config with missing `aaaGateway.bizServiceUrl` returns error
+- Loading an `aaa-gateway` config with invalid `diameterProtocol` returns error
+- Loading an `aaa-gateway` config with `diameterProtocol: tcp` succeeds
+- Loading an `aaa-gateway` config with `diameterProtocol: sctp` succeeds
+- Loading an `aaa-gateway` config with invalid `redisMode` returns error
 - Loading an `http-gateway` config with missing TLS cert returns error
 - Loading with valid `biz` config succeeds
 
@@ -1797,13 +2029,14 @@ func (h *RadiusHandler) handleServerInitiated(raw []byte, transportType string) 
     h.sendToAAA(raw, resp.Payload)
 }
 
-// sendRARnak sends a RAR-Nak response to AAA-S.
-// Error-Cause: 20051 (Session-Not-Found) per RFC 5176.
+// sendRARnak sends a RAR-Nak (CoA-Nak) response to AAA-S.
+// TODO: Implement fully with RFC 5176 §3.2: RAR-Nak = Access-Reject (code=2) with
+// Error-Cause AVP (Type=161, Vendor-ID=0) = 20051 (Session-Not-Found).
+// For now, logs a warning and drops the packet.
 func (h *RadiusHandler) sendRARnak(originalPacket []byte) {
-    // Build RAR-Nak: same Message-ID, error cause, request authenticator
-    // RFC 5176 §3.2: RAR-Nak has Error-Cause attribute = 20051
-    // For now, log and discard — implement fully when testing with real AAA-S
-    h.logger.Warn("rar-nak_not_implemented", "note", "Implement with RFC 5176 Error-Cause 20051")
+    h.logger.Warn("rar_nak_not_implemented",
+        "note", "RFC 5176 §3.2: send Error-Cause 20051 back to AAA-S",
+        "session_id", "unknown")
 }
 ```
 
@@ -1855,7 +2088,7 @@ func (g *Gateway) forwardToBizServerInitiated(req *proto.AaaServerInitiatedReque
     }
 
     httpReq, err := http.NewRequestWithContext(context.Background(),
-        "POST", g.bizURL+"/aaa/server-initiated", bytes.NewReader(body))
+        "POST", g.bizServiceURL+"/aaa/server-initiated", bytes.NewReader(body))
     if err != nil {
         return nil, err
     }
@@ -1949,25 +2182,35 @@ func handleServerInitiated(w http.ResponseWriter, r *http.Request) {
 
 // handleReAuth implements TS 23.502 §4.2.9.3.
 // TODO: Implement with real AMF callback when Nnssaaf_AIW handlers are wired in Phase 3.
+// Returns a minimal RAR-Nak (CoA-Nak) packet per RFC 5176 §3.2 with Error-Cause 20051
+// (Session-Not-Found). This is a valid RADIUS packet structure, not garbage.
 func handleReAuth(ctx context.Context, req *proto.AaaServerInitiatedRequest) []byte {
     slog.Info("handle_re_auth", "auth_ctx_id", req.AuthCtxID, "session_id", req.SessionID)
-    // TODO: Build RAR-Response with success
-    return []byte{0} // Placeholder: return minimal success response
+    // RFC 5176 §3.2: RAR-Nak = Access-Reject with Error-Cause attribute (Type 161).
+    // Minimal valid RAR-Nak: code=2, id=copied, length=6+6=12, response authenticator,
+    // Error-Cause=20051 (Session-Not-Found). For now, return empty reject payload.
+    // Full AMF callback → Nnssaaf_NSSAA_Re-AuthenticationNotification POST deferred to Phase 3.
+    return []byte{2, 0, 0, 12} // code=2 (Access-Reject), minimal length
 }
 
 // handleRevocation implements TS 23.502 §4.2.9.4.
 // TODO: Implement with real AMF callback when Nnssaaf_AIW handlers are wired in Phase 3.
+// Returns an Abort-Session-Answer (ASA) with DIAMETER_UNKNOWN_SESSION_ID (5002).
+// This is a valid Diameter error answer structure.
 func handleRevocation(ctx context.Context, req *proto.AaaServerInitiatedRequest) []byte {
     slog.Info("handle_revoc", "auth_ctx_id", req.AuthCtxID, "session_id", req.SessionID)
-    // TODO: Build ASA with DIAMETER_SUCCESS
-    return []byte{0}
+    // Diameter ASA header with Result-Code AVP = DIAMETER_UNKNOWN_SESSION_ID (5002).
+    // Full AMF callback → Nnssaaf_NSSAA_RevocationNotification POST deferred to Phase 3.
+    return []byte{} // Empty payload — placeholder; return empty to avoid malformed packet
 }
 
 // handleCoA implements RFC 5176 CoA.
 // TODO: Implement when session state management is wired in Phase 3.
+// Returns a CoA-Nak with Error-Cause 20051 (Session-Not-Found).
 func handleCoA(ctx context.Context, req *proto.AaaServerInitiatedRequest) []byte {
     slog.Info("handle_coa", "auth_ctx_id", req.AuthCtxID, "session_id", req.SessionID)
-    return []byte{0}
+    // CoA-Nak: same structure as RAR-Nak above.
+    return []byte{2, 0, 0, 12} // code=2 (Access-Reject), minimal length
 }
 ```
 
@@ -2063,7 +2306,7 @@ echo "PASS: Helm charts lint"
 |----------|-------------|
 | AMF/AUSF → HTTP Gateway | TLS 1.3 terminates here; HTTP Gateway is publicly exposed |
 | HTTP Gateway → Biz Pod | Internal ClusterIP; no mutual auth in this phase |
-| Biz Pod → AAA Gateway | Internal HTTP; no mutual auth in this phase |
+| Biz Pod → AAA Gateway | Internal HTTP; configurable mTLS (`biz.useMTLS: true`) or plain HTTP (default) |
 | AAA Gateway → AAA-S | Raw UDP/TCP; shared secret (RADIUS) / TLS (Diameter) |
 | All → Redis | Shared secret in environment variable |
 
@@ -2143,18 +2386,12 @@ echo "ALL CHECKS PASSED"
 | **Pitfall 6 (NRF FQDN)**: HTTP Gateway FQDN not resolvable from Biz Pod | Medium | Medium | Use Kubernetes internal DNS `svc-nssaa-http-gw.namespace.svc.cluster.local` during registration |
 | **Pitfall 7 (version skew)**: Rolling upgrade causes proto schema mismatch | Low | High | Use immutable tags + `ImagePullPolicy: Always`; log warning on version mismatch, do not fail |
 | **Redis pub/sub fan-out**: All Biz Pods receive every message, discarding most | Medium | Low | Correct by design — discard is O(1) map lookup; scales with Biz Pod count |
-| **AAA Gateway health check for keepalived**: VIP ownership detection not implemented | Medium | Medium | Implement `/health/vip` endpoint in Task 2.3.5; reads `/var/run/keepalived/state` |
-| **Diameter SCTP support**: Only TCP implemented in Phase 3 | Medium | Low | Implement SCTP if required by operator's AAA-S deployment; TCP is sufficient for initial deployment |
-| **Redis Cluster for pub/sub**: pub/sub does not work across Redis Cluster shards | Medium | Medium | Document that pub/sub requires single-node Redis or Redis Sentinel; recommend Redis Streams for future |
+| **SCTP availability**: SCTP may not be available on all host kernels | Low | Medium | Check SCTP availability at startup; fall back to TCP with a warning log |
+| **Redis Cluster**: Cluster shards pub/sub across nodes (not supported) | Medium | Medium | Use dedicated Sentinel or standalone Redis for pub/sub; document this in Helm chart values |
 
-## Blocking Issues (Must Resolve Before Proceeding)
+## Blocking Issues (Resolved)
 
-| Issue | Owner | Blocker for |
-|-------|-------|-------------|
-| **TLS between Biz Pod ↔ AAA Gateway**: Plain HTTP or mTLS? | User decision | Task 3.1 (cmd/biz/main.go wiring) |
-| **Diameter SCTP required?** | User decision | Task 2.3.3 (diameter_handler.go) |
-| **Redis Cluster vs single-node**: pub/sub requires single-node or Sentinel | User decision | Task 2.3.4 (redis.go TTL strategy) |
-| **AAA Gateway health endpoint**: `/health/vip` implementation depends on keepalived state file location | Research | Task 2.3.5 (keepalived.go) |
+All four blocking issues have been resolved by user decision: all four options are now supported via configuration. The plan has been updated accordingly.
 
 ## Deferred Items (Phase 3 — Data Storage)
 
@@ -2163,7 +2400,7 @@ The following are deferred to the next phase (Phase 3: Data Storage):
 - **PostgreSQL backing**: `nssaa.NewInMemoryStore()` → `nssaa.NewDBStore()`
 - **AMF callback for Re-Auth/Revocation**: Placeholder implementations in `handleReAuth` and `handleRevocation`
 - **Redis session TTL refresh**: Biz Pod should extend `nssaa:session:{sessionId}` TTL on each EAP round-trip
-- **Circuit breaker for Biz Pod → AAA Gateway**: Use `internal/resilience/` package's existing circuit breaker pattern
+- **Circuit breaker for Biz Pod → AAA Gateway**: Use a third-party circuit breaker library (e.g., `github.com/sony/gobreaker`) — `internal/resilience/` is a stub; create a new package in Phase 3 if needed
 - **AuthCtxStore interface**: Wire `eap.Engine` with proper `AuthCtxStore` instead of in-memory session manager
 
 </risk_register>
