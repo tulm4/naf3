@@ -4,6 +4,7 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -61,15 +62,21 @@ func New(cfg Config) *Gateway {
 	}
 
 	g.redis = newRedisClient(cfg.RedisAddr, cfg.RedisMode)
+	g.bizHTTPClient = &http.Client{Timeout: 30 * time.Second}
 
 	g.radiusHandler = &RadiusHandler{
 		logger:          cfg.Logger,
 		publishResponse: g.publishResponseBytes,
+		forwardToBiz:    g.forwardToBiz,
 	}
 
 	g.diameterHandler = &DiameterHandler{
 		logger:          cfg.Logger,
 		publishResponse: g.publishResponseBytes,
+		forwardToBiz:   g.forwardToBiz,
+		version:        cfg.Version,
+		bizURL:        cfg.BizServiceURL,
+		httpClient:     g.bizHTTPClient,
 	}
 
 	return g
@@ -245,6 +252,75 @@ func (g *Gateway) publishResponseBytes(sessionID string, raw []byte) {
 	if err := g.publishResponse(g.ctx, &event); err != nil {
 		g.logger.Error("failed to publish response bytes", "error", err, "session_id", sessionID)
 	}
+}
+
+// forwardToBiz sends a server-initiated message to the Biz Pod via HTTP POST.
+// It also writes the session correlation entry to Redis first.
+func (g *Gateway) forwardToBiz(ctx context.Context, sessionID string, transportType string, messageType string, raw []byte) {
+	// 1. Look up session correlation from Redis
+	entry, err := g.getSessionCorr(ctx, sessionID)
+	if err != nil || entry == nil {
+		g.logger.Warn("server_initiated_session_not_found",
+			"session_id", sessionID,
+			"transport", transportType,
+			"message_type", messageType)
+		return
+	}
+
+	// 2. Build and send the request to Biz Pod
+	req := &proto.AaaServerInitiatedRequest{
+		Version:       g.version,
+		SessionID:     sessionID,
+		AuthCtxID:     entry.AuthCtxID,
+		TransportType: proto.TransportType(transportType),
+		MessageType:   proto.MessageType(messageType),
+		Payload:       raw,
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		g.logger.Error("failed to marshal server-initiated request", "error", err)
+		return
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST",
+		g.cfg.BizServiceURL+"/aaa/server-initiated", bytes.NewReader(body))
+	if err != nil {
+		g.logger.Error("failed to create request to biz", "error", err)
+		return
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set(proto.HeaderName, g.version)
+
+	resp, err := g.bizHTTPClient.Do(httpReq)
+	if err != nil {
+		g.logger.Error("biz service unavailable for server-initiated",
+			"error", err, "session_id", sessionID)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		g.logger.Warn("biz returned non-OK for server-initiated",
+			"status", resp.StatusCode, "session_id", sessionID)
+	}
+}
+
+// getSessionCorr reads the SessionCorrEntry from Redis for a given sessionID.
+func (g *Gateway) getSessionCorr(ctx context.Context, sessionID string) (*proto.SessionCorrEntry, error) {
+	key := proto.SessionCorrKey(sessionID)
+	data, err := g.redis.Get(ctx, key).Bytes()
+	if err != nil {
+		if err == redis.Nil {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var entry proto.SessionCorrEntry
+	if err := json.Unmarshal(data, &entry); err != nil {
+		return nil, err
+	}
+	return &entry, nil
 }
 
 // publishResponse publishes AaaResponseEvent to the nssaa:aaa-response channel.

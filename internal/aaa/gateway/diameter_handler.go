@@ -3,15 +3,22 @@ package gateway
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
+	"net/http"
 )
 
 // DiameterHandler handles Diameter protocol traffic.
 type DiameterHandler struct {
 	logger          *slog.Logger
 	publishResponse func(sessionID string, raw []byte)
+	forwardToBiz   func(ctx context.Context, sessionID string, transportType string, messageType string, raw []byte)
+	version         string
+	bizURL         string
+	httpClient     *http.Client
 }
 
 // Listen starts the Diameter server on the configured protocol (TCP or SCTP).
@@ -75,18 +82,110 @@ func (h *DiameterHandler) serveSCTP(listener net.Listener) {
 }
 
 // HandleConnection processes an incoming Diameter connection from AAA-S.
+// It reads messages, determines the type, and routes to the appropriate handler.
+// Spec: RFC 6733 App H (SCTP), Command Code 280 (DER/DEA), Command Code 274 (ASR/ASA).
 func (h *DiameterHandler) HandleConnection(conn net.Conn) {
 	defer conn.Close()
-	// TODO: Use go-diameter/v4 to decode message header and determine message type.
-	// Command Code 280 = Experimental-Result (used for DER/DEA)
-	// Command Code 274 = Abort-Session-Request (ASR) / Abort-Session-Answer (ASA)
 	h.logger.Info("Diameter connection received", "remote", conn.RemoteAddr())
+
+	for {
+		// Diameter messages have a 20-byte header:
+		// version(1) + flags(1) + command-code(3) + application-id(4) + hop-by-hop(4) + end-to-end(4) + length(3)
+		header := make([]byte, 20)
+		if _, err := io.ReadFull(conn, header); err != nil {
+			if err != io.EOF {
+				h.logger.Error("Diameter read error", "error", err)
+			}
+			return
+		}
+
+		// Parse header fields
+		version := header[0]
+		if version != 1 {
+			h.logger.Warn("unsupported Diameter version", "version", version)
+			return
+		}
+
+		commandCode := binary.BigEndian.Uint32(header[1:4]) >> 8 // top 3 bytes
+		_length := binary.BigEndian.Uint32([]byte{0, header[16], header[17], header[18]})
+		length := int(_length)
+
+		if length < 20 {
+			h.logger.Warn("Diameter message too short", "length", length)
+			return
+		}
+
+		// Read remaining bytes
+		remaining := length - 20
+		if remaining > 0 {
+			msg := make([]byte, remaining)
+			if _, err := io.ReadFull(conn, msg); err != nil {
+				h.logger.Error("Diameter read body error", "error", err)
+				return
+			}
+			header = append(header, msg...)
+		}
+
+		// Route based on Command Code
+		// 280 = Experimental-Result (DER/DEA — client-initiated)
+		// 274 = Abort-Session-Request (ASR — server-initiated)
+		switch commandCode {
+		case 280:
+			// Client-initiated: response to our DER
+			sessionID := extractDiameterSessionID(header)
+			h.publishResponse(sessionID, header)
+		case 274:
+			// Server-initiated: ASR from AAA-S
+			h.handleServerInitiated(header)
+		default:
+			h.logger.Debug("Diameter unhandled command code",
+				"command_code", commandCode,
+				"length", length)
+		}
+	}
+}
+
+// handleServerInitiated handles ASR (Abort-Session-Request) from AAA-S.
+func (h *DiameterHandler) handleServerInitiated(raw []byte) {
+	sessionID := extractDiameterSessionID(raw)
+	if sessionID == "" {
+		h.logger.Warn("ASR: no session ID found")
+		return
+	}
+
+	h.logger.Info("Diameter ASR received",
+		"session_id", sessionID)
+
+	h.forwardToBiz(context.Background(), sessionID, "DIAMETER", "ASR", raw)
 }
 
 // Forward sends a Diameter message to AAA-S and returns the response.
 // This is a stub — the actual implementation forwards to AAA-S.
 func (h *DiameterHandler) Forward(ctx context.Context, payload []byte, sessionID string) ([]byte, error) {
 	// TODO: Implement actual Diameter forwarding to AAA-S server
-	// For now, return a placeholder ASA response
+	// For now, return a placeholder empty response
 	return []byte{}, nil
+}
+
+// extractDiameterSessionID extracts the Session-Id AVP from a Diameter message.
+// The Session-Id AVP is in the message body after the 20-byte header.
+func extractDiameterSessionID(raw []byte) string {
+	if len(raw) < 24 {
+		return ""
+	}
+	// Session-Id AVP: AVP code 263, flags, length (4 bytes), followed by UTF8String value
+	pos := 20
+	for pos+8 <= len(raw) {
+		avpCode := binary.BigEndian.Uint32([]byte{0, raw[pos], raw[pos+1], raw[pos+2]})
+		avpLen := int(binary.BigEndian.Uint32([]byte{0, raw[pos+4], raw[pos+5], raw[pos+6]}))
+		if avpLen < 8 || pos+avpLen > len(raw) {
+			break
+		}
+		if avpCode == 263 { // Session-Id AVP
+			// Value starts at pos+8 (after code[4] + flags[1] + length[3])
+			return string(raw[pos+8 : pos+avpLen])
+		}
+		pos += avpLen
+	}
+	return ""
 }

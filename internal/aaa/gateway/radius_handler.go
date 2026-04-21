@@ -14,13 +14,14 @@ const (
 	radiusAccessReject      = 3
 	radiusAccessChallenge   = 11
 	radiusCoARequest        = 43 // RFC 5176
-	radiusDisconnectRequest = 40 // RFC 5176
+	radiusDisconnectRequest  = 40 // RFC 5176
 )
 
 // RadiusHandler handles RADIUS protocol traffic.
 type RadiusHandler struct {
 	logger          *slog.Logger
 	publishResponse func(sessionID string, raw []byte)
+	forwardToBiz    func(ctx context.Context, sessionID string, transportType string, messageType string, raw []byte)
 }
 
 // Listen starts the RADIUS UDP listener.
@@ -86,17 +87,57 @@ func (h *RadiusHandler) Forward(ctx context.Context, payload []byte, sessionID s
 }
 
 // handleServerInitiated handles server-initiated RADIUS packets (CoA, DM).
+// It extracts the session ID, looks up the Biz Pod, and forwards the request.
 func (h *RadiusHandler) handleServerInitiated(raw []byte, transport string) {
-	// TODO: Implement server-initiated flow
-	// - Parse session from RADIUS State attribute
-	// - Look up session correlation in Redis
-	// - Forward to Biz Pod via HTTP POST /aaa/server-initiated
-	h.logger.Info("server-initiated RADIUS received", "transport", transport)
+	sessionID := extractSessionID(raw)
+	if sessionID == "" {
+		h.logger.Warn("server_initiated_no_session_id", "transport", transport)
+		return
+	}
+
+	msgType := "RAR"
+	if raw[0] == radiusCoARequest {
+		msgType = "COA"
+	}
+
+	h.logger.Info("server-initiated RADIUS received",
+		"transport", transport,
+		"session_id", sessionID,
+		"message_type", msgType)
+
+	h.forwardToBiz(context.Background(), sessionID, "RADIUS", msgType, raw)
 }
 
 // extractSessionID extracts the session ID from RADIUS packet.
+// It looks for the State attribute (type 24) which carries the session correlation key.
 func extractSessionID(raw []byte) string {
-	// Extract from RADIUS State attribute (attribute type 24)
-	// For now, return empty string as a placeholder
+	if len(raw) < 20 {
+		return ""
+	}
+	// RADIUS packet structure: 20-byte header + attributes
+	// State attribute: type=24, length=variable
+	pos := 20
+	for pos+2 <= len(raw) {
+		attrType := raw[pos]
+		attrLen := int(raw[pos+1])
+		if attrLen < 2 || pos+attrLen > len(raw) {
+			break
+		}
+		if attrType == 24 { // State attribute
+			return string(raw[pos+2 : pos+attrLen])
+		}
+		pos += attrLen
+	}
 	return ""
 }
+
+// sendRARnak sends a RAR-Nak (CoA-Nak) response to AAA-S.
+// TODO: Implement fully with RFC 5176 §3.2: RAR-Nak = Access-Reject (code=2) with
+// Error-Cause AVP (Type=161, Vendor-ID=0) = 20051 (Session-Not-Found).
+// For now, logs a warning and drops the packet.
+func sendRARnak(logger *slog.Logger, originalPacket []byte) {
+	logger.Warn("rar_nak_not_implemented",
+		"note", "RFC 5176 §3.2: send Error-Cause 20051 back to AAA-S",
+		"session_id", "unknown")
+}
+

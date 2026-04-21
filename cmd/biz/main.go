@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"flag"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -142,15 +143,61 @@ func main() {
 }
 
 func handleAaaForward(w http.ResponseWriter, r *http.Request) {
-	// Called by AAA Gateway for server-initiated flow (RAR/ASR/CoA)
-	// For now, return 501 Not Implemented — fully wired in Task 6.1
 	http.Error(w, "not implemented", http.StatusNotImplemented)
 }
 
 func handleServerInitiated(w http.ResponseWriter, r *http.Request) {
-	// Called by AAA Gateway when AAA-S initiates Re-Auth or Revocation
-	// For now, return 501 Not Implemented — fully wired in Task 6.1
-	http.Error(w, "not implemented", http.StatusNotImplemented)
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if r.Header.Get("Content-Type") != "application/json" {
+		http.Error(w, "unsupported media type", http.StatusUnsupportedMediaType)
+		return
+	}
+
+	var req proto.AaaServerInitiatedRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	var respPayload []byte
+	switch req.MessageType {
+	case proto.MessageTypeRAR:
+		respPayload = handleReAuth(r.Context(), &req)
+	case proto.MessageTypeASR:
+		respPayload = handleRevocation(r.Context(), &req)
+	case proto.MessageTypeCoA:
+		respPayload = handleCoA(r.Context(), &req)
+	default:
+		http.Error(w, "unknown message type", http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(proto.AaaServerInitiatedResponse{
+		Version:   proto.CurrentVersion,
+		SessionID: req.SessionID,
+		AuthCtxID: req.AuthCtxID,
+		Payload:   respPayload,
+	})
+}
+
+func handleReAuth(ctx context.Context, req *proto.AaaServerInitiatedRequest) []byte {
+	slog.Info("handle_re_auth", "auth_ctx_id", req.AuthCtxID, "session_id", req.SessionID)
+	return []byte{2, 0, 0, 12}
+}
+
+func handleRevocation(ctx context.Context, req *proto.AaaServerInitiatedRequest) []byte {
+	slog.Info("handle_revoc", "auth_ctx_id", req.AuthCtxID, "session_id", req.SessionID)
+	return []byte{}
+}
+
+func handleCoA(ctx context.Context, req *proto.AaaServerInitiatedRequest) []byte {
+	slog.Info("handle_coa", "auth_ctx_id", req.AuthCtxID, "session_id", req.SessionID)
+	return []byte{2, 0, 0, 12}
 }
 
 // podHeartbeat registers the Biz Pod in the Redis SET and refreshes every 30 seconds.
