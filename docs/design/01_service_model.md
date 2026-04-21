@@ -418,118 +418,142 @@ The NSSAAF is structured as a **3-component model** for Kubernetes production de
 
 #### Flow A: AMF → NSSAAF → AAA-S → NSSAAF → AMF
 
+> **Note (Phase R):** This flow spans three NSSAAF components: HTTP Gateway → Biz Pod → AAA Gateway. Each component handles a distinct responsibility. See §5.4.3 for the per-component responsibility model.
+
 ```
-AMF                    NSSAAF                  AAA-S
-  │                       │                       │
-  │ POST /slice-auth      │                       │
-  │ (EAP ID Response,    │                       │
-  │  GPSI, S-NSSAI)      │                       │
-  │──────────────────────►│                       │
-  │                       │                       │
-  │                       │ 1. Validate request   │
-  │                       │ 2. Create session in  │
-  │                       │    PostgreSQL         │
-  │                       │ 3. Select AAA config  │
-  │                       │    (by S-NSSAI)       │
-  │                       │                       │
-  │                       │ 4. Encode RADIUS      │
-  │                       │    Access-Request     │
-  │                       │                       │
-  │                       │───────────────────────►
-  │                       │                       │
-  │                       │    RADIUS Access-     │
-  │                       │    Challenge          │
-  │                       │◄──────────────────────│
-  │                       │                       │
-  │                       │ 5. Decode RADIUS      │
-  │                       │ 6. Encode EAP to AMF  │
-  │                       │                       │
-  │ 201 Created          │                       │
-  │ (EAP Challenge,       │                       │
-  │  authCtxId)          │                       │
-  │◄──────────────────────│                       │
-  │                       │                       │
-  │ PUT /slice-auth/{id} │                       │
-  │ (EAP Response)       │                       │
-  │──────────────────────►│                       │
-  │                       │                       │
-  │                       │ 7. RADIUS Access-     │
-  │                       │    Request            │
-  │                       │───────────────────────►│
-  │                       │                       │
-  │                       │    RADIUS Access-     │
-  │                       │    Accept/Reject      │
-  │                       │◄──────────────────────│
-  │                       │                       │
-  │                       │ 8. Update session     │
-  │                       │    state in DB        │
-  │                       │                       │
-  │ 200 OK               │                       │
-  │ (EAP Result,         │                       │
-  │  authResult)         │                       │
-  │◄──────────────────────│                       │
+AMF                    HTTP GW              Biz Pod              AAA GW (active)           AAA-S
+  │                       │                   │                       │                      │
+  │ POST /slice-auth      │                   │                       │                      │
+  │ (EAP ID Response,    │                   │                       │                      │
+  │  GPSI, S-NSSAI)      │                   │                       │                      │
+  │──────────────────────►│                   │                       │                      │
+  │                       │ HTTP/ClusterIP    │                       │                      │
+  │                       │ POST /slice-auth  │                       │                      │
+  │                       │───────────────────►│                       │                      │
+  │                       │                   │                       │                      │
+  │                       │                   │ 1. Validate request   │                      │
+  │                       │                   │ 2. Create session in  │                      │
+  │                       │                   │    PostgreSQL         │                      │
+  │                       │                   │ 3. Select AAA config  │                      │
+  │                       │                   │    (by S-NSSAI)       │                      │
+  │                       │                   │                       │                      │
+  │                       │                   │ 4. Encode EAP into    │                      │
+  │                       │                   │    RADIUS Access-Req  │                      │
+  │                       │                   │                       │                      │
+  │                       │                   │ 5. HTTP POST /aaa/    │                      │
+  │                       │                   │    forward (raw bytes)│                      │
+  │                       │                   │                       │                      │
+  │                       │                   │ HTTP/9090             │ UDP:1812             │
+  │                       │                   │──────────────────────►│─────────────────────►│
+  │                       │                   │                       │                      │
+  │                       │                   │                       │    RADIUS Access-    │
+  │                       │                   │                       │    Challenge          │
+  │                       │                   │                       │◄────────────────────│
+  │                       │                   │                       │                      │
+  │                       │                   │ 6. Decode EAP from    │                      │
+  │                       │                   │    RADIUS response     │                      │
+  │                       │                   │ 7. Advance EAP state   │                      │
+  │                       │                   │                       │                      │
+  │ 201 Created          │                   │                       │                      │
+  │ (EAP Challenge,       │                   │                       │                      │
+  │  authCtxId)          │                   │                       │                      │
+  │◄──────────────────────│                   │                       │                      │
+  │                       │                   │                       │                      │
+  │ PUT /slice-auth/{id} │                   │                       │                      │
+  │ (EAP Response)       │                   │                       │                      │
+  │──────────────────────►│                   │                       │                      │
+  │                       │───────────────────►│                       │                      │
+  │                       │                   │ 8. Encode EAP into    │                      │
+  │                       │                   │    RADIUS Access-Req  │                      │
+  │                       │                   │──────────────────────►│─────────────────────►│
+  │                       │                   │                       │                      │
+  │                       │                   │                       │    RADIUS Access-    │
+  │                       │                   │                       │    Accept/Reject      │
+  │                       │                   │                       │◄────────────────────│
+  │                       │                   │ 9. Decode EAP result │                      │
+  │                       │                   │ 10. Update session    │                      │
+  │                       │                   │     state in DB        │                      │
+  │ 200 OK               │                   │                       │                      │
+  │ (EAP Result,         │                   │                       │                      │
+  │  authResult)         │                   │                       │                      │
+  │◄──────────────────────│                   │                       │                      │
 ```
+
+**Key separation of concerns in Flow A:**
+- **HTTP Gateway:** TLS termination, routing N58 to Biz Pod. No encode/decode, no session state.
+- **Biz Pod:** Full EAP encode/decode via `internal/radius/` encode/decode functions. Session state management. Calls AAA Gateway via `httpAAAClient`.
+- **AAA Gateway:** Raw RADIUS UDP socket I/O. Writes session correlation to Redis. Publishes responses via Redis pub/sub. No EAP decode/encode.
 
 #### Flow B: AAA-S → NSSAAF → AMF (Re-Auth Triggered)
 
+> **Note (Phase R):** Server-initiated messages arrive at the AAA Gateway via RADIUS/Diameter sockets. The AAA Gateway looks up the session correlation in Redis to determine the `authCtxId`, then POSTs to the Biz Pod's `/aaa/server-initiated` endpoint.
+
 ```
-AAA-S              NSSAAF                UDM                  AMF
-  │                   │                    │                    │
-  │ Re-Auth Request   │                    │                    │
-  │ (GPSI, S-NSSAI)  │                    │                    │
-  │──────────────────►│                    │                    │
-  │                   │                    │                    │
-  │                   │ 1. Validate AAA-S  │                    │
-  │                   │    authorization   │                    │
-  │                   │ 2. Nudm_UECM_Get  │                    │
-  │                   │    (GPSI)         │                    │
-  │                   │──────────────────►│                    │
-  │                   │                    │                    │
-  │                   │    AMF ID(s)      │                    │
-  │                   │◄──────────────────│                    │
-  │                   │                    │                    │
-  │ ACK (immediate)  │                    │                    │
-  │◄──────────────────│                    │                    │
-  │                   │                    │                    │
-  │                   │ 3. Nnssaaf_NSSAA_ │                    │
-  │                   │    Re-AuthNotif   │                    │
-  │                   │                   │                    │
-  │                   │───────────────────────────────────────►│
-  │                   │                    │                    │
-  │                   │                    │    204 No Content  │
-  │                   │◄───────────────────────────────────────│
-  │                   │                    │                    │
-  │                   │ 4. AMF triggers    │                    │
-  │                   │    NSSAA procedure │                    │
-  │                   │    (→ Flow A)      │                    │
+AAA-S              AAA GW                Biz Pod              UDM                  AMF
+  │                   │                    │                    │                    │
+  │ RADIUS Re-Auth    │                    │                    │                    │
+  │ Request           │                    │                    │                    │
+  │──────────────────►│                    │                    │                    │
+  │                   │ 1. Lookup session  │                    │                    │
+  │                   │    corr in Redis   │                    │                    │
+  │                   │                    │                    │                    │
+  │                   │ 2. HTTP POST /aaa/│                    │                    │
+  │                   │    server-initiated│                    │                    │
+  │                   │───────────────────►│                    │                    │
+  │                   │                    │ 3. Validate AAA-S  │                    │
+  │                   │                    │    authorization   │                    │
+  │                   │                    │ 4. Nudm_UECM_Get  │                    │
+  │                   │                    │    (GPSI)         │                    │
+  │                   │                    │──────────────────►│                    │
+  │                   │                    │                    │                    │
+  │                   │                    │    AMF ID(s)      │                    │
+  │                   │                    │◄──────────────────│                    │
+  │                   │                    │                    │                    │
+  │                   │                    │ 5. Nnssaaf_NSSAA_│                    │
+  │                   │                    │    Re-AuthNotif   │                    │
+  │                   │                    │                   │                    │
+  │                   │                    │───────────────────────────────────────►│
+  │                   │                    │                    │                    │
+  │                   │                    │                    │    204 No Content  │
+  │                   │                    │◄───────────────────────────────────────│
+  │                   │                    │                    │                    │
+  │                   │                    │ 6. AMF triggers    │                    │
+  │                   │                    │    NSSAA procedure │                    │
+  │                   │                    │    (→ Flow A)      │                    │
+  │                   │                    │                    │                    │
+  │ ACK (immediate)  │                    │                    │                    │
+  │◄──────────────────│                    │                    │                    │
 ```
 
 ### 5.3 Thread Model
 
-```
-Event-driven, async I/O (io_uring / epoll):
+> **Note (Phase R):** In the 3-component model, threads are distributed across three separate processes. RADIUS Sender and Diameter Sender run in the AAA Gateway, not in the Biz Pod. The Biz Pod's thread model includes only HTTP/2 acceptor and EAP state processing.
 
-Main Event Loop:
-  ├── SBI HTTP/2 Acceptor     (thread pool: 4-8 threads)
-  │     └── per-request: route → validate → dispatch
-  │
-  ├── EAP State Processor     (dedicated thread pool: 16-32 threads)
-  │     └── per-session: advance EAP state machine
-  │
-  ├── RADIUS Sender           (dedicated thread pool: 8-16 threads)
-  │     └── async send/recv, non-blocking UDP
-  │
-  ├── Diameter Sender          (dedicated thread pool: 4-8 threads)
-  │     └── SCTP/TCP async, connection pool
-  │
-  ├── Notification Dispatcher  (dedicated thread pool: 4 threads)
-  │     └── HTTP POST to AMF callbacks
-  │
-  └── Background Workers:
-        ├── NRF heartbeat       (interval: 5 min)
-        ├── AAA health checker   (interval: 30s)
-        ├── Session timeout      (scanner: every 1 min)
-        └── Audit log flusher    (batch: every 5s)
+**AAA Gateway process threads:**
+```
+├── RADIUS UDP Listener    (goroutine per listener: 1 thread)
+│     └── recv/send loop, non-blocking UDP
+│
+├── Diameter TCP/SCTP Listener (goroutine per listener: 1 thread)
+│     └── accept/recv loop, non-blocking I/O
+│
+└── Redis Pub/Sub Handler  (goroutine: 1 thread)
+      └── response dispatch to pending channels
+```
+
+**Biz Pod process threads:**
+```
+├── SBI HTTP/2 Acceptor     (thread pool: 4-8 threads)
+│     └── per-request: route → validate → dispatch
+│
+├── EAP State Processor     (dedicated thread pool: 16-32 threads)
+│     └── per-session: advance EAP state machine
+│
+└── Background Workers:
+      ├── NRF heartbeat       (interval: 5 min)
+      ├── AAA health checker   (interval: 30s) — via HTTP to AAA Gateway
+      ├── Session timeout      (scanner: every 1 min)
+      └── Audit log flusher    (batch: every 5s)
 ```
 
 ### 5.4 Multi-Pod Kubernetes Deployment
@@ -623,12 +647,14 @@ The production deployment follows a **3-component model**, each deployed as a se
 - Forwards raw response messages from Business Logic back to AAA-S
 - The Virtual IP (VIP) from keepalived is the **single stable source IP** seen by AAA-S
 - **Active-standby failover**: if the active pod dies, keepalived migrates the VIP to the standby within seconds; AAA-S sees no address change
+- Wire protocol: see `internal/proto/aaa_transport.go` (`AaaForwardRequest`/`AaaForwardResponse`) and `internal/proto/biz_callback.go` (`AaaResponseEvent`, `SessionCorrEntry`)
 
 **Business Logic Pods (N replicas, NSSAAF app):**
 - Receives raw AAA transport from AAA Gateway via internal HTTP
 - Performs full EAP encode/decode, EAP state machine, session management
 - Sends encoded EAP responses back to AAA Gateway for transmission to AAA-S
 - No direct external connectivity — purely internal HTTP communication
+- Wire protocol: uses `httpAAAClient` (`cmd/biz/http_aaa_client.go`) which implements `eap.AAAClient` and forwards via `proto.AaaForwardRequest`
 
 **Why no encode/decode in AAA Gateway?**
 - Separation of concerns: AAA Gateway handles only transport; Business Logic handles EAP semantics
@@ -795,9 +821,11 @@ AMF                    HTTP GW              Biz Pod              AAA GW (active)
 - Business Logic → AAA Gateway: `svc-nssaa-aaa:9090` (ClusterIP, routes to whichever pod holds the VIP)
 - The ClusterIP for AAA Gateway resolves to both replicas; the active pod handles the traffic
 
-**Session routing:** Business Logic pods store EAP session state in Redis. When the AAA Gateway forwards a response from AAA-S, it includes a session correlation ID in the HTTP request, allowing any Business Logic pod to retrieve the session from Redis and advance the state machine.
+**Session routing:** Business Logic pods store EAP session state in Redis. When the AAA Gateway forwards a response from AAA-S, it publishes an `AaaResponseEvent` to the Redis channel `nssaa:aaa-response`. All Biz Pods receive every event; each discards events not matching its in-flight sessions. Session correlation entries (mapping `sessionId` → `authCtxId`) are stored at Redis keys `nssaa:session:{sessionId}` by the AAA Gateway before forwarding to AAA-S. See `internal/proto/biz_callback.go` for wire protocol types.
 
-#### 5.4.7 Kubernetes Manifest Structure
+#### 5.4.7 Component Configuration Structure
+
+**Kubernetes manifests** (planned for production, see `docs/roadmap/`):
 
 ```
 nssAAF/
@@ -816,6 +844,17 @@ nssAAF/
     ├── configmap.yaml           # Go stdlib + custom UDP/TCP server bootstrap
     ├── keepalived.conf          # ConfigMap: keepalived VRRP configuration
     └── network-attachments.yaml  # Multus CNI CRD for bridge VLAN interface
+```
+
+**Development configuration** (see `compose/`):
+
+```
+compose/
+├── dev.yaml                    # docker-compose for all 3 components
+└── configs/
+    ├── http-gateway.yaml       # HTTP Gateway config
+    ├── biz.yaml                # Biz Pod config
+    └── aaa-gateway.yaml        # AAA Gateway config
 ```
 
 #### 5.4.8 NF Profile Registration (NRF)

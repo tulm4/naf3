@@ -5,7 +5,6 @@ interface: N/A (NSSAAF ↔ AAA-S internal)
 service: Diameter Client
 operation: N/A (internal)
 implementation: github.com/fiorix/go-diameter/v4 (base stack) + custom 3GPP AVPs
----
 
 # NSSAAF Diameter Client Design
 
@@ -22,6 +21,17 @@ implementation: github.com/fiorix/go-diameter/v4 (base stack) + custom 3GPP AVPs
 - 3GPP-S-NSSAI AVP (code 310) — tự viết
 - EAP-Payload AVP (code 209) — tự viết
 - Transport security (DTLS/IPSec) — tự viết
+
+## 0.1 Component Location
+
+> **Note (Phase R):** After the 3-component refactor, raw Diameter handling (TCP/SCTP socket I/O, message dispatch) moved to `internal/aaa/gateway/`. The `internal/diameter/` package now contains encode/decode and the `go-diameter` state machine — no socket code, no direct external connectivity. The AAA Gateway binary (`cmd/aaa-gateway/`) imports `internal/aaa/gateway/` and uses its `DiameterHandler` for raw socket operations. See `docs/design/01_service_model.md` §5.4.3.
+
+| Package | Contains | Used by |
+|---------|----------|---------|
+| `internal/diameter/` | Encode/decode, go-diameter state machine | Biz Pod (`cmd/biz/`) |
+| `internal/aaa/gateway/diameter_handler.go` | TCP/SCTP listener, message dispatch | AAA Gateway (`cmd/aaa-gateway/`) |
+
+The `DiameterHandler` in `internal/aaa/gateway/` operates as a raw pass-through — it receives TCP/SCTP messages, writes session correlation to Redis, forwards raw bytes to AAA-S, and publishes responses via Redis pub/sub. No Diameter message assembly/disassembly occurs in the AAA Gateway.
 
 ## 1. Overview
 

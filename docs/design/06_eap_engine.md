@@ -68,6 +68,22 @@ NSSAAF thực hiện vai trò **EAP authenticator backend** — relay các thôn
 
 **NSSAAF:** EAP authenticator backend — tiếp nhận EAP Response từ AMF, chuyển đổi sang AAA protocol (RADIUS/Diameter), gửi đến AAA-S, nhận response, chuyển đổi ngược và gửi về AMF.
 
+### 2.4 AAA Client Interface (Phase R)
+
+> **Note (Phase R):** After the 3-component refactor, `eap.AAAClient` is satisfied by `httpAAAClient` in `cmd/biz/http_aaa_client.go`, not by a direct RADIUS/Diameter socket client. The interface remains unchanged — only the implementation differs.
+
+The `eap.AAAClient` interface defines how the EAP engine communicates with AAA-S:
+
+```go
+type AAAClient interface {
+    SendEAP(ctx context.Context, authCtxID string, eapPayload []byte) ([]byte, error)
+}
+```
+
+In the 3-component model, `httpAAAClient` forwards EAP payloads to the AAA Gateway via HTTP POST `/aaa/forward` (see `internal/proto/aaa_transport.go`). The AAA Gateway then sends raw RADIUS/Diameter over the wire. This indirection is why the Biz Pod has no direct external connectivity.
+
+The Biz Pod's routing layer (`internal/biz/router.go`) determines the transport type (RADIUS or DIAMETER) based on S-NSSAI configuration, but does not send directly — it produces a `proto.AaaForwardRequest` that `httpAAAClient` forwards to the AAA Gateway.
+
 ---
 
 ## 3. EAP Session State Machine
@@ -535,6 +551,8 @@ func (e *EapEngine) ProcessAsync(ctx *EapContext, incoming *EapMessage) (<-chan 
 ---
 
 ## 7. Acceptance Criteria
+
+> **Note (Phase R):** In the 3-component model, the EAP engine runs in the Biz Pod. RADIUS encode/decode is in `internal/radius/`; Diameter encode/decode is in `internal/diameter/`. Raw socket I/O (RADIUS UDP, Diameter TCP/SCTP) runs in the AAA Gateway (`internal/aaa/gateway/`). The EAP engine communicates with AAA-S indirectly via `httpAAAClient` → AAA Gateway → AAA-S.
 
 | # | Criteria | Implementation |
 |---|----------|----------------|

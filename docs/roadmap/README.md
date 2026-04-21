@@ -48,13 +48,13 @@
 |-------|--------|-----------------|
 | Phase 0: Setup | ✅ DONE | `cmd/nssAAF/` |
 | Phase 1: Foundation | ✅ DONE | `internal/types/`, `internal/api/nssaa/`, `internal/api/aiw/`, `internal/api/common/`, `internal/config/` |
-| Phase 2: Protocol | ✅ DONE | `internal/eap/`, `internal/radius/`, `internal/diameter/`, `internal/aaa/` |
+| Phase 2: Protocol | ✅ DONE | `internal/eap/`, `internal/radius/` (Biz Pod only), `internal/diameter/` (Biz Pod only), `internal/aaa/` |
 | Phase 3: Data & Storage | ✅ DONE | `internal/storage/`, `internal/cache/` |
 | Phase 4: HA | ⏳ PENDING | `internal/resilience/` |
 | Phase 5: Security | ⏳ PENDING | `internal/auth/`, `internal/crypto/` |
 | Phase 6: Integration | ⏳ PENDING | `internal/nrf/`, `internal/udm/`, `internal/amf/` |
 | Phase 7: Kubernetes | ⏳ PENDING | — |
-| **Phase R: 3-Component Refactor** | 🔄 PENDING | — |
+| **Phase R: 3-Component Refactor** | ✅ DONE | `internal/proto/`, `cmd/biz/`, `cmd/http-gateway/`, `cmd/aaa-gateway/`, `internal/aaa/gateway/` |
 
 ---
 

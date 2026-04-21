@@ -21,6 +21,8 @@ Thiết kế kiến trúc High Availability cho NSSAAF đạt telecom-grade avai
 
 ### 2.1 Multi-Layer HA Design
 
+> **Note (Phase R):** After the 3-component refactor, NSSAAF pods are split into three distinct deployments: HTTP Gateway, Biz Pods, and AAA Gateway. HA characteristics differ per component. See `docs/design/01_service_model.md` §5.4 for the full 3-component architecture.
+
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
 │                          LOAD BALANCER (NLB/CLB)                          │
@@ -66,29 +68,59 @@ Thiết kế kiến trúc High Availability cho NSSAAF đạt telecom-grade avai
    (Shard 0)            (Shard 0)             (Shard 1)
 ```
 
+**HA characteristics by component (Phase R):**
+
+| Component | Replicas | HA Mechanism | Scalable? |
+|---|---|---|---|
+| HTTP Gateway | N (stateless) | LoadBalancer, any pod handles any request | Yes, horizontally |
+| Biz Pod | N (stateless) | No session affinity; state in Redis/PG | Yes, horizontally |
+| AAA Gateway | 2 (active-standby) | keepalived VRRP + VIP | **No — hard limit of 2** |
+
 ### 2.2 Stateless Design Principle
 
+> **Note (Phase R):** In the 3-component model, both HTTP Gateway and Biz Pod are stateless. Only the AAA Gateway maintains in-process state (pending response channels), but all state needed for routing is in Redis.
+
+**Biz Pod — fully stateless:**
 ```
-┌─────────────────────────────────────────────────────┐
-│                   NSSAAF Pod                          │
-│                                                       │
-│  ┌─────────────┐                                     │
-│  │  Istio      │ ─── mTLS inbound/outbound          │
-│  │  Sidecar    │                                     │
-│  └──────┬──────┘                                     │
-│         │                                              │
-│  ┌──────▼──────┐                                     │
-│  │ NSSAAF      │ ─── No local state                  │
-│  │ Application │     No connection pools             │
-│  │             │     No session cache                │
-│  └──────┬──────┘                                     │
-│         │                                              │
-│  ┌──────▼──────┐                                     │
-│  │ Istio       │ ─── All I/O to external services    │
-│  │ Sidecar     │                                     │
-│  └─────────────┘                                     │
-└─────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                    Biz Pod                                      │
+│                                                              │
+│  ┌─────────────┐                                            │
+│  │  HTTP      │ ─── mTLS inbound (from HTTP Gateway)       │
+│  │  Handler    │                                            │
+│  └──────┬──────┘                                            │
+│         │                                                     │
+│  ┌──────▼──────┐                                            │
+│  │ EAP Engine  │ ─── No local state                        │
+│  │             │     No connection pools                     │
+│  │             │     No session cache                        │
+│  └──────┬──────┘                                            │
+│         │                                                     │
+│  ┌──────▼──────┐                                            │
+│  │ httpAAAClient│ ─── HTTP to AAA Gateway (internal only)   │
+│  │             │     No direct external connectivity        │
+│  └─────────────┘                                            │
+└──────────────────────────────────────────────────────────────┘
 ```
+
+**HTTP Gateway — stateless TLS terminator:**
+```
+┌──────────────────────────────────────────────────────────────┐
+│                    HTTP Gateway                                │
+│                                                              │
+│  ┌─────────────┐                                            │
+│  │  TLS 1.3   │ ─── TLS termination                        │
+│  │  Terminator │                                            │
+│  └──────┬──────┘                                            │
+│         │                                                     │
+│  ┌──────▼──────┐                                            │
+│  │ HTTP Router │ ─── No session state                       │
+│  │             │     Routes to Biz Pods via ClusterIP        │
+│  └─────────────┘                                            │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Principle:** All persistent state resides in PostgreSQL and Redis external to pods. Any Biz Pod or HTTP Gateway pod can handle any request.
 
 **Nguyên tắc:** Mọi trạng thái nằm trong PostgreSQL và Redis bên ngoài pod. NSSAAF pods hoàn toàn stateless — bất kỳ pod nào có thể xử lý bất kỳ request nào.
 
@@ -98,33 +130,36 @@ Thiết kế kiến trúc High Availability cho NSSAAF đạt telecom-grade avai
 
 ### 3.1 Pod Distribution
 
+> **Note (Phase R):** The monolithic NSSAAF deployment is replaced by three separate Deployments. The YAML below applies to Biz Pods only. HTTP Gateway and AAA Gateway each have their own Deployment manifests. See `docs/design/01_service_model.md` §5.4.7.
+
 ```yaml
-# NSSAAF Deployment with anti-affinity across AZs
+# Biz Pod Deployment with anti-affinity across AZs
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: nssAAF
+  name: nssAAF-biz
   labels:
-    app: nssAAF
+    app: nssAAF-biz
     tier: network-function
+    component: biz  # distinguishes from http-gateway and aaa-gateway
 spec:
   replicas: 9  # 3 pods per AZ minimum
   selector:
     matchLabels:
-      app: nssAAF
+      app: nssAAF-biz
   template:
     metadata:
       labels:
-        app: nssAAF
+        app: nssAAF-biz
         tier: network-function
-    spec:
+        component: biz
       # Pod anti-affinity: spread across AZs
       affinity:
         podAntiAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
             - labelSelector:
                 matchLabels:
-                  app: nssAAF
+                  app: nssAAF-biz
               topologyKey: topology.kubernetes.io/zone
           preferredDuringSchedulingIgnoredDuringExecution:
             - weight: 100
@@ -451,14 +486,19 @@ Outlier detection tách biệt các pod có vấn đề:
 
 ### 7.1 Failure Matrix
 
+> **Note (Phase R):** Failures are scoped per component. Biz Pod and HTTP Gateway failures are recovered by Kubernetes (HPA/PDB). AAA Gateway failures require keepalived failover within seconds.
+
 | Failure | Impact | Recovery | RTO |
 |---------|--------|----------|-----|
-| 1 pod dies | Request redistributed | HPA spawns replacement | ~30s |
-| 1 AZ down | 1/3 capacity lost | HPA scales up remaining AZs | <2 min |
-| 2 AZs down | Degraded (read-only config) | Emergency scale-up in healthy AZ | <5 min |
+| HTTP Gateway pod dies | Traffic routed to remaining HTTP GW replicas | HPA spawns replacement | ~30s |
+| Biz Pod dies | In-flight EAP sessions may fail; HPA spawns replacement | HPA spawns replacement; in-flight sessions retried by AMF | ~30s |
+| 1 AZ down (HTTP GW/Biz) | 1/3 capacity lost | HPA scales up remaining AZs | <2 min |
 | DB leader fails | Patroni promotes sync replica | Automatic failover | <30s |
 | Redis master fails | Cluster promotes replica | Automatic failover | <10s |
-| All pods fail | Total outage | Cluster recovery | <5 min |
+| AAA Gateway active dies | AAA-S connection drops; keepalived promotes standby | keepalived VRRP failover | ~1-3s |
+| AAA Gateway standby dies | No HA until replaced | Manual intervention or node-level recovery | N/A |
+| All Biz Pods fail | Total service outage (SBI unavailable) | Cluster recovery | <5 min |
+| All HTTP GW pods fail | Total service outage (SBI unreachable) | Cluster recovery | <5 min |
 
 ### 7.2 Graceful Degradation
 
@@ -504,15 +544,21 @@ func (s *Server) HandleRequest(ctx *Request) *Response {
 
 ## 8. Acceptance Criteria
 
+> **Note (Phase R):** These criteria apply to the 3-component model. Biz Pod and HTTP Gateway are stateless and scale horizontally. AAA Gateway is stateful (active-standby) with a hard limit of 2 replicas.
+
 | # | Criteria | Implementation |
 |---|----------|----------------|
-| AC1 | Stateless NSSAAF: no local session state | All state in PostgreSQL + Redis |
-| AC2 | 3 AZ deployment với anti-affinity | PodAntiAffinity, requiredDuringScheduling |
-| AC3 | HPA: 3-50 replicas, scale on CPU/memory/sessions | HorizontalPodAutoscaler v2 |
-| AC4 | PDB: maxUnavailable=1, minAvailable=2 | PodDisruptionBudget |
-| AC5 | Patroni HA: leader + 2 standbys, automatic failover | Consul DCS, streaming replication |
-| AC6 | Redis Cluster: 3 shards, automatic failover | Cluster mode, quorum 2/3 |
-| AC7 | Circuit breaker per AAA server | CLOSED/OPEN/HALF_OPEN |
-| AC8 | RTO < 30s for single AZ failure | Patroni automatic failover |
-| AC9 | RPO = 0 (sync replication to 1 standby) | Synchronous streaming replication |
-| AC10 | Graceful degradation: reject when DB unhealthy | HealthManager with HealthState |
+| AC1 | Stateless Biz Pod: no local session state | All state in PostgreSQL + Redis |
+| AC2 | Stateless HTTP Gateway: no session state | Routes all requests to Biz Pods |
+| AC3 | 3 AZ deployment with anti-affinity | PodAntiAffinity, requiredDuringScheduling |
+| AC4 | HPA for Biz Pods: 3-50 replicas, scale on CPU/memory/sessions | HorizontalPodAutoscaler v2 |
+| AC5 | HPA for HTTP Gateway: N replicas, scale on CPU/memory | HorizontalPodAutoscaler v2 |
+| AC6 | PDB: maxUnavailable=1, minAvailable=2 per deployment | PodDisruptionBudget |
+| AC7 | AAA Gateway: exactly 2 replicas, active-standby | keepalived VRRP, strategy=Recreate |
+| AC8 | Patroni HA: leader + 2 standbys, automatic failover | Consul DCS, streaming replication |
+| AC9 | Redis Cluster: 3 shards, automatic failover | Cluster mode, quorum 2/3 |
+| AC10 | Circuit breaker per AAA server | CLOSED/OPEN/HALF_OPEN |
+| AC11 | RTO < 30s for single AZ failure (Biz/HTTP GW) | Patroni automatic failover + HPA |
+| AC12 | RTO < 3s for AAA Gateway active failure | keepalived VRRP failover |
+| AC13 | RPO = 0 (sync replication to 1 standby) | Synchronous streaming replication |
+| AC14 | Graceful degradation: reject when DB unhealthy | HealthManager with HealthState |

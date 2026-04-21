@@ -5,7 +5,6 @@ interface: N/A (NSSAAF ↔ AAA-S internal)
 service: RADIUS Client
 operation: N/A (internal)
 implementation: Custom (no external library)
----
 
 # NSSAAF RADIUS Client Design
 
@@ -17,6 +16,17 @@ implementation: Custom (no external library)
 - UDP transport + HMAC-MD5 + 3GPP VSA custom = phần lớn code vẫn tự viết
 - Dùng library base protocol cho RADIUS không tiết kiệm nhiều effort
 - Custom implementation dễ debug production issues hơn (không có "black box")
+
+## 0.1 Component Location
+
+> **Note (Phase R):** After the 3-component refactor, raw RADIUS handling (UDP socket I/O, packet dispatch) moved to `internal/aaa/gateway/`. The `internal/radius/` package now contains only encode/decode logic — no socket code, no external connectivity. The AAA Gateway binary (`cmd/aaa-gateway/`) imports `internal/aaa/gateway/` and uses its `RadiusHandler` for raw socket operations. See `docs/design/01_service_model.md` §5.4.3.
+
+| Package | Contains | Used by |
+|---------|----------|---------|
+| `internal/radius/` | Encode/decode logic only | Biz Pod (`cmd/biz/`) |
+| `internal/aaa/gateway/radius_handler.go` | UDP socket listener, packet dispatch | AAA Gateway (`cmd/aaa-gateway/`) |
+
+The `RadiusHandler` in `internal/aaa/gateway/` operates as a raw pass-through — it receives UDP packets, writes session correlation to Redis, forwards raw bytes to AAA-S, and publishes responses via Redis pub/sub. No RADIUS decode/encode occurs in the AAA Gateway.
 
 ## 1. Overview
 
