@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nssaa-biz.fullname" . }}
+  labels:
+    app: nssaa-biz
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: nssaa-biz
+  template:
+    metadata:
+      labels:
+        app: nssaa-biz
+    spec:
+      containers:
+        - name: biz
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 8080
+          env:
+            - name: CONFIG
+              value: /etc/nssAAF/biz.yaml
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nssAAF
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: nssaa-biz-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: svc-nssaa-biz
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app: nssaa-biz
+  ports:
+    - port: 8080
+      targetPort: 8080

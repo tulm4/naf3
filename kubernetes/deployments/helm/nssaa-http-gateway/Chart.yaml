@@ -1,0 +1,5 @@
+apiVersion: v2
+name: nssaa-http-gateway
+description: NSSAAF HTTP Gateway — TLS terminator and N58/N60 forwarder
+version: 0.1.0
+appVersion: "1.0"

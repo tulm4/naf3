@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nssaa-aaa-keepalived
+data:
+  keepalived.conf: |
+    vrrp_instance vi_aaa {
+        state BACKUP
+        interface net0
+        virtual_router_id 60
+        priority 100
+        advert_int 1
+        unicast_peer {
+            {{ .Values.aaaGateway.vip.peerIp }}
+        }
+        virtual_ipaddress {
+            {{ .Values.aaaGateway.vip.address }}/{{ .Values.aaaGateway.vip.cidr }}
+        }
+        track_script {
+            chk_aaa_gw
+        }
+    }
+  chk_aaa_gw.sh: |
+    #!/bin/bash
+    curl -f http://localhost:9090/health/vip || exit 1

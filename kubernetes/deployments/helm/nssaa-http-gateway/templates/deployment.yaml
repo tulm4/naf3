@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nssaa-http-gateway.fullname" . }}
+  labels:
+    app: nssaa-http-gateway
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: nssaa-http-gateway
+  template:
+    metadata:
+      labels:
+        app: nssaa-http-gateway
+    spec:
+      containers:
+        - name: http-gw
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 8443
+          env:
+            - name: CONFIG
+              value: /etc/nssAAF/http-gateway.yaml
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nssAAF
+              readOnly: true
+            - name: tls
+              mountPath: /etc/tls
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8443
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8443
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: nssaa-http-gateway-config
+        - name: tls
+          secret:
+            secretName: nssaa-http-gateway-tls

@@ -1,0 +1,31 @@
+# AAA Gateway configuration for NSSAAF
+component: aaa-gateway
+version: "0.1.0"
+
+server:
+  addr: ":9090"
+  readTimeout: 10s
+  writeTimeout: 30s
+  idleTimeout: 120s
+
+redis:
+  addr: "redis:6379"
+  password: ""
+  db: 0
+  poolSize: 50
+
+aaaGateway:
+  bizServiceUrl: "http://biz:8080"
+  listenRadius: ":1812"
+  listenDiameter: ":3868"
+  diameterProtocol: "tcp"
+  redisMode: "standalone"
+  keepalivedStatePath: "/var/run/keepalived/state"
+
+logging:
+  level: "info"
+  format: "json"
+
+metrics:
+  enabled: true
+  path: "/metrics"

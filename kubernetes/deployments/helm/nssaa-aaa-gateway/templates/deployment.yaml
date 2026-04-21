@@ -1,0 +1,117 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nssaa-aaa-gateway.fullname" . }}
+  labels:
+    app: nssaa-aaa
+  annotations:
+    k8s.v1.cni.cncf.io/networks: |
+      [{
+        "name": "aaa-bridge-vlan",
+        "interface": "net0",
+        "ips": ["$(POD_IP)/24"],
+        "gateway": ["10.1.100.1"]
+      }]
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: nssaa-aaa
+  template:
+    metadata:
+      labels:
+        app: nssaa-aaa
+      annotations:
+        k8s.v1.cni.cncf.io/networks: |
+          [{
+            "name": "aaa-bridge-vlan",
+            "interface": "net0"
+          }]
+    spec:
+      containers:
+        - name: aaa-gw
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 9090
+            - containerPort: 1812
+              protocol: UDP
+            - containerPort: 3868
+          env:
+            - name: CONFIG
+              value: /etc/nssAAF/aaa-gateway.yaml
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nssAAF
+              readOnly: true
+            - name: keepalived-state
+              mountPath: /var/run/keepalived
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+        - name: keepalived
+          image: osixopen/keepalived:2.3.1
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+          volumeMounts:
+            - name: keepalived-conf
+              mountPath: /etc/keepalived
+            - name: keepalived-state
+              mountPath: /var/run/keepalived
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+      volumes:
+        - name: config
+          configMap:
+            name: nssaa-aaa-gateway-config
+        - name: keepalived-conf
+          configMap:
+            name: nssaa-aaa-keepalived
+        - name: keepalived-state
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: svc-nssaa-aaa
+spec:
+  clusterIP: None
+  selector:
+    app: nssaa-aaa
+  ports:
+    - name: http
+      port: 9090
+      targetPort: 9090
+    - name: radius
+      port: 1812
+      targetPort: 1812
+      protocol: UDP
+    - name: diameter
+      port: 3868
+      targetPort: 3868

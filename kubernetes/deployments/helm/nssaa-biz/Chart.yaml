@@ -1,0 +1,5 @@
+apiVersion: v2
+name: nssaa-biz
+description: NSSAAF Biz Pod — EAP engine and 3GPP handlers
+version: 0.1.0
+appVersion: "1.0"

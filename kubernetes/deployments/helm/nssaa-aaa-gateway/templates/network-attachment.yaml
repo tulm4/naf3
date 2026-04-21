@@ -1,0 +1,16 @@
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: aaa-bridge-vlan
+spec:
+  config: |
+    {
+      "cniVersion": "0.3.1",
+      "name": "aaa-bridge-vlan",
+      "type": "bridge",
+      "bridge": "aaa-br0",
+      "vlan": 100,
+      "ipam": {
+        "type": "static"
+      }
+    }

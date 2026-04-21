@@ -1,0 +1,25 @@
+replicaCount: 3
+
+image:
+  repository: nssAAF-http-gw
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 443
+
+config:
+  bizServiceUrl: http://svc-nssaa-biz:8080
+
+tls:
+  cert: /etc/tls/server.crt
+  key: /etc/tls/server.key
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 64Mi

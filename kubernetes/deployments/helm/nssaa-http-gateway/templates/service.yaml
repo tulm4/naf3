@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: svc-nssaa-http-gw
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    app: nssaa-http-gateway
+  ports:
+    - port: 443
+      targetPort: 8443

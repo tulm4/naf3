@@ -1,0 +1,68 @@
+# compose/dev.yaml
+# Local development setup for 3-component NSSAAF architecture.
+# Mirrors production topology: HTTP Gateway → Biz Pod → AAA Gateway → Redis → AAA-S mock.
+version: "3.8"
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  mock-aaa-s:
+    build:
+      context: .
+      dockerfile: Dockerfile.mock-aaa-s
+    image: nssAAF-mock-aaa-s:latest
+    ports: ["1812:1812/udp", "3868:3868"]
+    networks:
+      - backend
+
+  aaa-gateway:
+    image: nssAAF-aaa-gw:latest
+    depends_on:
+      redis:
+        condition: service_healthy
+      mock-aaa-s:
+        condition: service_started
+    volumes:
+      - ./configs/aaa-gateway.yaml:/etc/nssAAF/aaa-gateway.yaml:ro
+    ports: ["9090:9090"]
+    network_mode: host  # Dev only: keepalived needs host networking for VIP
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9090/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  biz:
+    image: nssAAF-biz:latest
+    depends_on:
+      redis:
+        condition: service_healthy
+      aaa-gateway:
+        condition: service_healthy
+    volumes:
+      - ./configs/biz.yaml:/etc/nssAAF/biz.yaml:ro
+    ports: ["8080:8080"]
+    networks:
+      - backend
+
+  http-gateway:
+    image: nssAAF-http-gw:latest
+    depends_on:
+      biz:
+        condition: service_started
+    volumes:
+      - ./configs/http-gateway.yaml:/etc/nssAAF/http-gateway.yaml:ro
+    ports: ["8443:443"]
+    networks:
+      - backend
+
+networks:
+  backend:
+    driver: bridge

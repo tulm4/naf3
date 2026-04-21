@@ -1,0 +1,32 @@
+replicaCount: 2
+
+image:
+  repository: nssAAF-aaa-gw
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+
+config:
+  bizServiceUrl: http://svc-nssaa-biz:8080
+  redisAddr: redis:6379
+  listenRadius: ":1812"
+  listenDiameter: ":3868"
+  diameterProtocol: tcp
+  redisMode: standalone
+  keepalivedStatePath: /var/run/keepalived/state
+
+aaaGateway:
+  vip:
+    address: "10.1.100.50"
+    cidr: "24"
+    peerIp: "10.1.100.51"
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 512Mi
+  requests:
+    cpu: 200m
+    memory: 128Mi

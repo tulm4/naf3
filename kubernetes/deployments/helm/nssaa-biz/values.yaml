@@ -1,0 +1,21 @@
+replicaCount: 5
+
+image:
+  repository: nssAAF-biz
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+
+config:
+  aaaGatewayUrl: http://svc-nssaa-aaa:9090
+  redisAddr: redis:6379
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 512Mi
+  requests:
+    cpu: 200m
+    memory: 128Mi

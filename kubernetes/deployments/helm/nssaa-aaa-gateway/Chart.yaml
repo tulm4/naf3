@@ -1,0 +1,5 @@
+apiVersion: v2
+name: nssaa-aaa-gateway
+description: NSSAAF AAA Gateway — RADIUS/Diameter proxy with keepalived
+version: 0.1.0
+appVersion: "1.0"
