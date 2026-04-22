@@ -1,610 +1,483 @@
 # NSSAAF Codebase Structure
 
-**Analysis Date:** 2026-04-20
+**Analysis Date:** 2026-04-22
 
-## 1. Project Structure Overview
+## Architecture Overview
 
-```
-naf3/
-├── cmd/nssAAF/
-│   └── main.go                        # Application entry point
-├── configs/
-│   ├── example.yaml                   # Annotated config reference
-│   ├── development.yaml, staging.yaml, production.yaml
-├── internal/
-│   ├── api/
-│   │   ├── aiw/                      # Nnssaaf_AIW service (N60 interface)
-│   │   ├── common/                   # Shared HTTP utilities, middleware
-│   │   └── nssaa/                   # Nnssaaf_NSSAA service (N58 interface)
-│   ├── aaa/                          # AAA proxy (AAA-P) — routes to RADIUS/Diameter
-│   ├── amf/                          # AMF SBI client stub
-│   ├── auth/                         # Authentication utilities
-│   ├── cache/redis/                  # Redis client pool and session cache
-│   ├── config/                      # YAML configuration loading
-│   ├── crypto/                       # Cryptographic utilities
-│   ├── diameter/                    # Diameter AAA client (go-diameter/v4)
-│   ├── eap/                         # EAP engine (RFC 3748)
-│   ├── nrf/                         # NRF service discovery client
-│   ├── resilience/                  # Circuit breaker, retry policies
-│   ├── storage/postgres/            # PostgreSQL pool and DAOs
-│   ├── types/                       # 3GPP data types (GPSI, SUPI, Snssai, NssaaStatus)
-│   └── udm/                         # UDM SBI client stub
-├── oapi-gen/
-│   └── gen/                         # Code-generated from 3GPP OpenAPI specs
-│       ├── aiw/
-│       ├── nssaa/
-│       └── specs/
-├── pkg/                             # Public helper packages (empty/placeholder)
-├── test/
-│   ├── e2e/                        # End-to-end test runner
-│   └── integration/                # Integration test runner
-├── scripts/
-│   ├── migrate/                    # Database migration tooling
-│   └── tools/                      # Build/dev helper scripts
-├── deployments/
-│   ├── argocd/, helm/, kustomize/  # Kubernetes deployment manifests
-└── docs/                           # 3GPP specs, design docs, roadmap
-```
-
-## 2. Module Inventory
-
-### `internal/types/`
-
-Core 3GPP data types with validation.
-
-| Public Type / Function | Purpose |
-|---|---|
-| `type Gpsi string` | GPSI identifier; validates `^5-?[0-9]{8,14}$` (TS 29.571 §5.4.4.3) |
-| `func (Gpsi) Validate() error` | Validates GPSI pattern and required presence |
-| `type Snssai struct { SST uint8; SD string }` | S-NSSAI; SST 0–255, SD 6 hex chars (TS 23.003 §3.2) |
-| `func (Snssai) Validate() error` | Validates SST range and SD hex format |
-| `func (Snssai) Key() string` | Returns `"sst:sd"` normalized key for maps/cache |
-| `type Supi string` | SUPI; validates `^imu-[0-9]{15}$` (TS 29.571 §5.4.4.2) |
-| `type EapMessage []byte` | EAP payload wrapper with JSON marshal support |
-| `const AuthResultNotExecuted/Success/Failure/Pending` | NssaaStatus authResult enum |
-| `type ValidationError struct { HTTPStatus, Field, Reason, Cause }` | Input validation failure |
-| `type NssaaError struct { HTTPStatus, Err, Cause, Detail }` | Domain-level error |
-| `const Cause*` | 3GPP cause codes (24 constants) |
-| `var Err*` | Sentinel errors (ErrAuthContextNotFound, ErrAaaTimeout, etc.) |
-
-**Spec traces in every type:** All types include `// Spec: TS XX.XXX §Y.Z` comments.
-
-### `internal/config/`
-
-YAML configuration loading with environment variable expansion.
-
-| Public Type / Function | Purpose |
-|---|---|
-| `type Config struct { Server, Database, Redis, EAP, AAA, RateLimit, Logging, Metrics, NRF, UDM }` | Root config struct |
-| `type ServerConfig / DatabaseConfig / RedisConfig / EAPConfig / AAAConfig / ...` | Per-subsystem config structs |
-| `func Load(path string) (*Config, error)` | Reads YAML, expands `${VAR}` env placeholders, applies defaults |
-
-Defaults are applied for: server timeouts, EAP rounds/timeout, AAA retries/timeouts, Redis pool size, metrics path.
-
-### `internal/api/common/`
-
-Shared HTTP layer: ProblemDetails (RFC 7807), headers, middleware.
-
-| Public Type / Function | Purpose |
-|---|---|
-| `type ProblemDetails struct { Type, Title, Detail, Instance, Cause, Status }` | RFC 7807 error response |
-| `func NewProblem / ValidationProblem / ForbiddenProblem / NotFoundProblem / ...` | Factory functions for every HTTP error type |
-| `func WriteProblem(w, *ProblemDetails)` | Writes problem response with correct Content-Type |
-| `func WriteJSON(w, status, v)` | Writes JSON response |
-| `const HeaderXRequestID / HeaderLocation / Header3GPPSessionID / ...` | HTTP header constants (TS 29.500 §5) |
-| `const MediaTypeJSONVersion / MediaTypeProblemJSON / MediaType3GPPNSSAA / ...` | Content-Type constants |
-| `func RequestIDMiddleware(http.Handler) http.Handler` | Injects X-Request-ID; preserves client-supplied ID |
-| `func LoggingMiddleware(http.Handler) http.Handler` | Structured slog log for every request (method, path, status, duration_ms) |
-| `func RecoveryMiddleware(http.Handler) http.Handler` | Panic recovery → 500 ProblemDetails + stack trace |
-| `func CORSMiddleware(http.Handler) http.Handler` | Adds CORS headers for `/oam/` paths only |
-| `type responseWriter struct` | Wraps ResponseWriter to capture status code for logging |
-| `func GetRequestID / WithRequestID ctx helpers` | Context value accessors for request correlation |
-
-### `internal/api/nssaa/`
-
-N58 interface: Nnssaaf_NSSAA service (TS 29.526 §7.2, TS 23.502 §4.2.9).
-
-| Public Type / Function | Purpose |
-|---|---|
-| `type AuthCtx struct { AuthCtxID, GPSI, SnssaiSST, SnssaiSD, AmfInstance, ReauthURI, RevocURI, EapPayload }` | Slice auth context stored in NSSAAF |
-| `type AuthCtxStore interface { Load/Save/Delete/Close }` | Storage abstraction (Phase 3 replaces with Redis) |
-| `type InMemoryStore struct` | Phase 1 in-memory impl of AuthCtxStore |
-| `var ErrNotFound` | Sentinel for missing context |
-| `type Handler struct { store, aaa, apiRoot }` | Implements `nssaanats.ServerInterface` |
-| `type HandlerOption func(*Handler)` | Functional options (`WithAAA`, `WithAPIRoot`) |
-| `func NewHandler(AuthCtxStore, ...HandlerOption) *Handler` | Constructor |
-| `func (Handler) CreateSliceAuthenticationContext` | `POST /slice-authentications` — creates auth context, echoes EAP |
-| `func (Handler) ConfirmSliceAuthentication` | `PUT /slice-authentications/{authCtxId}` — confirms auth |
-| `func (h *Handler) ServeHTTP(w, r)` | Satisfies `http.Handler`; delegates to oapi-codegen |
-| `var _ nssaanats.ServerInterface = (*Handler)(nil)` | Compile-time interface check |
-
-**Phase marker:** AAA forwarding is commented out with `// Phase 2:`; Phase 1 echoes the EAP message back.
-
-### `internal/api/aiw/`
-
-N60 interface: Nnssaaf_AIW service (TS 29.526 §7.3).
-
-Identical structure to `nssaa/`, but for SUPI-based authentication (vs GPSI/S-NSSAI):
-
-| Public Type | Difference from NSSAA |
-|---|---|
-| `type AuthContext { AuthCtxID, Supi, EapPayload, TtlsInner }` | Uses SUPI, not GPSI/Snssai |
-| `func CreateAuthenticationContext` | `POST /authentications` |
-| `func ConfirmAuthentication` | `PUT /authentications/{authCtxId}` |
-
-Both handlers use `aiwnats.ServerInterface` (generated from AIW OpenAPI YAML).
-
-### `internal/radius/`
-
-RADIUS client for AAA-S interworking (TS 29.561 Ch.16, RFC 2865, RFC 3579).
-
-| Public Type / Function | Purpose |
-|---|---|
-| `type Config struct { ServerAddress, ServerPort, SharedSecret, Timeout, MaxRetries, Transport, LocalBindAddr }` | Client config |
-| `type Client struct { config, transport, packetID, mu, logger }` | Main RADIUS client |
-| `func NewRadiusClient(Config, *slog.Logger) (*Client, error)` | Constructor; creates UDP transport |
-| `func (Client) SendAccessRequest(ctx, attrs) ([]byte, error)` | Sends Access-Request; retry loop with backoff |
-| `func (Client) SendEAP(ctx, gpsi, eapPayload, snssaiSst, snssaiSd) ([]byte, error)` | Wraps EAP in RADIUS attributes, sends Access-Request |
-| `func (Client) Stats() ClientStats` | Returns operational stats |
-| `func FragmentEAPMessage(payload, maxSize) [][]byte` | Fragments EAP into ≤253-byte chunks (RFC 3579) |
-| `func AssembleEAPMessage(attrs) []byte` | Reassembles fragments from RADIUS attributes |
-| `var ErrTimeout / ErrInvalidResponse / ErrIDMismatch` | Sentinel errors |
-| `const DefaultServerPort = 1812, DefaultResponseWindow = 10s, DefaultMaxRetries = 3` | Defaults |
-
-**Transport layer:** `NewUDPClient` with `LocalBindAddr`. DTLS transport also defined in `dtls.go`.
-
-### `internal/diameter/`
-
-Diameter client using `go-diameter/v4` state machine (TS 29.561 Ch.17, RFC 4072, RFC 6733).
-
-| Public Type / Function | Purpose |
-|---|---|
-| `type Config struct { OriginHost, OriginRealm, DestinationHost, DestinationRealm, ServerAddress, Network, TLS* }` | Client config |
-| `type Client struct { cfg, settings, machine, smClient, conn, mu, pending map, hopByHopSeq }` | Wraps go-diameter state machine |
-| `func NewClient(Config, *slog.Logger) (*Client, error)` | Constructor; registers DEA/STA handlers |
-| `func (Client) Connect() error` | Establishes TCP/SCTP/TLS connection |
-| `func (Client) SendDER(ctx, sessionID, userName, eapPayload, sst, sd) ([]byte, error)` | Sends Diameter-EAP-Request; waits on channel for DEA response |
-| `func (Client) PeerMetadata() (*smpeer.Metadata, error)` | Returns peer info from CER/CEA handshake |
-| `const AppIDAAP = 5, CmdDER/CmdDEA = 268` | Diameter application/command constants |
-| `func EncodeSnssaiAVP(sst, sd) (*diam.AVP, error)` | Encodes 3GPP S-NSSAI AVP |
-
-**Pending request map:** `map[uint32]chan *diam.Message` keyed by hop-by-hop ID; uses atomic counter for ID generation.
-
-### `internal/eap/`
-
-EAP engine (RFC 3748) with session state machine and TLS support.
-
-| Public Type / Function | Purpose |
-|---|---|
-| `type Engine struct { cfg, sessionManager, fragmentMgr, aaaClient, tlsConfig, logger }` | Main EAP engine |
-| `func NewEngine(Config, AAAClient, *slog.Logger) *Engine` | Constructor |
-| `func (Engine) StartSession(authCtxID, gpsi) (*Session, error)` | Creates new EAP session |
-| `func (Engine) Process(ctx, authCtxID, eapPayload) (*EapMessage, AuthResult, error)` | Processes EAP message; drives state machine |
-| `func (Engine) GetSession(authCtxID) (*Session, error)` | Retrieves existing session |
-| `func (Engine) DeleteSession(authCtxID)` | Removes session |
-| `func (Engine) Stats() EngineStats` | Returns active sessions, fragment buffers, etc. |
-| `type Session struct { AuthCtxID, GPSI, State, Rounds, ExpectedId, MaxRounds, Timeout, ... }` | Per-auth session state |
-| `type SessionState int` | `SessionStateInit/Exchange/Completing/Done/Failed/Timeout` |
-| `type EapMethod int` | `EapMethodIdentity/TLS/AKAprime/TTLS` |
-| `const DefaultMaxRounds = 20, DefaultRoundTimeout = 30s, DefaultSessionTTL = 5m` | Engine defaults |
-
-**State machine:** `Init → EapExchange → Completing → Done/Failed/Terminal`. Retry detection via `sha256Hash` of incoming payload cached against `LastNonce`. `AAAClient` interface: `SendEAP(ctx, authCtxID, payload) ([]byte, error)`.
-
-### `internal/storage/postgres/`
-
-PostgreSQL persistence layer via `jackc/pgx/v5`.
-
-| Public Type / Function | Purpose |
-|---|---|
-| `type Pool struct { pool *pgxpool.Pool }` | Wraps pgx connection pool |
-| `func NewPool(ctx, Config) (*Pool, error)` | Constructor; parses DSN, sets pool params, pings |
-| `func (Pool) Acquire / Exec / ExecResult / Query / QueryRow / BeginTx / Stats / Close` | Pool operations |
-| `func RunMigrations(ctx, *Pool, migrations) error` | Applies SQL migrations |
-| `type SessionDAO struct { pool }` | Data access for auth sessions |
-| `type AaaConfigDAO struct { pool }` | Data access for AAA server configs |
-| `type AuditDAO struct { pool }` | Audit log writes |
-
-### `internal/cache/redis/`
-
-Redis caching layer via `go-redis/v9`.
-
-| Public Type / Function | Purpose |
-|---|---|
-| `type Pool struct { client redis.Cmdable }` | Single or cluster Redis client |
-| `func NewPool(ctx, Config) (*Pool, error)` | Single-node constructor |
-| `func NewClusterPool(ctx, Config) (*Pool, error)` | Redis Cluster constructor |
-| `func (Pool) Client() redis.Cmdable` | Returns underlying client |
-| `func (Pool) Close() error` | Closes client (handles both types) |
-| `type SessionCache struct` | EAP session caching with TTL |
-| `type IdempotencyKey struct` | Idempotency key dedup |
-| `type RateLimiter struct` | Per-GPSI, per-AMF, global rate limiting |
-| `type DistributedLock struct` | Redis-based distributed lock |
-
-### `internal/aaa/`
-
-AAA Proxy (AAA-P) that routes EAP to either RADIUS or Diameter backend.
-
-| Public Type / Function | Purpose |
-|---|---|
-| `type Router interface { SendEAP(ctx, authCtxID, eapPayload) ([]byte, error) }` | Interface for AAA routing |
-| `type Config struct` | Per-server config (address, protocol, TLS, etc.) |
-| `type CircuitBreaker struct` | Tracks consecutive failures, opens after threshold |
-| `func (Router) SelectBackend(snssaiSnssai) (*Backend, error)` | Looks up AAA config for S-NSSAI |
-| `func (Router) SendEAP(ctx, authCtxID, eapPayload) ([]byte, error)` | Routes to RADIUS or Diameter based on config |
-
-### `internal/nrf/`, `internal/udm/`, `internal/amf/`
-
-SBI client stubs for 3GPP service discovery and peer NF communication.
-
-| Package | Purpose |
-|---|---|
-| `internal/nrf/` | NF profile registration + NRF service discovery |
-| `internal/udm/` | UDM client for subscription data retrieval (N59 interface) |
-| `internal/amf/` | AMF client for notifications (e.g., slice auth result) |
-
-These are stubs in Phase 1 — log at `slog.Debug` or return empty responses.
-
-### `internal/resilience/`
-
-Circuit breaker pattern and retry policies for AAA calls.
-
-| Public Type | Purpose |
-|---|---|
-| `type CircuitBreaker struct { failures, threshold, recoveryTimeout, state, mu }` | Tracks AAA server health |
-
-### `internal/crypto/`, `internal/auth/`
-
-Cryptographic utilities and auth helpers (placeholders/stubs).
-
-## 3. Dependency Graph
-
-### Go module dependencies (`go.mod`)
+NSSAAF implements a 3-component model for Kubernetes production deployments:
 
 ```
-github.com/operator/nssAAF
-├── github.com/google/uuid v1.6.0         # Request ID generation
-├── github.com/stretchr/testify v1.11.1    # Testing assertions
-├── github.com/go-chi/chi/v5 v5.1.0       # HTTP routing (in tests)
-├── github.com/jackc/pgx/v5 v5.9.1        # PostgreSQL driver
-├── github.com/redis/go-redis/v9 v9.18.0  # Redis client
-├── github.com/fiorix/go-diameter/v4 v4.1.0 # Diameter state machine + dict
-├── gopkg.in/yaml.v3 v3.0.1               # Config file parsing
-└── oapi-gen/gen/{nssaa,aiw,specs}        # Generated from 3GPP OpenAPI YAMLs
+AMF/AUSF → HTTP Gateway (N replicas) → Biz Pods (N replicas) → AAA Gateway (2 replicas) → AAA-S
 ```
 
-### Internal package import graph
+The split decouples TLS termination from business logic and external AAA protocol handling.
 
-```
-cmd/nssAAF/main.go
-├── internal/config
-├── internal/api/nssaa  (→ creates InMemoryStore)
-├── internal/api/aiw    (→ creates InMemoryStore)
-└── internal/api/common (→ middleware wrappers)
+---
 
-internal/api/nssaa/handler.go
-├── internal/api/common    (ProblemDetails, headers, validators)
-├── oapi-gen/gen/nssaa    (generated ServerInterface + types)
-└── oapi-gen/gen/specs    (shared specs like AuthStatus)
+## 1. Package Dependency Graph
 
-internal/api/aiw/handler.go
-├── internal/api/common
-└── oapi-gen/gen/aiw
+### Proto Package: Zero-Internal-Dependencies Constraint
 
-internal/api/common/
-├── (self-contained — no internal deps)
-└── (used by all api/* packages)
-
-internal/eap/engine.go
-├── internal/types
-└── internal/radius OR internal/diameter (via AAAClient interface)
-
-internal/radius/client.go
-└── (self-contained — no internal deps)
-
-internal/diameter/client.go
-└── github.com/fiorix/go-diameter/v4
-
-internal/storage/postgres/pool.go
-└── github.com/jackc/pgx/v5
-
-internal/cache/redis/pool.go
-└── github.com/redis/go-redis/v9
-
-internal/types/
-├── internal/api/common (ValidationError.ToProblemDetails)
-└── (no other internal deps — pure types)
-
-internal/aaa/router.go
-├── internal/radius  (RADIUSBackend)
-└── internal/diameter (DiameterBackend)
-```
-
-### Call flow (runtime)
-
-```
-HTTP Request
-    ↓
-common.RecoveryMiddleware → common.RequestIDMiddleware → common.LoggingMiddleware → common.CORSMiddleware
-    ↓
-http.ServeMux
-    ↓
-nssaa.Router or aiw.Router (oapi-codegen chi-based)
-    ↓
-Handler.ServeHTTP → oapi-codegen Handler (validates request) → Handler.CreateSliceAuthenticationContext / ConfirmSliceAuthentication
-    ↓
-AuthCtxStore (InMemoryStore → Phase 3: Redis-backed)
-    ↓
-// Phase 2: AAA Client → RADIUS or Diameter → NSS-AAA Server
-```
-
-## 4. Entry Points
-
-### `cmd/nssAAF/main.go`
-
-Single binary entry point.
-
-**Startup sequence:**
-1. Parse `-config` flag (default: `configs/staging.yaml`)
-2. Initialize `slog.NewJSONHandler` logger
-3. `config.Load(*configPath)` — read YAML, expand env vars, apply defaults
-4. Create `nssaa.NewInMemoryStore()` and `aiw.NewInMemoryStore()`
-5. Create `nssaa.NewHandler(store)` and `aiw.NewHandler(store)` with `WithAPIRoot`
-6. Create routers via `nssaa.NewRouter` / `aiw.NewRouter`
-7. Register `mux.Handle("/nnssaaf-nssaa/", ...)` and `mux.Handle("/nnssaaf-aiw/", ...)`
-8. Register OAM: `/health`, `/ready` with CORS
-9. Wrap mux with global middleware (Recovery → RequestID → Logging → CORS, outermost-to-innermost)
-10. `http.Server` with configured timeouts
-11. Goroutine: `srv.ListenAndServe()` → error channel
-12. Signal handler: `SIGINT/SIGTERM` → graceful shutdown with 10s timeout
-
-**Build artifact:** Binary at `./nssAAF` (compiled, 9.7 MB).
-
-## 5. Test Coverage
-
-### Test files (13 total)
-
-| Test File | Package | Coverage |
-|---|---|---|
-| `internal/types/types_test.go` | `internal/types/` | GPSI, SUPI, Snssai validation |
-| `internal/types/gpsi_test.go` | `internal/types/` | GPSI regex and normalization |
-| `internal/types/snssai_test.go` | `internal/types/` | S-NSSAI validation |
-| `internal/config/config_test.go` | `internal/config/` | YAML loading, env expansion, defaults |
-| `internal/api/common/common_test.go` | `internal/api/common/` | ProblemDetails factories |
-| `internal/api/nssaa/handler_test.go` | `internal/api/nssaa/` | POST/PUT handlers, GPSI/Snssai validation, store errors |
-| `internal/api/aiw/handler_test.go` | `internal/api/aiw/` | POST/PUT handlers, SUPI validation |
-| `internal/eap/engine_test.go` | `internal/eap/` | EAP engine state machine |
-| `internal/eap/eap_test.go` | `internal/eap/` | EAP packet parsing |
-| `internal/radius/radius_test.go` | `internal/radius/` | RADIUS message encoding |
-| `internal/radius/client_test.go` | `internal/radius/` | RADIUS client retries, validation |
-| `internal/diameter/diameter_test.go` | `internal/diameter/` | Diameter AVP encoding |
-| `internal/storage/postgres/session_test.go` | `internal/storage/postgres/` | Session DAO |
-| `internal/cache/redis/cache_test.go` | `internal/cache/redis/` | Redis cache operations |
-| `internal/aaa/aaa_test.go` | `internal/aaa/` | AAA routing logic |
-
-### Test patterns observed
-
-**Mock store pattern** (used in both `nssaa/handler_test.go` and `aiw/handler_test.go`):
+`internal/proto/` is the **isolation boundary** between components. It MUST have zero dependencies on any other internal package:
 
 ```go
-type mockStore struct {
-    data      map[string]*AuthCtx
-    loadErr   error
-    saveErr   error
-    deleteErr error
+// internal/proto/http_gateway.go
+import "context"
+
+// internal/proto/aaa_transport.go
+import (
+    "context"
+    "time"
+)
+
+// internal/proto/biz_callback.go
+// (no imports — only struct definitions and constants)
+```
+
+This constraint prevents import cycles: HTTP Gateway can import `proto` without pulling in `eap/`, `radius/`, or `diameter/`.
+
+### Internal Dependencies by Package
+
+```
+internal/proto/
+  └── [NO internal dependencies — pure data transfer]
+
+internal/aaa/
+  ├── aaa.go         (empty package doc)
+  ├── router.go      → internal/diameter, internal/radius
+  ├── config.go      (no imports)
+  └── metrics.go     (no imports)
+
+internal/aaa/gateway/
+  ├── gateway.go         → internal/proto, redis/go-redis/v9
+  ├── radius_handler.go  (no external imports)
+  ├── diameter_handler.go (no external imports)
+  └── redis.go           → redis/go-redis/v9
+
+internal/api/
+  ├── nssaa/
+  │   ├── handler.go → internal/api/common, oapi-gen/gen/nssaa, oapi-gen/gen/specs
+  │   └── router.go  → oapi-gen/gen/nssaa
+  ├── aiw/
+  │   ├── handler.go → internal/api/common, oapi-gen/gen/aiw
+  │   └── router.go  → oapi-gen/gen/aiw
+  └── common/        (middleware, validators, context helpers)
+
+internal/eap/
+  ├── engine.go      → internal/types
+  ├── engine_client.go (defines AAAClient interface — no imports)
+  ├── session.go     (no imports)
+  ├── state.go       (no imports)
+  ├── codec.go       (no imports)
+  ├── tls.go         (no imports)
+  └── fragment.go    (no imports)
+
+internal/radius/
+  └── client.go, packet.go, attribute.go, vsa.go, message_auth.go, dtls.go
+      (no internal imports — raw RADIUS protocol only)
+
+internal/diameter/
+  └── client.go, diameter.go, snssai_avp.go, eap_avp.go
+      (no internal imports — raw Diameter protocol only)
+
+internal/types/      (GPSI, SUPI, Snssai, NssaaStatus, EapMessage, AuthResult)
+
+internal/cache/redis/
+  ├── session_cache.go → redis/go-redis/v9
+  ├── ratelimit.go    → redis/go-redis/v9
+  ├── lock.go         → redis/go-redis/v9
+  ├── idempotency.go  → redis/go-redis/v9
+  └── pool.go         → redis/go-redis/v9
+
+internal/storage/postgres/
+  ├── pool.go, session.go, aaa_config.go, audit.go, migrate.go → jackc/pgx/v5
+
+internal/config/     (YAML loading, env expansion)
+internal/auth/, internal/crypto/, internal/resilience/
+internal/amf/, internal/udm/, internal/nrf/  (3GPP service clients — Phase 3)
+```
+
+---
+
+## 2. Component Boundaries
+
+### `cmd/http-gateway/`
+
+| Aspect | Detail |
+|--------|--------|
+| Entry point | `cmd/http-gateway/main.go` |
+| Config component | `config.ComponentHTTPGateway` |
+| Key imports | `internal/config`, `internal/proto` |
+| Interfaces implemented | `proto.BizServiceClient` (by `httpBizClient` struct) |
+| External dependencies | AMF/AUSF (TLS on :443), Biz Pods (HTTP on clusterIP) |
+
+**Wiring pattern:**
+
+```go
+// cmd/http-gateway/main.go:24-55
+type httpBizClient struct {
+    bizServiceURL string
+    httpClient    *http.Client
+    version       string
 }
-func (m *mockStore) Load(id string) (*AuthCtx, error) { ... }
-func (m *mockStore) Save(ctx *AuthCtx) error { ... }
-```
 
-**httptest helpers:**
-
-```go
-func doRequest(handler *Handler, method, path string, body interface{}) *httptest.ResponseRecorder
-func makeRouter(handler *Handler) http.Handler  // chi router + RequestIDMiddleware
-```
-
-**Framework:** `github.com/stretchr/testify` — `assert` (failures continue) and `require` (fatal on failure).
-
-**Coverage:** `coverage.out` file present (98 KB), indicating `go test -coverprofile` was run.
-
-### Packages without tests
-
-The following packages have no `*_test.go` files:
-- `internal/aaa/router.go` (partial — `aaa_test.go` exists)
-- `internal/amf/`, `internal/udm/`, `internal/nrf/` (stub implementations)
-- `internal/crypto/`, `internal/auth/`, `internal/resilience/`
-- `internal/storage/postgres/pool.go`, `migrate.go`, `aaa_config.go`, `audit.go`
-- `internal/cache/redis/session_cache.go`, `ratelimit.go`, `lock.go`, `idempotency.go`
-
-## 6. Configuration
-
-### Config file format
-
-YAML files in `configs/`: `example.yaml`, `development.yaml`, `staging.yaml`, `production.yaml`.
-
-### Configuration structure
-
-All config lives in a single nested `Config` struct. Environment variable placeholders use `${VAR}` syntax (simple `os.Expand`), including defaults: `${VAR:-default}`.
-
-| Section | Key Fields | Defaults |
-|---|---|---|
-| `server` | `addr`, `readTimeout`, `writeTimeout`, `idleTimeout` | `":8080"`, `10s`, `30s`, `120s` |
-| `database` | `host`, `port`, `name`, `user`, `password` (env), `maxConns`, `minConns`, `connMaxLifetime`, `sslMode` | Pool: 100/20 conns |
-| `redis` | `addrs[]`, `password` (env), `db`, `poolSize` | `poolSize: 50` |
-| `eap` | `maxRounds`, `roundTimeout`, `sessionTtl` | `20`, `30s`, `5m` |
-| `aaa` | `responseTimeout`, `maxRetries`, `failureThreshold`, `recoveryTimeout` | `10s`, `3`, `5`, `30s` |
-| `rateLimit` | `perGpsiPerMin`, `perAmfPerSec`, `globalPerSec` | (no defaults) |
-| `logging` | `level`, `format` | (no defaults) |
-| `metrics` | `enabled`, `path` | `path: "/metrics"` |
-| `nrf` | `baseURL`, `discoverTimeout` | (no defaults) |
-| `udm` | `baseURL`, `timeout` | (no defaults) |
-
-### How config is loaded
-
-`cmd/nssAAF/main.go` line 33:
-```go
-cfg, err := config.Load(*configPath)
-```
-
-`internal/config/config.go` line 103: reads file → `expandEnv` → `yaml.Unmarshal` → `applyDefaults`.
-
-## 7. Notable Patterns
-
-### Functional options for handler construction
-
-Both `nssaa.Handler` and `aiw.Handler` use the functional options pattern:
-
-```go
-type HandlerOption func(*Handler)
-
-func WithAAA(aaa AAARouter) HandlerOption { ... }
-func WithAPIRoot(apiRoot string) HandlerOption { ... }
-
-func NewHandler(store AuthCtxStore, opts ...HandlerOption) *Handler {
-    h := &Handler{store: store}
-    for _, opt := range opts { opt(h) }
-    return h
+func (c *httpBizClient) ForwardRequest(ctx context.Context, path, method string, body []byte) ([]byte, int, error) {
+    // Forwards to Biz Pods at cfg.HTTPgw.BizServiceURL
+    // Returns (responseBody, httpStatus, error)
 }
 ```
 
-### Store interface abstraction
+The HTTP Gateway is stateless. It does NOT implement load balancing itself — it relies on Kubernetes Service round-robin or istio-sidecar.
 
-`AuthCtxStore` interface defined in both `nssaa/` and `aiw/`. Phase 1 uses `InMemoryStore`; Phase 3 will replace with Redis-backed implementation without changing handler code.
+### `cmd/biz/`
 
-### Compile-time interface verification
+| Aspect | Detail |
+|--------|--------|
+| Entry point | `cmd/biz/main.go` |
+| Config component | `config.ComponentBiz` |
+| Key imports | `internal/api/nssaa`, `internal/api/aiw`, `internal/api/common`, `internal/config`, `internal/proto` |
+| Interfaces implemented | `eap.AAAClient` (by `httpAAAClient` returned from `newHTTPAAAClient()`) |
+| External dependencies | Redis (heartbeat + pub/sub), AAA Gateway (HTTP on :9090) |
+
+**Wiring pattern:**
 
 ```go
-var _ nssaanats.ServerInterface = (*Handler)(nil)
+// cmd/biz/main.go:62-78
+// Creates HTTP AAA client (satisfies eap.AAAClient = AAARouter)
+aaaClient := newHTTPAAAClient(
+    cfg.Biz.AAAGatewayURL,  // "http://svc-nssaa-aaa:9090"
+    cfg.Redis.Addr,
+    podID,
+    cfg.Version,
+    &http.Client{...},
+)
+
+// Wires to NSSAA handler
+nssaaHandler := nssaa.NewHandler(nssaaStore,
+    nssaa.WithAPIRoot(apiRoot),
+    nssaa.WithAAA(aaaClient), // aaaClient satisfies eap.AAAClient
+)
 ```
 
-Both handlers assert at compile time that they implement the oapi-codegen `ServerInterface`.
-
-### Oapi-codegen router integration
-
-`Handler.ServeHTTP` delegates to the generated oapi-codegen chi router:
-
+**Biz Pod heartbeat** (`cmd/biz/main.go:205-226`):
 ```go
-func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-    reqID := common.GetRequestID(r.Context())
-    if reqID == "" { reqID = uuid.NewString() }
-    r = r.WithContext(common.WithRequestID(r.Context(), reqID))
-    nssaanats.Handler(h).ServeHTTP(w, r)
+func podHeartbeat(ctx context.Context, redisAddr, podID string) {
+    // Registers pod in Redis SET: proto.PodsKey = "nssaa:pods"
+    rdb.SAdd(ctx, proto.PodsKey, podID)
+    // Refreshes every 30 seconds via ticker
 }
 ```
 
-### AAA client interface
+### `cmd/aaa-gateway/`
 
-`internal/eap/engine.go` defines an `AAAClient` interface:
+| Aspect | Detail |
+|--------|--------|
+| Entry point | `cmd/aaa-gateway/main.go` |
+| Config component | `config.ComponentAAAGateway` |
+| Key imports | `internal/aaa/gateway`, `internal/config` |
+| Interfaces implemented | `proto.BizAAAClient` (by `Gateway.ForwardEAP`) |
+| External dependencies | Redis (pub/sub + session correlation), RADIUS/Diameter AAA-S |
+
+**Wiring pattern:**
+
 ```go
+// cmd/aaa-gateway/main.go:43-54
+gw := gateway.New(gateway.Config{
+    BizServiceURL:  cfg.AAAgw.BizServiceURL,  // "http://svc-nssaa-biz:8080"
+    RedisAddr:     cfg.Redis.Addr,
+    ListenRADIUS:  cfg.AAAgw.ListenRADIUS,    // ":1812"
+    ListenDIAMETER: cfg.AAAgw.ListenDIAMETER,  // ":3868"
+    ...
+})
+
+// Exposes HTTP endpoints for Biz Pod communication
+http.HandleFunc("/aaa/forward", gw.HandleForward)
+http.HandleFunc("/health/vip", gw.VIPHealthHandler)  // Keepalived VIP check
+```
+
+**AAA Gateway internal wiring** (`internal/aaa/gateway/gateway.go:56-83`):
+```go
+g.radiusHandler = &RadiusHandler{
+    logger:          cfg.Logger,
+    publishResponse: g.publishResponseBytes,
+    forwardToBiz:    g.forwardToBiz,
+}
+
+g.diameterHandler = &DiameterHandler{
+    logger:          cfg.Logger,
+    publishResponse: g.publishResponseBytes,
+    forwardToBiz:    g.forwardToBiz,
+    version:         cfg.Version,
+    bizURL:          cfg.BizServiceURL,
+    httpClient:      g.bizHTTPClient,
+}
+```
+
+---
+
+## 3. Key Interface Patterns
+
+### `eap.AAAClient` Interface
+
+Defined in `internal/eap/engine_client.go:16-22`:
+
+```go
+// AAAClient is the interface for communicating with AAA-S.
+// Spec: TS 29.561 §16-17
 type AAAClient interface {
+    // SendEAP forwards an EAP message to AAA-S and returns the response.
+    // The response may be an EAP-Request (continue) or EAP-Success/Failure.
     SendEAP(ctx context.Context, authCtxID string, eapPayload []byte) ([]byte, error)
 }
 ```
 
-Both `radius.Client` and `diameter.Client` satisfy this interface, allowing swap via configuration.
+**Implementors:**
+- `internal/aaa/router.go`: `(*Router).SendEAP()` — uses `radius.Client` or `diameter.Client` directly
+- `cmd/biz/main.go`: `httpAAAClient` (via `newHTTPAAAClient()`) — calls AAA Gateway over HTTP
 
-### EAP retry detection
+**Consumers:**
+- `internal/eap/engine.go`: `Engine.aaaClient AAAClient` field, used in `forwardToAAA()`
 
-`internal/eap/engine.go` uses SHA-256 hash of incoming EAP payload as `LastNonce` to detect and replay cached responses for idempotent retries:
+### `proto.BizServiceClient` Interface
+
+Defined in `internal/proto/http_gateway.go:6-20`:
 
 ```go
-msgHash := sha256Hash(eapPayload)
-if bytesEqual(session.LastNonce, msgHash) && session.CachedResponse != nil {
-    // Replay cached response without calling AAA
-    return &respMsg, types.AuthResultPending, nil
+// BizServiceClient is the interface HTTP Gateway uses to forward N58/N60 requests to Biz Pods.
+type BizServiceClient interface {
+    ForwardRequest(ctx context.Context, path, method string, body []byte) ([]byte, int, error)
 }
 ```
 
-### ProblemDetails factory functions
+**Implementor:**
+- `cmd/http-gateway/main.go`: `httpBizClient`
 
-`internal/api/common/problem.go` provides named constructors for every HTTP error type:
-- `ValidationProblem`, `UnauthorizedProblem`, `ForbiddenProblem`, `NotFoundProblem`
-- `ConflictProblem`, `GoneProblem`
-- `BadGatewayProblem` (502), `ServiceUnavailableProblem` (503), `GatewayTimeoutProblem` (504)
-- `InternalServerProblem` (500)
+**Consumer:**
+- `cmd/http-gateway/main.go` itself (both in same file)
 
-### Structured logging with slog
+### `proto.BizAAAClient` Interface
 
-All packages use `log/slog` with structured key-value pairs:
+Defined in `internal/proto/aaa_transport.go:71-76`:
 
 ```go
-slog.Info("starting NSSAAF", "config", *configPath, "server_addr", cfg.Server.Addr)
-slog.Error("radius_send_error", "id", id, "attempt", attempt, "error", err)
-```
-
-No `fmt.Printf` or `log.Printf` observed in production code.
-
-### HTTP middleware composition
-
-`cmd/nssAAF/main.go` line 76-82 — middleware applied outermost-to-innermost:
-
-```go
-handler = common.RecoveryMiddleware(handler)   // innermost: catches panics
-handler = common.RequestIDMiddleware(handler)  // injects/correlates request ID
-handler = common.LoggingMiddleware(handler)    // logs request/response
-handler = common.CORSMiddleware(handler)       // outermost: CORS headers
-```
-
-### RADIUS retry with exponential backoff
-
-```go
-for attempt := 0; attempt <= c.config.MaxRetries; attempt++ {
-    if attempt > 0 {
-        backoff := time.Duration(1<<(attempt-1)) * time.Second
-        select { case <-ctx.Done(): return nil, ctx.Err(); case <-time.After(backoff): }
-    }
-    response, err := c.transport.Send(sendCtx, rawPacket, serverAddr)
-    ...
+// BizAAAClient is the interface the Biz Pod uses to talk to the AAA Gateway.
+type BizAAAClient interface {
+    ForwardEAP(ctx context.Context, req *AaaForwardRequest) (*AaaForwardResponse, error)
 }
 ```
 
-### Diameter hop-by-hop ID tracking
+**Implementor:**
+- `internal/aaa/gateway/gateway.go`: `(*Gateway).ForwardEAP()`
 
-`internal/diameter/client.go` uses atomic counter for hop-by-hop ID and a `map[uint32]chan *diam.Message` pending requests registry.
-
-## 8. Key Design Decisions
-
-### OpenAPI code generation
-
-API types and routers are generated by `oapi-codegen` from 3GPP OpenAPI YAML specs stored in `oapi-gen/specs/`. Generated code lives in `oapi-gen/gen/nssaa/`, `oapi-gen/gen/aiw/`, and `oapi-gen/gen/specs/`. Local `replace` directives in `go.mod` point to these local paths.
-
-**Spec files** (stored in `oapi-gen/5GC_APIs-Rel-18/` and `oapi-gen/specs/`):
-- `TS29526_Nnssaaf_NSSAA.yaml` → N58 interface
-- `TS29526_Nnssaaf_AIW.yaml` → N60 interface
-- `TS29571_CommonData.yaml` → shared data types (Snssai, Gpsi, Supi, ProblemDetails)
-
-### Phase-based implementation roadmap
-
-Code is explicitly marked with `// Phase 1:`, `// Phase 2:`, `// Phase 3:` comments indicating what is stubbed vs. implemented:
-
-- **Phase 1** (current): In-memory stores, EAP engine (stub), RADIUS/Diameter framing, no actual AAA forwarding
-- **Phase 2**: Connect EAP engine to AAA-S via RADIUS/Diameter
-- **Phase 3**: Replace `InMemoryStore` with Redis-backed `AuthCtxStore`
-
-### Dual AAA protocol support
-
-`internal/radius/` and `internal/diameter/` are separate packages, both implement a common `AAAClient` interface used by `internal/eap/engine.go`. Selection is likely configured via `aaa.protocol` in config (not yet wired in `main.go`).
-
-### 3GPP spec traceability
-
-Every type, function, and key decision includes `// Spec: TS XX.XXX §Y.Z` comments. Cause codes, data types, error codes, and API fields all trace back to specific 3GPP specification sections.
-
-### No external secrets manager
-
-Configuration uses simple `${VAR}` env var expansion in YAML config files. No HashiCorp Vault, AWS Secrets Manager, or Kubernetes secrets integration — passwords are read from env vars directly.
-
-### No authentication on HTTP endpoints
-
-The SBI API (`/nnssaaf-nssaa/`, `/nnssaaf-aiw/`) has no TLS/client certificate auth in Phase 1. CORS middleware only applies to `/oam/` paths. Production config would need TLS termination at load balancer.
-
-### Redis used for both caching and distributed coordination
-
-`internal/cache/redis/` covers session caching, rate limiting, idempotency keys, and distributed locks — a single Redis instance serves multiple purposes per the Phase 3 design.
-
-### go-chi/chi used only in generated routers
-
-The `chi` router (`github.com/go-chi/chi/v5`) appears only in the oapi-codegen generated router (not in `main.go`). `main.go` uses the standard library `http.ServeMux` for top-level routing.
+**Consumer:**
+- `cmd/biz/main.go`: `httpAAAClient.ForwardEAP()`
 
 ---
 
-*Codebase analysis: 2026-04-20*
+## 4. Data Flow Paths
+
+### Client-Initiated Flow: POST /nnssaaf-nssaa/v1/slice-authentications → AAA-S
+
+```
+1.  AMF → HTTP Gateway      HTTPS/443 (TLS terminated)
+2.  HTTP Gateway → Biz Pod  HTTP/ClusterIP svc-nssaa-biz:8080
+    └── bizClient.ForwardRequest(path, method, body)
+
+3.  Biz Pod NSSAA Handler   internal/api/nssaa/handler.go
+    ├── Validates GPSI, Snssai, eapIdRsp
+    ├── Creates AuthCtx with UUID
+    ├── Stores in InMemoryStore
+    └── h.aaa.SendEAP(ctx, authCtxID, eapPayload)  [Phase 2]
+
+4.  Biz Pod → AAA Gateway   HTTP POST /aaa/forward
+    └── httpAAAClient.ForwardEAP(req *AaaForwardRequest)
+
+5.  AAA Gateway             internal/aaa/gateway/gateway.go
+    ├── writeSessionCorr() → Redis SET nssaa:session:{sessionId}
+    ├── Routes by transport: RADIUS or Diameter
+    └── radiusHandler.Forward() / diameterHandler.Forward()
+
+6.  AAA Gateway → AAA-S    RADIUS UDP :1812 or Diameter TCP :3868
+    └── Raw protocol bytes (no EAP framing at this layer)
+
+7.  AAA-S → AAA Gateway    RADIUS/Diameter response
+    ├── radiusHandler.handlePacket() / diameterHandler.HandleConnection()
+    └── publishResponseBytes(sessionID, raw)
+
+8.  AAA Gateway → Biz Pod   Redis pub/sub nssaa:aaa-response
+    └── publishResponse(event *AaaResponseEvent)
+
+9.  AAA Gateway → Biz Pod   HTTP response to /aaa/forward
+    └── Returns AaaForwardResponse{Payload: response}
+
+10. Biz Pod                  Processes response
+11. Biz Pod → HTTP Gateway  HTTP 201 Created
+12. HTTP Gateway → AMF      HTTPS/443
+```
+
+### Server-Initiated Flow: RAR/ASR/CoA from AAA-S → AMF
+
+```
+1.  AAA-S → AAA Gateway   RAR (RADIUS CoA-Request :1812) or ASR (Diameter :3868)
+
+2.  AAA Gateway            internal/aaa/gateway/gateway.go
+    ├── radiusHandler.handleServerInitiated() / diameterHandler.handleServerInitiated()
+    └── forwardToBiz(sessionID, "RAR"/"ASR", raw)
+
+3.  AAA Gateway            getSessionCorr(sessionID) from Redis
+    └── Key: nssaa:session:{sessionId} → SessionCorrEntry{AuthCtxID, Sst, Sd}
+
+4.  AAA Gateway → Biz Pod  HTTP POST /aaa/server-initiated
+    └── AaaServerInitiatedRequest{
+            Version, SessionID, AuthCtxID, TransportType, MessageType, Payload
+         }
+
+5.  Biz Pod                cmd/biz/main.go:149-186 handleServerInitiated()
+    ├── Switch on MessageType: RAR → handleReAuth(), ASR → handleRevocation(), CoA → handleCoA()
+    └── Returns AaaServerInitiatedResponse{Payload}
+
+6.  AAA Gateway → AAA-S   HTTP response body returned as raw protocol bytes
+```
+
+---
+
+## 5. Redis Key Patterns
+
+Defined in `internal/proto/biz_callback.go:28-38`:
+
+| Key Pattern | Type | Purpose | TTL |
+|-------------|------|---------|-----|
+| `nssaa:session:{sessionId}` | STRING (JSON) | Session correlation entry (`SessionCorrEntry`) | `DefaultPayloadTTL` = 10 minutes |
+| `nssaa:pods` | SET | Live Biz Pod IDs for observability | No TTL (managed by heartbeat) |
+| `nssaa:aaa-response` | Pub/Sub channel | AAA response events from Gateway to Pods | N/A |
+
+**Session correlation entry** (`internal/proto/biz_callback.go:14-24`):
+```go
+type SessionCorrEntry struct {
+    AuthCtxID string `json:"authCtxId"` // NSSAAF auth context ID
+    PodID     string `json:"podId"`     // Biz Pod hostname (observability only)
+    Sst       uint8  `json:"sst"`       // S-NSSAI SST
+    Sd        string `json:"sd"`        // S-NSSAI SD
+    CreatedAt int64  `json:"createdAt"` // Unix timestamp
+}
+```
+
+**Session hot-cache keys** (`internal/cache/redis/session_cache.go:36-39`):
+```go
+func sessionKey(authCtxID string) string {
+    return fmt.Sprintf("nssaa:session:%s", authCtxID)  // Note: different from proto.SessionCorrKeyPrefix
+}
+```
+
+**Rate limiting keys** (`internal/cache/redis/ratelimit.go:29-36`):
+```go
+func gpsiKey(gpsiHash string) string {
+    return fmt.Sprintf("nssaa:ratelimit:gpsi:%s", gpsiHash)
+}
+func amfKey(amfID string) string {
+    return fmt.Sprintf("nssaa:ratelimit:amf:%s", amfID)
+}
+```
+
+---
+
+## 6. Testing Strategy
+
+### Test File Locations
+
+| Package | Test Files | Coverage |
+|---------|-----------|----------|
+| `internal/proto/` | `biz_callback_test.go`, `aaa_transport_test.go`, `http_gateway_test.go` | Schema validation, JSON round-trips, Redis constants |
+| `internal/eap/` | `engine_test.go`, `eap_test.go` | Engine state machine, session management, EAP parsing |
+| `internal/aaa/` | `aaa_test.go` | Router logic |
+| `internal/aaa/gateway/` | `gateway_test.go` | Gateway lifecycle, VIP health |
+| `internal/radius/` | `radius_test.go`, `client_test.go` | RADIUS packet building, attribute encoding |
+| `internal/diameter/` | `diameter_test.go` | Diameter message parsing |
+| `internal/api/nssaa/` | `handler_test.go` | N58 endpoint validation |
+| `internal/api/aiw/` | `handler_test.go` | AIW endpoint validation |
+| `internal/api/common/` | `common_test.go` | Middleware, validators |
+| `internal/types/` | `types_test.go` | GPSI/SUPI/Snssai validation |
+| `internal/config/` | `config_test.go` | YAML loading, env expansion |
+| `internal/cache/redis/` | `cache_test.go` | Redis operations |
+| `internal/storage/postgres/` | `session_test.go` | PostgreSQL session storage |
+
+### Mock Patterns
+
+**Interface mocking** (e.g., `internal/proto/http_gateway_test.go:10-27`):
+```go
+type mockBizServiceClient struct {
+    forwardCalled       bool
+    forwardPath        string
+    forwardMethod      string
+    forwardBody        []byte
+    forwardRespBody    []byte
+    forwardRespStatus  int
+    forwardRespErr     error
+}
+
+func (m *mockBizServiceClient) ForwardRequest(ctx context.Context, path, method string, body []byte) ([]byte, int, error) {
+    m.forwardCalled = true
+    // ... capture args ...
+    return m.forwardRespBody, m.forwardRespStatus, m.forwardRespErr
+}
+```
+
+**Test session management** (`internal/eap/engine_client.go:130-155`):
+```go
+// Exported helpers for package-level tests
+func NewTestSessionManager(ttl time.Duration) *sessionManager
+func (m *sessionManager) TestPut(session *Session)
+func (m *sessionManager) TestGet(authCtxID string) (*Session, error)
+func (m *sessionManager) TestSize() int
+func NewTestSession(authCtxID, gpsi string) *Session
+```
+
+---
+
+## 7. Notable Architecture Decisions
+
+### 1. Proto Package Isolation
+
+`internal/proto/` is the only package that can be imported by all three binaries without creating import cycles. It contains:
+- Wire protocol types (`AaaForwardRequest`, `AaaServerInitiatedRequest`, `SessionCorrEntry`)
+- Redis key/channel constants (`SessionCorrKeyPrefix`, `PodsKey`, `AaaResponseChannel`)
+- Interface definitions (`BizServiceClient`, `BizAAAClient`)
+- Version header constant (`HeaderName = "X-NSSAAF-Version"`)
+
+### 2. AAA Gateway Active-Standby via Keepalived
+
+The AAA Gateway runs 2 replicas with Keepalived for active-standby failover. VIP health check:
+```go
+// internal/aaa/gateway/gateway.go:356-372
+func (g *Gateway) VIPHealthHandler(w http.ResponseWriter, r *http.Request) {
+    statePath := g.cfg.KeepalivedStatePath  // "/var/run/keepalived/state"
+    data, readKeepalivedState(statePath)
+    // Returns 200 if MASTER, 503 if BACKUP
+}
+```
+
+### 3. Session Correlation via Redis
+
+Instead of tracking which Biz Pod owns which session, the AAA Gateway uses Redis:
+- Writes `SessionCorrEntry` before forwarding to AAA-S
+- Reads entry on response arrival or server-initiated routing
+- All Biz Pods subscribe to `nssaa:aaa-response` channel and discard non-matching events
+
+This avoids sticky sessions and allows any Biz Pod to handle the response.
+
+### 4. In-Memory vs Redis Stores
+
+Phase 1 uses in-memory stores (`InMemoryStore` in `internal/api/nssaa/` and `internal/api/aiw/`). Phase 3 replaces these with Redis-backed implementations using the same `AuthCtxStore` interface.
+
+### 5. OAPI-Codegen for API Handlers
+
+API handlers implement the `oapi-codegen.ServerInterface` generated from 3GPP OpenAPI specs:
+- N58 (NSSAA): `oapi-gen/gen/nssaa`
+- AIW: `oapi-gen/gen/aiw`
+- Specs: `oapi-gen/gen/specs` (shared types like `AuthStatus`)
+
+The generated router validates requests; handlers delegate to business logic.
+
+---
+
+*Codebase structure analysis: 2026-04-22*
