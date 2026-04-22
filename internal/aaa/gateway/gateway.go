@@ -19,16 +19,23 @@ import (
 
 // Config holds AAA Gateway configuration.
 type Config struct {
-	BizServiceURL       string        // http://svc-nssaa-biz:8080
-	RedisAddr           string        // Redis address for pub/sub and session correlation
-	ListenRADIUS       string        // ":1812" — UDP listen address for RADIUS
-	ListenDIAMETER     string        // ":3868" — listen address for Diameter (TCP or SCTP)
-	AAAGatewayURL      string        // self-referential for health checks
-	Logger             *slog.Logger
-	Version            string        // Injected at build time
-	DiameterProtocol   string        // "tcp" or "sctp"
-	RedisMode          string        // "standalone" or "sentinel"
-	KeepalivedStatePath string      // path to keepalived state file
+	BizServiceURL       string // http://svc-nssaa-biz:8080
+	RedisAddr          string // Redis address for pub/sub and session correlation
+	ListenRADIUS      string // ":1812" — UDP listen address for RADIUS
+	ListenDIAMETER    string // ":3868" — listen address for Diameter (TCP or SCTP)
+	AAAGatewayURL     string // self-referential for health checks
+	Logger            *slog.Logger
+	Version           string // Injected at build time
+	DiameterProtocol  string // "tcp" or "sctp"
+
+	// Diameter client-initiated config (PLAN §2.3.5):
+	// Required for DER/DEA forwarding to AAA-S. Without these, Forward() returns an error.
+	DiameterServerAddress string // e.g. "nss-aaa-server:3868"
+	DiameterRealm        string // e.g. "operator.com"
+	DiameterHost         string // Origin-Host for CER (AAA Gateway identity)
+
+	RedisMode          string // "standalone" or "sentinel"
+	KeepalivedStatePath string // path to keepalived state file
 }
 
 // Gateway is the AAA Gateway component. It runs in a separate process from Biz Pods.

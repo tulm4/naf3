@@ -63,6 +63,13 @@ type AAAgwConfig struct {
 	ListenRADIUS      string `yaml:"listenRadius"`        // ":1812"
 	ListenDIAMETER    string `yaml:"listenDiameter"`      // ":3868"
 	DiameterProtocol   string `yaml:"diameterProtocol"`    // "tcp" or "sctp"
+
+	// Diameter client-initiated config (PLAN §2.3.5):
+	// Required for DER/DEA forwarding to AAA-S.
+	DiameterServerAddress string `yaml:"diameterServerAddress"` // e.g. "nss-aaa-server:3868"
+	DiameterRealm        string `yaml:"diameterRealm"`         // e.g. "operator.com"
+	DiameterHost         string `yaml:"diameterHost"`          // Origin-Host for CER
+
 	RedisMode         string `yaml:"redisMode"`          // "standalone" or "sentinel"
 	KeepalivedStatePath string `yaml:"keepalivedStatePath"` // "/var/run/keepalived/state"
 }
@@ -250,6 +257,16 @@ func applyDefaults(cfg *Config) {
 		}
 		if cfg.AAAgw.KeepalivedStatePath == "" {
 			cfg.AAAgw.KeepalivedStatePath = "/var/run/keepalived/state"
+		}
+		// Diameter client config defaults (PLAN §2.3.5 — required for DER/DEA forwarding)
+		if cfg.AAAgw.DiameterServerAddress == "" {
+			cfg.AAAgw.DiameterServerAddress = "nss-aaa-server:3868"
+		}
+		if cfg.AAAgw.DiameterRealm == "" {
+			cfg.AAAgw.DiameterRealm = "operator.com"
+		}
+		if cfg.AAAgw.DiameterHost == "" {
+			cfg.AAAgw.DiameterHost = "nssaa-gw.operator.com"
 		}
 	}
 }

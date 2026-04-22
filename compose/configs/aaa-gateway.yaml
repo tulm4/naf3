@@ -19,6 +19,11 @@ aaaGateway:
   listenRadius: ":1812"
   listenDiameter: ":3868"
   diameterProtocol: "tcp"
+  # Diameter client-initiated config (see PLAN §2.3.5):
+  # Required for DER/DEA forwarding to AAA-S. Without these, DIAMETER transport silently fails.
+  diameterServerAddress: "nss-aaa-server:3868"   # AAA-S address
+  diameterRealm: "operator.com"                     # AAA-S realm (Origin-Realm in CER)
+  diameterHost: "nssaa-gw.operator.com"            # Origin-Host for CER (AAA Gateway identity)
   redisMode: "standalone"
   keepalivedStatePath: "/var/run/keepalived/state"
 

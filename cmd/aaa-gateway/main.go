@@ -41,14 +41,17 @@ func main() {
 	)
 
 	gw := gateway.New(gateway.Config{
-		BizServiceURL:       cfg.AAAgw.BizServiceURL,
-		RedisAddr:          cfg.Redis.Addr,
+		BizServiceURL:        cfg.AAAgw.BizServiceURL,
+		RedisAddr:           cfg.Redis.Addr,
 		ListenRADIUS:       cfg.AAAgw.ListenRADIUS,
 		ListenDIAMETER:     cfg.AAAgw.ListenDIAMETER,
 		AAAGatewayURL:      "http://" + cfg.Server.Addr,
 		Logger:              logger,
 		Version:             cfg.Version,
 		DiameterProtocol:    cfg.AAAgw.DiameterProtocol,
+		DiameterServerAddress: cfg.AAAgw.DiameterServerAddress,
+		DiameterRealm:        cfg.AAAgw.DiameterRealm,
+		DiameterHost:         cfg.AAAgw.DiameterHost,
 		RedisMode:          cfg.AAAgw.RedisMode,
 		KeepalivedStatePath: cfg.AAAgw.KeepalivedStatePath,
 	})

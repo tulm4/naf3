@@ -164,12 +164,19 @@ func (h *DiameterHandler) handleServerInitiated(raw []byte) {
 	h.forwardToBiz(context.Background(), sessionID, "DIAMETER", "ASR", raw)
 }
 
-// Forward sends a Diameter message to AAA-S and returns the response.
-// This is a stub — the actual implementation forwards to AAA-S.
+// Forward sends a Diameter-EAP-Request to AAA-S and returns the DEA response.
+// Spec: PHASE §2.3.5; RFC 6733 §2.1 (CER/CEA), RFC 4072 (Diameter EAP DER/DEA)
+// NOTE: This is a STUB. The actual implementation requires diameter_forward.go
+// which maintains a persistent TCP/SCTP connection with CER/CEA handshake and DWR/DWA
+// watchdog. See PLAN §2.3.5 for the full design. Until implemented, DIAMETER
+// transport silently fails — every DER gets an empty response.
 func (h *DiameterHandler) Forward(ctx context.Context, payload []byte, sessionID string) ([]byte, error) {
-	// TODO: Implement actual Diameter forwarding to AAA-S server
-	// For now, return a placeholder empty response
-	return []byte{}, nil
+	// TODO: Implement diameter_forward.go per PLAN §2.3.5
+	// - Connect to AAA-S, perform CER/CEA (go-diameter/v4 sm.Client)
+	// - Build DER from EAP payload (Session-Id, Auth-Application-Id=5, EAP-Payload AVP=209)
+	// - Register hop-by-hop ID → pending channel, send, wait for DEA
+	// - DWR watchdog and reconnect on failure
+	return []byte{}, fmt.Errorf("diameter_forward: not implemented (see PLAN §2.3.5)")
 }
 
 // extractDiameterSessionID extracts the Session-Id AVP from a Diameter message.

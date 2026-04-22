@@ -634,6 +634,8 @@ if err != nil {
 }
 ```
 
+> **Risk (Deferred):** The Diameter client-initiated path (`Forward()`) requires the AAA Gateway to maintain a persistent connection to AAA-S with CER/CEA handshake and DWR/DWA watchdog. See §2.3.5 for the full design and implementation plan.
+
 #### 2.3.4 `redis.go`
 
 Implement the Redis pub/sub and session correlation functions. The `aaaGateway.redisMode` config controls the Redis topology:
@@ -705,7 +707,115 @@ func (g *Gateway) subscribeResponses(ctx context.Context) {
 }
 ```
 
-#### 2.3.5 `keepalived.go`
+#### 2.3.5 `diameter_forward.go` — Client-Initiated Connection Management
+
+> **BLOCKER (Deferred):** This section was missing from the original plan. The `diameter_handler.Forward()` method is currently a stub returning `[]byte{}`, which silently breaks every DIAMETER-based NSSAA procedure. This must be implemented before DIAMETER transport is usable.
+
+**Background:** Unlike RADIUS (stateless UDP), Diameter over TCP/SCTP requires a pre-existing, persistent connection with mandatory CER/CEA handshake before any application messages. RFC 6733 §2.1: "A Diameter peer MUST send a CER to the peer before sending any other message." The AAA Gateway's `ForwardEAP()` calls `diameterHandler.Forward()` to send DER to AAA-S — this is the client-initiated path that needs the full Diameter client stack.
+
+**Architecture decision:** The AAA Gateway creates its own Diameter client using `go-diameter/v4/sm` directly (not importing `internal/diameter/`). This avoids the `internal/proto/` zero-dependency constraint since the gateway is not proto. The `proto.AaaForwardRequest.Payload` carries raw EAP bytes; the forwarder wraps them in DER AVPs.
+
+##### Config Additions (AAAgwConfig)
+
+```go
+// New fields in compose/configs/aaa-gateway.yaml
+aaaGateway:
+  diameterServerAddress: "aaa-server:3868"   // AAA-S address
+  diameterRealm:         "operator.com"        // AAA-S realm
+  diameterHost:         "nssaa-gw.operator.com" // Origin-Host for CER
+```
+
+##### Implementation Pattern
+
+```go
+// diameter_forward.go — lightweight Diameter client for AAA Gateway
+// Uses go-diameter/v4/sm directly (not internal/diameter/)
+
+import (
+    "github.com/fiorix/go-diameter/v4/diam"
+    "github.com/fiorix/go-diameter/v4/diam/sm"
+    "github.com/fiorix/go-diameter/v4/diam/sm/smpeer"
+)
+
+// diamForwarder manages a persistent connection to AAA-S.
+type diamForwarder struct {
+    addr      string
+    network   string  // "tcp" or "sctp"
+    settings  *sm.Settings
+    machine   *sm.StateMachine
+    smClient  *sm.Client
+    conn      diam.Conn
+    pending   map[uint32]chan *diam.Message  // hop-by-hop → response
+    pendingMu sync.RWMutex
+    logger    *slog.Logger
+}
+
+// On startup (in Gateway.Start):
+func (df *diamForwarder) Connect(ctx context.Context) error {
+    // 1. Dial AAA-S
+    // 2. go-diameter sm.Client handles CER/CEA automatically
+    // 3. Register handler for DEA responses
+    // 4. Start DWR watchdog goroutine (go-diameter handles this via EnableWatchdog)
+    // 5. Handle disconnection: reconnect with exponential backoff
+}
+
+// Forward encodes EAP payload into DER and returns DEA response bytes.
+func (df *diamForwarder) Forward(ctx context.Context, eapPayload []byte, sessionID string) ([]byte, error) {
+    // 1. Build DER: Session-Id, Auth-Application-Id=5, Auth-Request-Type=1,
+    //               User-Name, EAP-Payload (AVP 209), 3GPP-S-NSSAI AVP
+    // 2. Register hop-by-hop ID → session channel in pending map
+    // 3. Send DER, wait on channel (with deadline from context)
+    // 4. Return DEA bytes (caller publishes to Redis)
+}
+
+// handleDEA: lookup pending hop-by-hop, send to channel
+// watchDog: monitor connection, reconnect on failure
+```
+
+**CER/CEA:** Handled automatically by `go-diameter/v4/sm` state machine. The `sm.Client` sends CER on connect, validates CEA, and starts watchdog (DWR/DWA every 30s).
+
+**DER encoding:** Unlike `internal/diameter/client.go` which receives an already-built DER, this forwarder builds DER from raw EAP bytes. The AaaForwardRequest.Payload is the EAP message bytes; the forwarder wraps them in:
+- Session-Id AVP (263)
+- Origin-Host, Origin-Realm AVPs (from config)
+- Destination-Host, Destination-Realm AVPs (from config)
+- Auth-Application-Id = 5 (Diameter EAP)
+- Auth-Request-Type = 1 (AUTHORIZE_AUTHENTICATE)
+- User-Name (the GPSI/SUPI from the request)
+- EAP-Payload AVP (code **209**, per RFC 4072)
+- 3GPP-S-NSSAI AVP (code 310)
+
+**Pending map:** Same pattern as `internal/diameter/client.go` — hop-by-hop ID → response channel. The `sm.Client` handler dispatches incoming DEA by hop-by-hop.
+
+**Reconnection:** On connection failure, exponential backoff: 1s, 2s, 4s, max 30s. After 3 consecutive failures, log error and return context deadline exceeded.
+
+##### Wire into Gateway
+
+```go
+// In Gateway.New():
+df, err := newDiamForwarder(cfg.DiameterServerAddress, cfg.DiameterProtocol, cfg.Logger)
+if err != nil {
+    return nil, fmt.Errorf("diameter forwarder: %w", err)
+}
+g.diamForwarder = df
+
+// In Gateway.Start():
+if err := g.diamForwarder.Connect(ctx); err != nil {
+    g.logger.Error("diameter connect failed", "addr", cfg.DiameterServerAddress, "error", err)
+    // Do not fail startup — AAA-S may be temporarily unavailable
+}
+
+// In Gateway.ForwardEAP() — replace the diameterHandler.Forward() call:
+// case proto.TransportDIAMETER:
+//     response, err = g.diamForwarder.Forward(ctx, req.Payload, req.SessionID)
+```
+
+**Note:** The `diamForwarder` runs inside the AAA Gateway process. It maintains one persistent TCP/SCTP connection to AAA-S (shared across all Biz Pod requests). The `diameterHandler` (server-side listener) continues to handle server-initiated ASR messages independently.
+
+Spec: RFC 6733 §2.1 (CER/CEA), RFC 6733 §5.4 (DWR/DWA), RFC 4072 (Diameter EAP DER/DEA), TS 29.561 §17
+
+---
+
+#### 2.3.6 `keepalived.go`
 
 Implement VIP health check for keepalived integration. The AAA Gateway exposes a `/health/vip` endpoint that keepalived's `chk_aaa_gw` script calls to determine if this replica owns the VIP.
 
