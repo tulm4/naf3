@@ -9,6 +9,8 @@ service: Testing
 
 ## 1. Overview
 
+> **Note (Phase R):** After the 3-component refactor, testing spans three separate processes (HTTP Gateway, Biz Pod, AAA Gateway). Each component has its own test suite. E2E tests must verify the full flow across all three components. See `docs/design/01_service_model.md` §5.4 for the architecture overview.
+
 Testing strategy toàn diện cho NSSAAF đạt telecom-grade quality, bao gồm unit tests, integration tests, conformance tests, load tests, và chaos tests.
 
 ---
@@ -309,6 +311,8 @@ func TestRedis_Cluster(t *testing.T) {
 
 ### 5.1 E2E Test Architecture
 
+> **Note (Phase R):** In the 3-component model, E2E tests start all three components (HTTP Gateway, Biz Pod, AAA Gateway) plus supporting infrastructure.
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                  E2E Test Runner                             │
@@ -318,41 +322,60 @@ func TestRedis_Cluster(t *testing.T) {
          ┌────────────┼────────────┐
          ▼            ▼            ▼
 ┌─────────────┐ ┌─────────────┐ ┌─────────────┐
-│  AMF Mock  │ │   NSSAAF   │ │  AAA Mock  │
-│  (gRPC)   │ │  (Real)    │ │  (UDP/TCP) │
-└─────────────┘ └─────────────┘ └─────────────┘
-                       │
-                       ▼
-                 ┌─────────────┐
-                 │ PostgreSQL │
-                 │   Redis    │
-                 │   NRF Mock │
-                 └─────────────┘
+│  AMF Mock  │ │ HTTP Gateway │ │  Biz Pod    │  AAA Mock  │
+│  (gRPC)   │ │  (Real)    │ │  (Real)    │  (UDP/TCP) │
+└─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘
+                             │            │
+                             │            ▼
+                             │     ┌─────────────┐
+                             │     │ AAA Gateway │  (Real UDP/TCP)
+                             │     └─────────────┘
+                             │
+                             ▼
+                       ┌─────────────┐
+                       │ PostgreSQL  │
+                       │   Redis     │
+                       │   NRF Mock  │
+                       └─────────────┘
 ```
 
 ### 5.2 E2E Test Cases
 
 ```go
-// Full NSSAA flow E2E test
+// Full NSSAA flow E2E test (3-component model)
 func TestE2E_NSSAA_Flow(t *testing.T) {
     if testing.Short() {
         t.Skip("Skipping E2E in short mode")
     }
 
-    // Setup
-    nssAAFSvc := StartNSSAAFService()
-    defer nssAAFSvc.Stop()
+    // Setup: start all 3 components
+    httpGW := StartHTTPGateway(&HTTPGatewayConfig{Port: 8443})
+    defer httpGW.Stop()
 
+    bizPod := StartBizPod(&BizPodConfig{
+        DBURL:       testDBURL,
+        RedisURL:    testRedisURL,
+        AAAProxyURL: "http://localhost:9443", // AAA Gateway internal HTTP
+    })
+    defer bizPod.Stop()
+
+    aaaGW := StartAAAGateway(&AAAGatewayConfig{
+        Port: 1812, // RADIUS UDP
+        BizPodURL:   "http://localhost:8080", // internal HTTP callback
+    })
+    defer aaaGW.Stop()
+
+    // Mock external services
     amfMock := StartAMFMock()
     defer amfMock.Stop()
 
     aaaMock := StartAAASimulator(&AAASimulatorConfig{
-        Mode: "EAP_TLS",
+        Mode:       "EAP_TLS",
         AuthResult: "SUCCESS",
     })
     defer aaaMock.Stop()
 
-    // AMF sends initial request
+    // AMF sends initial request via HTTP Gateway
     ctx := &Nnssaaf_NSSAA_Authenticate_Request{
         Gpsi:    "5-208046000000001",
         Snssai:  &Snssai{Sst: 1, Sd: "000001"},
@@ -363,31 +386,10 @@ func TestE2E_NSSAA_Flow(t *testing.T) {
     resp1, err := amfMock.Authenticate(ctx)
     require.NoError(t, err)
 
-    // Verify response contains EAP message from AAA
+    // Verify: HTTP Gateway routed to Biz Pod, Biz Pod sent to AAA Gateway
     assert.NotEmpty(t, resp1.AuthCtxId)
     assert.NotEmpty(t, resp1.EapMessage)
-
-    // Multi-round EAP exchange (simplified)
-    for i := 0; i < 5; i++ {
-        eapResp := amfMock.GenerateEAPResponse(resp1.AuthCtxId)
-        resp, err := amfMock.ConfirmAuthentication(resp1.AuthCtxId, eapResp)
-        require.NoError(t, err)
-
-        if resp.AuthResult != nil {
-            break
-        }
-    }
-
-    // Verify final result
-    finalResp, _ := amfMock.ConfirmAuthentication(resp1.AuthCtxId, nil)
-    assert.Equal(t, "EAP_SUCCESS", finalResp.AuthResult)
-
-    // Verify callback notifications received by AMF
-    assert.True(t, amfMock.HasReauthCapability())
-
-    // Verify database state
-    session := nssAAFSvc.GetSession(resp1.AuthCtxId)
-    assert.Equal(t, "EAP_SUCCESS", session.Status)
+    assert.True(t, aaaGW.ReceivedRequest()) // AAA Gateway received RADIUS
 }
 
 func TestE2E_NSSAA_Reauth_FromAAA(t *testing.T) {

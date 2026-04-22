@@ -10,6 +10,8 @@ operation: N/A
 
 ## 1. Overview
 
+> **Note (Phase R):** After the 3-component refactor, cryptographic operations (session state encryption, MSK handling) run in **Biz Pods** only. The AAA Gateway handles raw socket I/O without encryption needs. The HTTP Gateway has no cryptographic responsibilities. See `docs/design/01_service_model.md` §5.4.
+
 Module `internal/crypto/` cung cấp tất cả cryptographic primitives cho NSSAAF:
 - **AES-256-GCM** cho symmetric encryption (session state, secrets)
 - **HKDF** cho key derivation

@@ -9,6 +9,8 @@ service: Metrics, Logs, Traces
 
 ## 1. Overview
 
+> **Note (Phase R):** After the 3-component refactor, observability spans three separate processes. Each component (HTTP Gateway, Biz Pod, AAA Gateway) exposes its own metrics endpoint. Distributed traces for the full flow (AMF → HTTP GW → Biz Pod → AAA GW → AAA-S) require trace context propagation via Redis pub/sub headers. See `docs/design/01_service_model.md` §5.4.6 for cross-component communication.
+
 Full-stack observability gồm Prometheus metrics, structured logging, và distributed tracing cho phép operations team giám sát và debug NSSAAF production.
 
 ---
@@ -72,10 +74,11 @@ var (
     )
 
     // AAA protocol metrics
+    // In 3-component model: Biz Pod sends to AAA Gateway via HTTP, AAA Gateway does raw socket I/O
     AaaRequestsTotal = prometheus.NewCounterVec(
         prometheus.CounterOpts{
             Name: "nssAAF_aaa_requests_total",
-            Help: "Total AAA protocol requests",
+            Help: "Total AAA protocol requests (Biz Pod → AAA Gateway)",
         },
         []string{"protocol", "server", "result"},
     )
@@ -160,22 +163,60 @@ var (
 
 ### 2.2 ServiceMonitor for Prometheus
 
+> **Note (Phase R):** In the 3-component model, each component (HTTP Gateway, Biz Pod, AAA Gateway) is a separate Deployment with its own metrics endpoint. Create separate ServiceMonitors for each component, or use pod scrapes.
+
 ```yaml
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: nssAAF-monitor
+  name: nssAAF-http-gw-monitor
   labels:
     team: platform
 spec:
   selector:
     matchLabels:
-      app: nssAAF
+      app: nssaa-http-gw  # HTTP Gateway deployment label
   endpoints:
     - port: metrics
       path: /metrics
       interval: 15s
       scrapeTimeout: 10s
+  namespaceSelector:
+    matchNames:
+      - nssAAF
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: nssAAF-biz-monitor
+  labels:
+    team: platform
+spec:
+  selector:
+    matchLabels:
+      app: nssaa-biz  # Biz Pod deployment label
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
+  namespaceSelector:
+    matchNames:
+      - nssAAF
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: nssAAF-aaa-gw-monitor
+  labels:
+    team: platform
+spec:
+  selector:
+    matchLabels:
+      app: nssaa-aaa-gw  # AAA Gateway deployment label
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
   namespaceSelector:
     matchNames:
       - nssAAF
@@ -311,21 +352,40 @@ func (s *NssaaService) HandleAuthRequest(ctx context.Context, req *SliceAuthInfo
 
 ### 4.2 Trace for Multi-Service Flow
 
+> **Note (Phase R):** In the 3-component model, the AAA request span runs in the **Biz Pod**, which calls the AAA Gateway via HTTP. The AAA Gateway's socket I/O (RADIUS/Diameter) is a separate process with its own trace context. The Biz Pod correlates the response via Redis pub/sub.
+
 ```
 AMF (Trace: abc123)
     │
     │  N58: Nnssaaf_NSSAA_Authenticate
     │  Headers: traceparent: 00-abc123-def456-01
     ▼
-NSSAAF (Trace: abc123, Span: ghi789)
+HTTP Gateway (Trace: abc123, Span: gw001)
+    │  (TLS termination, routing)
+    │  span: "http.route"
+    ▼
+NSSAAF Biz Pod (Trace: abc123, Span: biz001)
     │
     ├─ Span: db.insert_session
     │
-    ├─ Span: aaa.send_request (RADIUS)
+    ├─ Span: biz.forward_to_aaa (HTTP POST /aaa/forward)
     │       │
-    │       │  RADIUS transaction
+    │       │  HTTP/ClusterIP to AAA Gateway
+    │       ▼
+    │    AAA Gateway (separate process)
+    │       │  span: "aaa.recv_raw" (RADIUS UDP recv)
+    │       │
+    │       │  RADIUS transaction to AAA-S
     │       ▼
     │    AAA-S (external, no trace)
+    │       │
+    │       │  RADIUS response
+    │       ▼
+    │    AAA Gateway span: "aaa.send_raw" (RADIUS UDP send)
+    │       │
+    │       │  HTTP/ClusterIP response
+    │       ▼
+    │  span: "biz.recv_aaa_response" (via Redis pub/sub)
     │
     ├─ Span: db.update_session
     │

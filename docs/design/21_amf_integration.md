@@ -10,6 +10,8 @@ operation: Authenticate, Re-AuthenticationNotification, RevocationNotification
 
 ## 1. Overview
 
+> **Note (Phase R):** After the 3-component refactor, the AMF sends requests to the HTTP Gateway (N58), which routes to Biz Pods. Re-auth/revocation notifications are sent by Biz Pods via HTTP. See `docs/design/01_service_model.md` §5.4 for the architecture overview.
+
 AMF là consumer chính của NSSAAF. AMF tích hợp qua N58 interface (Nnssaaf_NSSAA service) và nhận callbacks cho re-auth/revocation notifications.
 
 ---
@@ -59,6 +61,8 @@ Headers:
 
 ### 3.1 During Registration
 
+> **Note (Phase R):** In the 3-component model, step 7 (NSSAAF processes) executes in the Biz Pod: it validates the request, creates a session, encodes the EAP message, sends to the AAA Gateway via HTTP, which forwards to AAA-S. See `01_service_model.md` §5.4.6 for the internal communication flow.
+
 ```
 Registration Request arrives at AMF
          │
@@ -73,13 +77,21 @@ UE responds with EAP Identity Response in NAS MM Transport
          │
          ▼
 AMF → NSSAAF: POST /slice-authentications
-(EAP Identity Response, GPSI, S-NSSAI, amfInstanceId, reauthNotifUri, revocNotifUri)
+(N58 → HTTP Gateway → Biz Pod)
          │
          ▼
-NSSAAF processes → RADIUS/Diameter → AAA-S
+Biz Pod: validates request, creates session in PostgreSQL, encodes EAP,
+         sends raw AAA bytes to AAA Gateway via HTTP POST /aaa/forward
+         │
+         ▼
+AAA Gateway: receives raw packet, forwards to AAA-S
+         │
+         ▼
+Biz Pod ← AAA Gateway: receives response via Redis pub/sub
          │
          ▼
 NSSAAF → AMF: 201 Created (EAP message for UE)
+(HTTP Gateway routes Biz Pod response back to AMF)
          │
          ▼
 AMF sends NAS Network Slice-Specific Authentication Command to UE

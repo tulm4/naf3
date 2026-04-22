@@ -9,6 +9,8 @@ service: Configuration
 
 ## 1. Overview
 
+> **Note (Phase R):** After the 3-component refactor, NSSAAF has three separate Deployments (HTTP Gateway, Biz Pod, AAA Gateway), each with its own configuration. The config repository structure uses separate directories per component. See `docs/design/01_service_model.md` §5.4 for the architecture overview.
+
 Thiết kế configuration management cho NSSAAF với GitOps workflow — đảm bảo:
 - **Versioned configuration** trong Git
 - **Environment separation** (dev, staging, production)
@@ -21,17 +23,32 @@ Thiết kế configuration management cho NSSAAF với GitOps workflow — đả
 
 ### 2.1 Repository Structure
 
+> **Note (Phase R):** The config repository includes separate directories for each of the three components: `http-gateway/`, `biz/`, and `aaa-gateway/`. Shared secrets (AAA shared secrets, TLS certs) are referenced by all three components.
+
 ```
 nssAAF-config/
 ├── base/
 │   ├── kustomization.yaml
-│   ├── configmap.yaml           # Default config
-│   ├── secrets.yaml            # Encrypted secrets (Sealed Secrets)
-│   ├── deployment.yaml
-│   ├── service.yaml
-│   ├── hpa.yaml
-│   ├── pdb.yaml
-│   └── servicemonitor.yaml
+│   ├── shared/
+│   │   ├── configmap.yaml           # Shared config (logging level, etc.)
+│   │   ├── secrets.yaml             # Encrypted secrets (Sealed Secrets)
+│   │   └── networkpolicy.yaml      # Shared network policies
+│   ├── http-gateway/
+│   │   ├── deployment.yaml          # HTTP Gateway (N replicas)
+│   │   ├── service.yaml            # LoadBalancer / ClusterIP
+│   │   ├── hpa.yaml               # HPA (N replicas)
+│   │   └── servicemonitor.yaml
+│   ├── biz/
+│   │   ├── deployment.yaml          # Biz Pod (N replicas, stateless)
+│   │   ├── service.yaml           # ClusterIP for internal SBI
+│   │   ├── hpa.yaml              # HPA
+│   │   └── servicemonitor.yaml
+│   └── aaa-gateway/
+│       ├── deployment.yaml          # AAA Gateway (2 replicas, Recreate strategy)
+│       ├── service.yaml           # ClusterIP for biz pods
+│       ├── keepalived.conf       # keepalived VRRP config
+│       ├── network-attachments.yaml # Multus CNI CRD
+│       └── servicemonitor.yaml
 │
 ├── overlays/
 │   ├── development/
@@ -104,18 +121,30 @@ kind: Kustomization
 namespace: nssAAF
 
 resources:
-  - ../../base
+  - ../../base/shared
+  - ../../base/http-gateway
+  - ../../base/biz
+  - ../../base/aaa-gateway
 
 patchesStrategicMerge:
   - config-patch.yaml
   - replicas-patch.yaml
 
+# Production scale: HTTP GW 3, Biz 5, AAA GW 2 (fixed)
 replicas:
-  - name: nssAAF
-    count: 9  # 3 per AZ
+  - name: nssaa-http-gw
+    count: 3
+  - name: nssaa-biz
+    count: 5
+  - name: nssaa-aaa-gw
+    count: 2  # hard maximum — never exceed 2 for AAA Gateway
 
 images:
-  - name: operator/nssAAF
+  - name: operator/nssaa-http-gw
+    newTag: "v1.0.0-prod"
+  - name: operator/nssaa-biz
+    newTag: "v1.0.0-prod"
+  - name: operator/nssaa-aaa-gw
     newTag: "v1.0.0-prod"
 ```
 
@@ -124,10 +153,27 @@ images:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: nssAAF-config
+  name: nssAAF-shared-config
 data:
   LOG_LEVEL: "info"
   METRICS_ENABLED: "true"
+---
+# HTTP Gateway config
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nssaa-http-gw-config
+data:
+  BIND_IP: "0.0.0.0"  # HTTP Gateway binds to pod IP on external interface
+  TLS_PORT: "443"
+  INTERNAL_SERVICE_URL: "http://svc-nssaa-biz:8080"
+---
+# Biz Pod config
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nssaa-biz-config
+data:
   EAP_MAX_ROUNDS: "20"
   EAP_ROUND_TIMEOUT_SECONDS: "30"
   SESSION_TTL_SECONDS: "300"
@@ -136,6 +182,18 @@ data:
   RATE_LIMIT_PER_GPSI_PER_MIN: "10"
   RATE_LIMIT_PER_AMF_PER_SEC: "1000"
   RATE_LIMIT_GLOBAL_PER_SEC: "100000"
+  AAA_GATEWAY_URL: "http://svc-nssaa-aaa:9090"
+---
+# AAA Gateway config
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nssaa-aaa-gw-config
+data:
+  RADIUS_PORT: "1812"
+  DIAMETER_PORT: "3868"
+  REDIS_URL: "redis://nssAAF-redis:6379"
+  REDIS_CHANNEL: "nssaa:aaa-response"
 ```
 
 ---

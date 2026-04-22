@@ -12,6 +12,8 @@ aaaProtocol: RADIUS / Diameter
 
 ## 1. Overview
 
+> **Note (Phase R):** After the 3-component refactor, NSSAAF is split into HTTP Gateway, Biz Pod, and AAA Gateway. See `docs/design/01_service_model.md` §5.4 for the architecture overview.
+
 Nnssaaf_AIW là dịch vụ NSSAAF dùng cho SNPN (Standalone Non-Public Network) authentication với Credentials Holder sử dụng AAA Server. Khác với Nnssaaf_NSSAA (dùng GPSI, consumer là AMF), Nnssaaf_AIW dùng **SUPI** và consumer là **AUSF**.
 
 Tài liệu này thiết kế chi tiết implementation của Nnssaaf_AIW theo TS 29.526 v18.7.0 và TS 33.501 §I.2.2.2.
@@ -117,10 +119,12 @@ POST /nnssaaf-aiw/v1/authentications
        - Session-Id, Auth-Application-Id, Auth-Request-Type
        - User-Name: supi
        - EAP-Payload AVP
-11. Send to AAA-S:
+11. Send to AAA-S via HTTP to AAA Gateway:
+    - Biz Pod sends raw AAA bytes to AAA Gateway via HTTP POST /aaa/forward
+    - AAA Gateway receives raw RADIUS/Diameter packet and forwards to AAA-S
     - Apply retry with exponential backoff: 0ms, 100ms, 200ms
     - After 3 retries exhausted → 504 AAA_TIMEOUT
-12. Decode AAA response:
+12. Receive AAA response via HTTP from AAA Gateway:
     a. RADIUS Access-Challenge → extract EAP-Message → return eapMessage
     b. RADIUS Access-Accept → EAP-Success
        - Extract MSK from MSK VSA (Vendor-Id=VSA, Vendor-Type=TBD)
@@ -195,10 +199,12 @@ PUT /nnssaaf-aiw/v1/authentications/01fr5xg2e3p4q5r6s7t8u9v0w2
    - If hash == session.LastNonce AND session.CachedResponse != nil:
      → Return cached response immediately (no AAA call)
 10. Encode EAP message to AAA protocol (same as POST step 10)
-11. Send to AAA-S:
+11. Send to AAA-S via HTTP to AAA Gateway:
+    - Biz Pod sends raw AAA bytes to AAA Gateway via HTTP POST /aaa/forward
+    - AAA Gateway forwards raw packet to AAA-S
     - Update session.ExpectedId = eapMsg.Id + 1
     - Update session.Rounds++
-12. Decode AAA response:
+12. Receive AAA response via HTTP from AAA Gateway:
     a. RADIUS Access-Challenge → extract EAP-Message → return eapMessage, authResult=null
     b. RADIUS Access-Accept → EAP-Success
        - Extract MSK from MSK VSA
@@ -347,8 +353,11 @@ const (
 
 ## 6. Database Schema (AIW-specific)
 
+> **Note (Phase R):** Session state is managed by Biz Pods. The `eap_session_state` column stores encrypted EAP session data. The AAA Gateway does not access the database directly — it uses Redis for session correlation (`nssaa:session:{sessionId}`) to map raw RADIUS/Diameter transaction IDs to `authCtxId`. See `docs/design/12_redis_ha.md` §4.6 for cross-component Redis keys.
+
 ```sql
 -- AIW sessions: separate from NSSAA sessions
+-- Managed by Biz Pods (see 01_service_model.md §5.4)
 CREATE TABLE aiw_auth_sessions (
     auth_ctx_id          VARCHAR(64) PRIMARY KEY,
     supi                 VARCHAR(32) NOT NULL,

@@ -12,6 +12,8 @@ aaaProtocol: RADIUS / Diameter
 
 ## 1. Overview
 
+> **Note (Phase R):** After the 3-component refactor, AUSF sends requests to the HTTP Gateway (N60), which routes to Biz Pods. The Biz Pod manages the AIW session, encodes/decodes EAP, and communicates with AAA-S via the AAA Gateway. See `docs/design/01_service_model.md` §5.4 for the architecture overview.
+
 Tài liệu này thiết kế chi tiết integration giữa NSSAAF và AUSF qua **N60 interface** cho SNPN (Standalone Non-Public Network) authentication với Credentials Holder.
 
 AUSF (Authentication Server Function) trong SNPN context đóng vai trò:
@@ -145,75 +147,75 @@ Confirm/advance authentication.
 
 ### 4.1 SNPN Access with Credentials Holder
 
+> **Note (Phase R):** In the 3-component model, AUSF calls the HTTP Gateway (N60), which routes to Biz Pods. Biz Pods encode/decode EAP and communicate with AAA-S via the AAA Gateway. See `01_service_model.md` §5.4.6.
+
 ```
-UE              AUSF              NSSAAF            AAA-S
- │                │                 │                 │
- │ 1. Auth Req  │                 │                 │
- │    (EAP Start)│                 │                 │
- │───────────────►│                 │                 │
- │                │                 │                 │
- │ 2. AUSF        │                 │                 │
- │    determines   │                 │                 │
- │    needs AAA   │                 │                 │
- │                │                 │                 │
- │                │ 3. POST /aiw   │                 │
- │                │    (supi,      │                 │
- │                │     eapIdRsp)  │                 │
- │                │────────────────►│                 │
- │                │                 │                 │
- │                │                 │ 4. RADIUS/DIA  │
- │                │                 │    Access-Req   │
- │                │                 │─────────────────►│
- │                │                 │                 │
- │                │                 │◄─────────────────│
- │                │                 │ 5. RADIUS/DIA  │
- │                │                 │    Access-Chal │
- │                │                 │                 │
- │                │ 6. 201 Created │                 │
- │                │    (eapMsg)    │                 │
- │                │◄────────────────│                 │
- │                │                 │                 │
- │ 7. EAP         │                │                 │
- │    Challenge   │                │                 │
- │◄───────────────│                │                 │
- │                │                 │                 │
- │ 8. EAP         │                │                 │
- │    Response    │                │                 │
- │───────────────►│                │                 │
- │                │                 │                 │
- │                │ 9. PUT /aiw   │                 │
- │                │    (eapMsg)   │                 │
- │                │────────────────►│                 │
- │                │                 │                 │
- │                │                 │ 10. Final      │
- │                │                 │    RADIUS/DIA   │
- │                │                 │─────────────────►│
- │                │                 │                 │
- │                │                 │◄─────────────────│
- │                │                 │ 11. Final Resp  │
- │                │                 │    (EAP result, │
- │                │                 │     MSK, pvs)   │
- │                │                 │                 │
- │                │ 12. 200 OK     │                 │
- │                │    (eapMsg,    │                 │
- │                │     authResult,│                 │
- │                │     msk, pvs)  │                 │
- │                │◄────────────────│                 │
- │                │                 │                 │
- │ 13. Auth Result│                │                 │
- │◄───────────────│                 │                 │
- │                │                 │                 │
- │                │ 14. AUSF derive │                 │
- │                │    NAS keys    │                 │
- │                │    from MSK    │                 │
- │                │                 │                 │
- │                │ 15. Namf_Comm  │                 │
- │                │    UEContextUpdate              │
- │                │────────────────►│                 │
- │ 16. NAS Security│                │                 │
- │    Context Est. │                │                 │
- │◄───────────────│                 │                 │
+UE              AUSF              HTTP GW           Biz Pod           AAA GW           AAA-S
+ |                |                 |                |                 |                |
+ | 1. Auth Req  |                 |                |                 |                |
+ |    (EAP Start)|                 |                |                 |                |
+ |───────────────►|                 |                |                 |                |
+ |                |                 |                |                 |                |
+ | 2. AUSF       |                 |                |                 |                |
+ |    determines  |                 |                |                 |                |
+ |    needs AAA   |                 |                |                 |                |
+ |                |                 |                |                 |                |
+ |                | 3. POST /aiw |                |                 |                |
+ |                |    (supi,     |                |                 |                |
+ |                |     eapIdRsp)|                |                 |                |
+ |                |────────────────►|                |                 |                |
+ |                |                 | 4. POST /aiw |                |                |
+ |                |                 |───────────────►|                |                |
+ |                |                 |                | 5. Encode EAP   |                |
+ |                |                 |                | 6. HTTP POST    |                |
+ |                |                 |                |    /aaa/forward|                |
+ |                |                 |                |────────────────►|                |
+ |                |                 |                |                 |                |
+ |                |                 |                | UDP:1812        | UDP:1812      |
+ |                |                 |                |────────────────►│───────────────►│
+ |                |                 |                |                 |                |
+ |                |                 |                | UDP:1812        |                |
+ |                |                 |                |◄────────────────│◄───────────────│
+ |                |                 |                | 7. Decode EAP   |                |
+ |                |                 |                | 8. Advance EAP  |                |
+ |                |                 |                |    state         |                |
+ |                | 9. 201 Created|                |                 |                |
+ |                |    (eapMsg)   |                |                 |                |
+ |                |◄────────────────|                |                 |                |
+ |                |                 |                |                 |                |
+ | 10. EAP       |                |                |                 |                |
+ |    Challenge  |                |                |                 |                |
+ |◄──────────────|                |                |                 |                |
+ |                |                 |                |                 |                |
+ | 11. EAP       |                |                |                 |                |
+ |    Response   |                |                |                 |                |
+ |───────────────►|                |                |                 |                |
+ |                |                 |                |                 |                |
+ |                | 12. PUT /aiw|                |                 |                |
+ |                |    (eapMsg) |                |                 |                |
+ |                |────────────────►|                |                 |                |
+ |                |                 | 13. PUT /aiw|                |                |
+ |                |                 |───────────────►|                |                |
+ |                |                 |                | 14. Encode EAP |                |
+ |                |                 |                | 15. HTTP POST   |                |
+ |                |                 |                |    /aaa/forward|                |
+ |                |                 |                |────────────────►│───────────────►│
+ |                |                 |                |                 |                |
+ |                |                 |                | UDP:1812        |                |
+ |                |                 |                |◄────────────────│◄───────────────│
+ |                |                 |                | 16. Decode EAP |                |
+ |                |                 |                | 17. Update DB  |                |
+ |                | 18. 200 OK   |                |                 |                |
+ |                |    (eapMsg,   |                |                 |                |
+ |                |     authResult,|                |                 |                |
+ |                |     msk, pvs)|                |                 |                |
+ |                |◄────────────────|                |                 |                |
+ |                |                 |                |                 |                |
+ | 19. Auth Resul|                |                 |                 |                |
+ |◄──────────────|                |                 |                 |                |
 ```
+
+> **AUSF continues:** Steps 20-22 (derive NAS keys from MSK, send Namf_Communication_UEContextUpdate) are the same as the original diagram — these execute outside the NSSAAF boundary.
 
 ### 4.2 AUSF Processing Steps
 
@@ -226,12 +228,14 @@ UE              AUSF              NSSAAF            AAA-S
 4. Validate SUPI format (`^imu-[0-9]{15}$`)
 5. Forward to NSSAAF
 
-**NSSAAF Actions:**
+**Biz Pod Actions (NSSAAF):**
 1. Generate authCtxId (UUIDv7)
 2. Lookup AAA server config for this SUPI/range
 3. Create session in PostgreSQL
-4. Forward EAP Identity Response to AAA-S
-5. Return authCtxId + EAP challenge
+4. Encode EAP Identity Response into RADIUS/Diameter
+5. Send raw AAA bytes to AAA Gateway via HTTP POST /aaa/forward
+6. Receive response via Redis pub/sub, decode EAP
+7. Return authCtxId + EAP challenge
 
 #### Step 9: PUT /nnssaaf-aiw/v1/authentications/{authCtxId}
 
@@ -240,15 +244,17 @@ UE              AUSF              NSSAAF            AAA-S
 2. Forward EAP response to NSSAAF
 3. Wait for final response
 
-**NSSAAF Actions:**
-1. Load session by authCtxId
+**Biz Pod Actions (NSSAAF):**
+1. Load session by authCtxId (from Redis cache or PostgreSQL)
 2. Validate SUPI matches
 3. Check session not expired
-4. Forward EAP to AAA-S
-5. On final response:
+4. Encode EAP into RADIUS/Diameter
+5. Send to AAA Gateway via HTTP POST /aaa/forward
+6. Receive response via Redis pub/sub
+7. On final response:
    - Extract MSK if EAP_SUCCESS
    - Extract PVS info if present
-   - Update session status
+   - Update session status in PostgreSQL
    - Return result to AUSF
 
 #### Step 14: AUSF Derives NAS Keys from MSK

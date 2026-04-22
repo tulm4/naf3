@@ -10,6 +10,8 @@ operation: N/A (internal routing)
 
 ## 1. Overview
 
+> **Note (Phase R):** After the 3-component refactor, the "AAA Proxy" logic (routing, S-NSSAI → ENSI mapping, protocol passthrough) lives in the **Biz Pod** (`internal/eap/`). The **AAA Gateway** (`cmd/aaa-gateway/`) handles only raw socket I/O. See `docs/design/01_service_model.md` §5.4 for the architecture overview.
+
 AAA Proxy (AAA-P) là component trong NSSAAF hỗ trợ routing đến third-party AAA-S. Theo TS 29.561, AAA-P được yêu cầu khi AAA-S belongs to a third party.
 
 **Modes:**
@@ -90,30 +92,36 @@ func (m *ENSIMapper) MapSnssaiToEnsi(snssai Snssai) string {
 
 ## 4. Protocol Passthrough
 
+> **Note (Phase R):** In the 3-component model, this protocol passthrough logic runs in the **Biz Pod** (not in the AAA Gateway). The Biz Pod encodes/decodes EAP and communicates with the AAA Gateway via HTTP. See `01_service_model.md` §5.4.3 for component responsibilities.
+
 ```go
-// Proxy mode: relay without modification (except routing headers)
-func (p *AAAProxy) RelayRADIUS(ctx context.Context, in []byte) ([]byte, error) {
-    // Parse incoming RADIUS packet
-    req, err := p.radiusCodec.Decode(in)
+// Proxy mode: Biz Pod relays EAP messages via HTTP to AAA Gateway
+// The AAA Gateway forwards raw RADIUS/Diameter bytes to/from AAA-S
+func (p *AAARelay) RelayToAAAGateway(ctx context.Context, rawPacket []byte, configID string) ([]byte, error) {
+    // Build forward request to AAA Gateway
+    req := &proto.AaaForwardRequest{
+        ConfigId: configID,
+        RawPacket: rawPacket,
+        Protocol:  "RADIUS", // or "DIAMETER"
+    }
+
+    // Send via HTTP to AAA Gateway
+    resp, err := p.httpAAAClient.ForwardAAA(ctx, req)
     if err != nil {
         return nil, err
     }
 
-    // Optionally: add proxy-specific attributes
-    if p.config.AddProxyAttr {
+    return resp.RawPacket, nil
+}
+
+// For proxy-mode (AAA-P), Biz Pod may add proxy-specific attributes
+func (p *AAARelay) AddProxyAttributes(req *radius.Packet, config *AAAConfig) error {
+    if config.AddProxyAttr {
         req.AddAttribute(VSA{
             VendorId:  10415,
             VendorType: 201,  // NSSAAF-Proxy-Info
-            Data:       []byte(p.config.ProxyIdentifier),
+            Data:       []byte(config.ProxyIdentifier),
         })
     }
-
-    // Forward to AAA-P
-    resp, err := p.aaaClient.Request(ctx, req)
-    if err != nil {
-        return nil, err
-    }
-
-    return p.radiusCodec.Encode(resp)
+    return nil
 }
-```

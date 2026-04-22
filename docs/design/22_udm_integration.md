@@ -10,6 +10,8 @@ operation: Nudm_UECM_Get
 
 ## 1. Overview
 
+> **Note (Phase R):** After the 3-component refactor, the UDM client runs in the **Biz Pod**. The UDM integration is used for server-initiated flows (Re-Auth, Revocation) where the Biz Pod needs to look up the AMF ID. See `docs/design/01_service_model.md` §5.4.3.
+
 NSSAAF tích hợp với UDM qua Nudm_UECM_Get service để lấy AMF ID hiện tại của UE khi AAA-S trigger re-authentication hoặc revocation.
 
 **Trigger flows:**

@@ -9,6 +9,8 @@ service: AAA Security
 
 ## 1. Overview
 
+> **Note (Phase R):** After the 3-component refactor, raw RADIUS/Diameter socket handling (including DTLS, IPSec) runs in the **AAA Gateway** (`cmd/aaa-gateway/`), not in the Biz Pod. The Biz Pod sends/receives via HTTP to the AAA Gateway. See `docs/design/01_service_model.md` §5.4.3 for component responsibilities.
+
 Thiết kế bảo mật cho AAA protocol transport giữa NSSAAF và NSS-AAA Server. Bao gồm RADIUS shared secret management, Diameter IPSec/TLS, và credential storage.
 
 ---

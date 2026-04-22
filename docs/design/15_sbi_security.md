@@ -10,6 +10,8 @@ operation: N/A
 
 ## 1. Overview
 
+> **Note (Phase R):** After the 3-component refactor, TLS termination happens at the **HTTP Gateway** (`app: nssaa-http-gw` label). The AuthorizationPolicy must target the HTTP Gateway pods, not a monolithic NSSAAF label. See `docs/design/01_service_model.md` §5.4 for the architecture overview.
+
 Thiết kế bảo mật cho tất cả Service-Based Interfaces của NSSAAF. Áp dụng TLS 1.3 mandatory, OAuth 2.0 / NRF-based authentication, và mTLS cho inter-NF communication.
 
 ---
@@ -229,7 +231,7 @@ spec:
 ### 4.2 AuthorizationPolicy
 
 ```yaml
-# Who can call NSSAAF?
+# Who can call NSSAAF? (HTTP Gateway)
 apiVersion: security.istio.io/v1beta1
 kind: AuthorizationPolicy
 metadata:
@@ -238,7 +240,7 @@ metadata:
 spec:
   selector:
     matchLabels:
-      app: nssAAF
+      app: nssaa-http-gw  # HTTP Gateway pods, not monolithic app:nssAAF
   action: ALLOW
   rules:
     # AMF can call Nnssaaf_NSSAA

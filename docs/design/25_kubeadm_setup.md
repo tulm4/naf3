@@ -9,6 +9,8 @@ service: Deployment
 
 ## 1. kubeadm Cluster Setup
 
+> **Note (Phase R):** After the 3-component refactor, the Helm chart deploys three separate components: HTTP Gateway (N replicas), Biz Pod (N replicas), and AAA Gateway (2 replicas active-standby). See `docs/design/01_service_model.md` §5.4 for the architecture overview.
+
 ### 1.1 Control Plane
 
 ```bash
@@ -97,6 +99,8 @@ spec:
 
 ## 2. Helm Chart Structure
 
+> **Note (Phase R):** The Helm chart has separate directories for each component: `http-gateway/`, `biz/`, and `aaa-gateway/`. The values.yaml reflects the 3-component deployment model with per-component replica counts.
+
 ```
 nssAAF/
 ├── Chart.yaml
@@ -106,18 +110,27 @@ nssAAF/
 ├── templates/
 │   ├── NOTES.txt
 │   ├── _helpers.tpl
-│   ├── deployment.yaml
-│   ├── service.yaml
-│   ├── service-headless.yaml
-│   ├── hpa.yaml
-│   ├── pdb.yaml
-│   ├── serviceaccount.yaml
-│   ├── secret.yaml
-│   ├── configmap.yaml
-│   ├── horizontalpodautoscaler.yaml
-│   ├── servicemonitor.yaml
-│   ├── poddisruptionbudget.yaml
-│   ├── networkpolicy.yaml
+│   ├── shared/
+│   │   ├── configmap.yaml          # Shared config (logging, metrics)
+│   │   ├── secret.yaml           # Encrypted secrets
+│   │   ├── networkpolicy.yaml    # Shared network policies
+│   │   └── servicemonitor.yaml   # Prometheus scraping
+│   ├── http-gateway/
+│   │   ├── deployment.yaml         # HTTP Gateway (N replicas)
+│   │   ├── service.yaml          # LoadBalancer / ClusterIP
+│   │   ├── hpa.yaml             # HPA
+│   │   └── pdb.yaml             # PodDisruptionBudget
+│   ├── biz/
+│   │   ├── deployment.yaml         # Biz Pod (N replicas, stateless)
+│   │   ├── service.yaml          # ClusterIP for internal SBI
+│   │   ├── hpa.yaml             # HPA
+│   │   └── pdb.yaml
+│   ├── aaa-gateway/
+│   │   ├── deployment.yaml        # AAA Gateway (2 replicas, Recreate)
+│   │   ├── service.yaml         # ClusterIP for biz pods
+│   │   ├── pdb.yaml             # PDB (maxUnavailable=1)
+│   │   ├── keepalived-configmap.yaml  # keepalived VRRP config
+│   │   └── network-attachments.yaml   # Multus CNI CRD
 │   └── tests/
 │       └── test-connection.yaml
 └── .helmignore
@@ -154,29 +167,70 @@ dependencies:
 
 ### 2.2 values.yaml
 
+> **Note (Phase R):** Each component has its own replica count. The AAA Gateway replica count is hard-coded to 2 (active-standby).
+
 ```yaml
-# Default values for NSSAAF
+# Default values for NSSAAF (3-component model)
 
-replicaCount: 3
-
-image:
-  repository: operator/nssAAF
-  tag: "1.0.0"
-  pullPolicy: IfNotPresent
-  pullSecrets: []
-
-imagePullSecrets: []
-
-service:
-  type: ClusterIP
-  port: 8080
-  grpcPort: 9090
+# HTTP Gateway (receives AMF/AUSF SBI traffic)
+httpGateway:
+  replicaCount: 3
+  image:
+    repository: operator/nssaa-http-gw
+    tag: "1.0.0"
+  service:
+    type: LoadBalancer  # Stable FQDN for AMF/AUSF
+    port: 443
   metricsPort: 9091
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "256Mi"
+    limits:
+      cpu: "1"
+      memory: "512Mi"
 
-serviceAccount:
-  create: true
-  name: nssAAF-sa
-  annotations: {}
+# Biz Pod (NSSAAF application logic)
+biz:
+  replicaCount: 5
+  image:
+    repository: operator/nssaa-biz
+    tag: "1.0.0"
+  service:
+    port: 8080  # ClusterIP, internal only
+  metricsPort: 9091
+  resources:
+    requests:
+      cpu: "2"
+      memory: "4Gi"
+    limits:
+      cpu: "4"
+      memory: "8Gi"
+
+# AAA Gateway (raw RADIUS/Diameter sockets, active-standby)
+# HARD LIMIT: Never exceed 2 replicas
+aaaGateway:
+  replicaCount: 2  # hard maximum — 1 active, 1 standby
+  image:
+    repository: operator/nssaa-aaa-gw
+    tag: "1.0.0"
+  service:
+    port: 9090  # ClusterIP for biz pods
+    radiusPort: 1812  # UDP, via Multus CNI
+    diameterPort: 3868  # TCP/SCTP, via Multus CNI
+  metricsPort: 9091
+  keepalived:
+    enabled: true
+    vip: "10.1.100.200"  # Stable IP seen by AAA-S
+    interface: "net0"      # Multus CNI bridge VLAN interface
+    virtualRouterId: 60
+  resources:
+    requests:
+      cpu: "1"
+      memory: "1Gi"
+    limits:
+      cpu: "2"
+      memory: "2Gi"
 
 podAnnotations:
   prometheus.io/scrape: "true"
@@ -341,131 +395,188 @@ internal:
 
 ---
 
-## 3. Deployment Template
+## 3. Deployment Templates
+
+> **Note (Phase R):** Each of the three components has its own Deployment manifest. The monolithic single-binary deployment has been replaced with separate templates for HTTP Gateway, Biz Pod, and AAA Gateway.
+
+### 3.1 HTTP Gateway Deployment
 
 ```yaml
-# templates/deployment.yaml
+# templates/http-gateway/deployment.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "nssAAF.fullname" . }}
+  name: {{ include "nssAAF.httpGateway.fullname" . }}
   labels:
     {{- include "nssAAF.labels" . | nindent 4 }}
-    app.kubernetes.io/component: nssAAF
+    app.kubernetes.io/component: http-gateway
 spec:
-  replicas: {{ .Values.replicaCount }}
+  replicas: {{ .Values.httpGateway.replicaCount }}
   selector:
     matchLabels:
-      {{- include "nssAAF.selectorLabels" . | nindent 6 }}
+      {{- include "nssAAF.httpGateway.selectorLabels" . | nindent 6 }}
   template:
     metadata:
-      annotations:
-        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
-        {{- toYaml .Values.podAnnotations | nindent 8 }}
       labels:
-        {{- include "nssAAF.labels" . | nindent 8 }}
-        app: {{ include "nssAAF.name" . }}
-        app.kubernetes.io/component: nssAAF
-        # No Istio sidecar injection — NSSAAF uses its own HTTP Gateway for TLS termination
+        app.kubernetes.io/component: http-gateway
+        app: nssaa-http-gw
     spec:
-      {{- with .Values.priorityClassName }}
-      priorityClassName: {{ . | quote }}
-      {{- end }}
       serviceAccountName: {{ include "nssAAF.serviceAccountName" . }}
-      securityContext:
-        {{- toYaml .Values.podSecurityContext | nindent 8 }}
-      {{- with .Values.affinity }}
-      affinity:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.nodeSelector }}
-      nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.tolerations }}
-      tolerations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      terminationGracePeriodSeconds: 60
       containers:
-        - name: nssAAF
-          securityContext:
-            {{- toYaml .Values.securityContext | nindent 12 }}
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
+        - name: http-gw
+          image: "{{ .Values.httpGateway.image.repository }}:{{ .Values.httpGateway.image.tag }}"
+          imagePullPolicy: {{ .Values.httpGateway.image.pullPolicy | default "IfNotPresent" }}
           ports:
-            - name: http
-              containerPort: 8080
-              protocol: TCP
-            - name: grpc
-              containerPort: 9090
+            - name: https
+              containerPort: 443
               protocol: TCP
             - name: metrics
-              containerPort: 9091
-              protocol: TCP
-          livenessProbe:
-            httpGet:
-              path: /healthz/live
-              port: 8080
-            initialDelaySeconds: 10
-            periodSeconds: 10
-            failureThreshold: 3
-            timeoutSeconds: 5
-          readinessProbe:
-            httpGet:
-              path: /healthz/ready
-              port: 8080
-            initialDelaySeconds: 5
-            periodSeconds: 5
-            failureThreshold: 2
-            timeoutSeconds: 3
-          startupProbe:
-            httpGet:
-              path: /healthz/startup
-              port: 8080
-            failureThreshold: 30
-            periodSeconds: 10
-          resources:
-            {{- toYaml .Values.resources | nindent 12 }}
+              containerPort: {{ .Values.httpGateway.metricsPort }}
           env:
+            - name: BIND_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: BIZ_SERVICE_URL
+              value: "http://svc-nssaa-biz:8080"
+          resources:
+            {{- toYaml .Values.httpGateway.resources | nindent 12 }}
+```
+
+### 3.2 Biz Pod Deployment
+
+```yaml
+# templates/biz/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nssAAF.biz.fullname" . }}
+  labels:
+    {{- include "nssAAF.labels" . | nindent 4 }}
+    app.kubernetes.io/component: biz
+spec:
+  replicas: {{ .Values.biz.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "nssAAF.biz.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: biz
+        app: nssaa-biz
+    spec:
+      serviceAccountName: {{ include "nssAAF.serviceAccountName" . }}
+      containers:
+        - name: biz
+          image: "{{ .Values.biz.image.repository }}:{{ .Values.biz.image.tag }}"
+          imagePullPolicy: {{ .Values.biz.image.pullPolicy | default "IfNotPresent" }}
+          ports:
+            - name: http
+              containerPort: 8080  # ClusterIP for internal SBI
+            - name: metrics
+              containerPort: {{ .Values.biz.metricsPort }}
+          env:
+            - name: AAA_GATEWAY_URL
+              value: "http://svc-nssaa-aaa:9090"
             - name: POD_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
-            - name: POD_NAMESPACE
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.namespace
+          resources:
+            {{- toYaml .Values.biz.resources | nindent 12 }}
+```
+
+### 3.3 AAA Gateway Deployment (Active-Standby)
+
+```yaml
+# templates/aaa-gateway/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nssAAF.aaaGateway.fullname" . }}
+  labels:
+    {{- include "nssAAF.labels" . | nindent 4 }}
+    app.kubernetes.io/component: aaa-gateway
+spec:
+  # HARD LIMIT: Never exceed 2 replicas. Diameter requires single active connection.
+  replicas: {{ .Values.aaaGateway.replicaCount }}
+  # Recreate strategy prevents two active pods during rolling update
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "nssAAF.aaaGateway.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        # Multus CNI secondary interface for AAA traffic
+        k8s.v1.cni.cncf.io/networks: |
+          [{
+            "name": "aaa-bridge-vlan",
+            "interface": "net0",
+            "ips": ["$(POD_IP)/24"],
+            "gateway": ["10.1.100.1"]
+          }]
+      labels:
+        app.kubernetes.io/component: aaa-gateway
+        app: nssaa-aaa-gw
+    spec:
+      serviceAccountName: {{ include "nssAAF.serviceAccountName" . }}
+      # NET_ADMIN capability required for keepalived to manage VIP
+      securityContext:
+        capabilities:
+          add: ["NET_ADMIN"]
+      containers:
+        - name: aaa-gw
+          image: "{{ .Values.aaaGateway.image.repository }}:{{ .Values.aaaGateway.image.tag }}"
+          imagePullPolicy: {{ .Values.aaaGateway.image.pullPolicy | default "IfNotPresent" }}
+          env:
             - name: POD_IP
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP
+            - name: REDIS_URL
+              value: "{{ .Values.redis.url }}"
+            - name: REDIS_CHANNEL
+              value: "nssaa:aaa-response"
+          ports:
+            - name: http-internal
+              containerPort: 9090
+            - name: radius
+              containerPort: 1812
+              protocol: UDP
+            - name: diameter
+              containerPort: 3868
+              protocol: TCP
+            - name: metrics
+              containerPort: {{ .Values.aaaGateway.metricsPort }}
           volumeMounts:
-            - name: tmp
-              mountPath: /tmp
-            - name: config
-              mountPath: /etc/nssAAF/config
+            - name: keepalived-conf
+              mountPath: /etc/keepalived/keepalived.conf
               readOnly: true
-            - name: secrets
-              mountPath: /etc/nssAAF/secrets
-              readOnly: true
+          resources:
+            {{- toYaml .Values.aaaGateway.resources | nindent 12 }}
       volumes:
-        - name: tmp
-          emptyDir: {}
-        - name: config
+        - name: keepalived-conf
           configMap:
-            name: {{ include "nssAAF.fullname" . }}-config
-        - name: secrets
-          secret:
-            secretName: {{ include "nssAAF.fullname" . }}-secrets
+            name: {{ include "nssAAF.aaaGateway.fullname" . }}-keepalived
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: nssaa-aaa-gw
+              topologyKey: topology.kubernetes.io/zone
 ```
 
 ---
 
 ## 4. GitOps with ArgoCD
 
+> **Note (Phase R):** ArgoCD deploys three separate Helm charts (or one chart with 3-component structure). The sync policy applies to all components.
+
 ```yaml
-# ArgoCD Application
+# ArgoCD Application (multi-component)
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -474,14 +585,18 @@ metadata:
 spec:
   project: network-functions
   source:
-    repoURL: https://github.com/operator/nssAAF-helm.git
+    repoURL: https://github.com/operator/nssAAF-config.git
     targetRevision: main
     path: nssAAF
     helm:
       valueFiles:
         - values-production.yaml
       parameters:
-        - name: image.tag
+        - name: httpGateway.image.tag
+          value: "1.0.0"
+        - name: biz.image.tag
+          value: "1.0.0"
+        - name: aaaGateway.image.tag
           value: "1.0.0"
   destination:
     server: https://kubernetes.default.svc
@@ -507,12 +622,15 @@ spec:
 
 ## 5. Acceptance Criteria
 
+> **Note (Phase R):** The acceptance criteria reflect the 3-component deployment model.
+
 | # | Criteria | Implementation |
 |---|----------|----------------|
 | AC1 | kubeadm cluster với 3 AZ nodes | Multi-AZ node pools |
-| AC2 | HPA: 3-50 replicas, CPU/memory/session metrics | HorizontalPodAutoscaler v2 |
-| AC3 | PDB: maxUnavailable=1 | PodDisruptionBudget |
-| AC4 | Helm chart với production values | values-production.yaml |
-| AC5 | ArgoCD GitOps deployment | ArgoCD Application |
-| AC6 | Prometheus ServiceMonitor | Prometheus Operator CRD |
-| AC7 | 3-component deployment: HTTP GW (N replicas), Biz (N replicas), AAA GW (2 replicas active-standby) | 3 Helm charts, keepalived VIP, Multus CNI |
+| AC2 | HPA for HTTP Gateway (N replicas) and Biz Pod (N replicas) | HorizontalPodAutoscaler v2 |
+| AC3 | HPA for AAA Gateway (2 replicas fixed, Recreate strategy) | Deployment.spec.strategy=Recreate |
+| AC4 | PDB: maxUnavailable=1 per component | PodDisruptionBudget |
+| AC5 | Helm chart với 3-component structure | Separate http-gateway/, biz/, aaa-gateway/ directories |
+| AC6 | ArgoCD GitOps deployment | ArgoCD Application |
+| AC7 | Prometheus ServiceMonitor per component | Separate monitors for HTTP GW, Biz, AAA GW |
+| AC8 | keepalived VIP for AAA Gateway (Multus CNI) | keepalived.conf, network-attachments.yaml |

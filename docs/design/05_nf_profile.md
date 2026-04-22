@@ -10,6 +10,8 @@ operation: NF Registration, NF Discovery, NF Heartbeat
 
 ## 1. Overview
 
+> **Note (Phase R):** After the 3-component refactor, NSSAAF is split into HTTP Gateway, Biz Pod, and AAA Gateway. See `docs/design/01_service_model.md` §5.4 for the architecture overview. NF profile registration (heartbeat, load updates) is performed by Biz Pods, which register the HTTP Gateway's address as the SBI contact point.
+
 NRF (Network Repository Function) là NF trung tâm trong 5G SBA quản lý:
 1. **NF Registration** — NSSAAF đăng ký profile với NRF
 2. **NF Discovery** — NSSAAF discover các NF khác (AMF callback URI, UDM services)
@@ -41,6 +43,8 @@ NSSAAF                      NRF
 ```
 
 ### 2.2 NF Profile Specification
+
+> **Note (Phase R):** The `ipv4Addresses` in NFProfile point to the **HTTP Gateway** pod IPs. The Biz Pod performs NRF registration and heartbeat — it reports the HTTP Gateway's address as the SBI contact point. See `01_service_model.md` §5.4.8 for how HTTP Gateway and Biz Pod coordinate for NRF registration.
 
 ```json
 POST /nnrf-disc/v1/nf-instances

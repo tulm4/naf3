@@ -10,6 +10,8 @@ operation: N/A
 
 ## 1. Overview
 
+> **Note (Phase R):** After the 3-component refactor, NSSAAF is split into HTTP Gateway, Biz Pod, and AAA Gateway. The NRM reflects the SBI-facing view (HTTP Gateway address as `sBIFQDN` and `ep-n58`/`ep-n59`). The AAA Gateway configuration (VIP, ports) is represented in `customInfo`. See `docs/design/01_service_model.md` §5.4 for the architecture overview.
+
 Thiết kế Network Resource Model (NRM) cho NSSAAF theo 3GPP TS 28.541 và ETSI NFV standards. FCAPS framework quản lý Fault, Configuration, Accounting, Performance, và Security.
 
 ---

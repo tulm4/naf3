@@ -9,6 +9,8 @@ service: Database HA
 
 ## 1. Overview
 
+> **Note (Phase R):** After the 3-component refactor, only **Biz Pods** access the database directly. The HTTP Gateway has no database access (it routes requests to Biz Pods). The AAA Gateway uses Redis for session correlation, not PostgreSQL. See `docs/design/01_service_model.md` §5.4 for the architecture overview.
+
 Thiết kế PostgreSQL High Availability với Patroni cho NSSAAF — đảm bảo:
 - **RPO = 0** cho synchronous replication (sync standby)
 - **RTO < 30s** cho automatic failover

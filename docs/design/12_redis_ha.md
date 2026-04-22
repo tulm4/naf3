@@ -9,6 +9,8 @@ service: Cache HA
 
 ## 1. Overview
 
+> **Note (Phase R):** After the 3-component refactor, Redis is used for **cross-component session correlation** in addition to session caching. The AAA Gateway writes session correlation keys (`nssaa:session:{sessionId}`) to Redis; Biz Pods subscribe to `nssaa:aaa-response` pub/sub to receive AAA responses. See `docs/design/01_service_model.md` §5.4.6 for the internal communication design.
+
 Thiết kế Redis Cluster cho NSSAAF session caching và rate limiting — đảm bảo:
 - **Sub-millisecond latency** (<1ms P99)
 - **Automatic failover** với cluster mode
@@ -296,6 +298,87 @@ func (r *RedisCluster) ReleaseLock(ctx context.Context, authCtxId string) error 
 
     _, err := r.client.Eval(ctx, lua, []string{key}, os.Getenv("POD_NAME")).Result()
     return err
+}
+```
+
+### 4.5 Cross-Component Session Correlation (Phase R)
+
+> **Note (Phase R):** These keys are used in the 3-component model for communication between AAA Gateway and Biz Pods. See `01_service_model.md` §5.4.6.
+
+In the 3-component model, the AAA Gateway needs to correlate raw RADIUS/Diameter transactions with Biz Pod sessions, and Biz Pods need to receive AAA responses asynchronously:
+
+```go
+// 4.5.1 Session Correlation (written by AAA Gateway, read by Biz Pods)
+// Key: nssaa:session:{transactionId}  (transactionId from RADIUS/Diameter)
+// Type: Hash
+// TTL: 300s (5 minutes)
+// Written by: AAA Gateway (before forwarding to AAA-S)
+// Read by: Biz Pods (via pub/sub event)
+
+func (r *RedisCluster) SetSessionCorrelation(ctx context.Context, txId, authCtxId string, configId string) error {
+    key := fmt.Sprintf("nssaa:session:%s", txId)
+    pipe := r.client.Pipeline()
+    pipe.HSet(ctx, key,
+        "authCtxId", authCtxId,
+        "configId", configId,
+        "createdAt", time.Now().Format(time.RFC3339),
+    )
+    pipe.Expire(ctx, key, 5*time.Minute)
+    _, err := pipe.Exec(ctx)
+    return err
+}
+
+// 4.5.2 Biz Pod Registry (written/read by Biz Pods + HTTP Gateway)
+// Key: nssaa:pods
+// Type: Set
+// TTL: none (persistent, updated on heartbeat)
+// Written by: Biz Pods (on startup, on heartbeat)
+// Used by: AAA Gateway (to know which pods to send server-initiated messages to)
+
+func (r *RedisCluster) RegisterBizPod(ctx context.Context, podName, podIP string) error {
+    key := "nssaa:pods"
+    member := fmt.Sprintf("%s:%s", podName, podIP)
+    pipe := r.client.Pipeline()
+    pipe.SAdd(ctx, key, member)
+    // Expire old entries that haven't heartbeat'd in 2 minutes
+    pipe.ZAdd(ctx, "nssaa:pods:heartbeat", redis.Z{
+        Score:  float64(time.Now().Unix()),
+        Member: member,
+    })
+    _, err := pipe.Exec(ctx)
+    return err
+}
+
+// 4.5.3 AAA Response Pub/Sub (published by AAA Gateway, subscribed by Biz Pods)
+// Channel: nssaa:aaa-response
+// Published by: AAA Gateway (on receiving response from AAA-S)
+// Subscribed by: All Biz Pods (each discards events not matching its in-flight sessions)
+
+func (r *RedisCluster) PublishAAAResponse(ctx context.Context, txId string, rawPacket []byte) error {
+    channel := "nssaa:aaa-response"
+    event := map[string]interface{}{
+        "txId":      txId,
+        "rawPacket": rawPacket,
+        "receivedAt": time.Now().Format(time.RFC3339Nano),
+    }
+    data, _ := json.Marshal(event)
+    return r.client.Publish(ctx, channel, data).Err()
+}
+
+func (r *RedisCluster) SubscribeAAAResponses(ctx context.Context) *redis.PubSub {
+    return r.client.Subscribe(ctx, "nssaa:aaa-response")
+}
+
+// 4.5.4 Server-Initiated Queue (written by AAA Gateway, read by Biz Pods)
+// Key: nssaa:server-initiated:{podName}
+// Type: List (FIFO queue)
+// Written by: AAA Gateway (on receiving server-initiated request from AAA-S)
+// Read by: Target Biz Pod (dequeues via BLPOP)
+
+func (r *RedisCluster) EnqueueServerInitiated(ctx context.Context, podName string, event *ServerInitiatedEvent) error {
+    key := fmt.Sprintf("nssaa:server-initiated:%s", podName)
+    data, _ := json.Marshal(event)
+    return r.client.RPush(ctx, key, data).Err()
 }
 ```
 
