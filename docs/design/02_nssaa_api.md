@@ -118,7 +118,7 @@ POST /nnssaaf-nssaa/v1/slice-authentications
        - Auth-Request-Type: 1 (AUTHORIZE_AUTHENTICATE)
        - User-Name: gpsi
        - 3GPP-S-NSSAI AVP (code 310): sst + sd
-       - EAP-Payload AVP (code 380): eapIdRsp bytes
+       - EAP-Payload AVP (code 209): eapIdRsp bytes
 11. Send to AAA-S (direct or via AAA-P proxy):
     - Apply retry with exponential backoff: 0ms, 100ms, 200ms
     - After 3 retries exhausted → 504 AAA_TIMEOUT

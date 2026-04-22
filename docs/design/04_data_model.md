@@ -648,10 +648,56 @@ func DeserializeSession(data []byte, authCtxId string) (*EapSessionState, error)
 
 ## 5. Redis Cache Architecture
 
+> **Note (Phase R):** In the 3-component model, Redis additionally serves as the cross-component coordination layer. See `internal/proto/biz_callback.go` for the session correlation key definitions.
+
 ### 5.1 Key Schema
 
 ```
 Namespace: nssaa:{environment}
+
+### 5.1.1 Cross-Component Session Correlation (Phase R)
+
+The following keys coordinate the 3-component model (Biz Pods ↔ AAA Gateway ↔ AAA-S) via Redis:
+
+```
+nssaa:session:{sessionId}
+  Type: String (JSON)
+  TTL: 600s (10 minutes) = proto.DefaultPayloadTTL
+  Value: SessionCorrEntry struct (JSON)
+  Purpose: Correlates a RADIUS/Diameter session ID with the NSSAAF authCtxId
+  Written by: AAA Gateway before forwarding to AAA-S
+  Read by: AAA Gateway on response arrival or server-initiated routing
+  Fields:
+    - authCtxId: string  // NSSAAF auth context ID
+    - podId: string       // Biz Pod hostname (observability only; NOT used for routing)
+    - sst: uint8          // S-NSSAI SST
+    - sd: string          // S-NSSAI SD
+    - createdAt: int64    // Unix timestamp
+  Source: internal/proto/biz_callback.go (SessionCorrEntry)
+
+nssaa:pods
+  Type: Set
+  TTL: None (managed by heartbeat)
+  Members: Live Biz Pod hostnames
+  Purpose: Track which Biz Pods are live (observability / future load balancing)
+  Updated by: Biz Pod heartbeat (SADD every 30s), cleaned up on shutdown (SREM)
+  Source: internal/proto/biz_callback.go (PodsKey)
+
+nssaa:aaa-response
+  Type: Pub/Sub channel
+  TTL: N/A
+  Purpose: Cross-component response routing
+  Publisher: AAA Gateway (when response arrives from AAA-S)
+  Subscribers: All Biz Pods (each discards non-matching events)
+  Message: AaaResponseEvent struct (JSON)
+    - version: string
+    - sessionId: string
+    - authCtxId: string
+    - payload: []byte  // raw response from AAA-S
+  Source: internal/proto/biz_callback.go (AaaResponseChannel, AaaResponseEvent)
+```
+
+### 5.1.2 Session Hot Cache (Phase 3)
 
 {nssaa}:session:{authCtxId}
   Type: Hash
@@ -665,6 +711,8 @@ Namespace: nssaa:{environment}
     - updatedAt: timestamp
   Purpose: Hot cache for active sessions
 
+### 5.1.3 AIW Session Hot Cache
+
 {nssaa}:aiw:session:{authCtxId}
   Type: Hash
   TTL: 300s (5 min)
@@ -677,6 +725,8 @@ Namespace: nssaa:{environment}
     - pvsInfoSize: int        -- number of pvsInfo entries
     - updatedAt: timestamp
   Purpose: Hot cache for active AIW sessions
+
+### 5.1.4 Operational Keys
 
 {nssaa}:idempotency:{authCtxId}:{msgHash}
   Type: String (JSON)
