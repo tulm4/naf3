@@ -83,7 +83,12 @@ func (h *DiameterHandler) serveSCTP(listener net.Listener) {
 
 // HandleConnection processes an incoming Diameter connection from AAA-S.
 // It reads messages, determines the type, and routes to the appropriate handler.
-// Spec: RFC 6733 App H (SCTP), Command Code 280 (DER/DEA), Command Code 274 (ASR/ASA).
+// Spec: RFC 6733 App H (SCTP), RFC 4072 (Diameter EAP)
+// Command Code 268 = DER/DEA (distinguished by R-bit)
+// Command Code 274 = Abort-Session-Request (ASR) / Abort-Session-Answer (ASA)
+// Route based on Command Code.
+// Note: go-diameter/v4 is used in internal/diameter/client.go (client-initiated path NSSAAF→AAA-S).
+// This server-side handler uses manual header parsing — no go-diameter/v4 import needed.
 func (h *DiameterHandler) HandleConnection(conn net.Conn) {
 	defer conn.Close()
 	h.logger.Info("Diameter connection received", "remote", conn.RemoteAddr())
@@ -127,10 +132,10 @@ func (h *DiameterHandler) HandleConnection(conn net.Conn) {
 		}
 
 		// Route based on Command Code
-		// 280 = Experimental-Result (DER/DEA — client-initiated)
+		// 268 = DER/DEA (RFC 4072 — distinguished by R-bit in header flags)
 		// 274 = Abort-Session-Request (ASR — server-initiated)
 		switch commandCode {
-		case 280:
+		case 268:
 			// Client-initiated: response to our DER
 			sessionID := extractDiameterSessionID(header)
 			h.publishResponse(sessionID, header)

@@ -615,15 +615,15 @@ func (h *DiameterHandler) Listen(ctx context.Context, addr, protocol string) err
 }
 
 // HandleConnection processes an incoming Diameter connection from AAA-S.
-func (h *DiameterHandler) HandleConnection(conn net.Conn) {
-    // Use go-diameter/v4 to decode message header and determine message type.
-    // Command Code 280 = Experimental-Result (used for DER/DEA)
-    // Command Code 274 = Abort-Session-Request (ASR) / Abort-Session-Answer (ASA)
-    // Route based on Command Code.
-}
+// Spec: RFC 4072 (Diameter EAP), RFC 6733 App H (SCTP)
+// Command Code 268 = DER/DEA (distinguished by R-bit in header flags)
+// Command Code 274 = ASR/ASA (Abort-Session-Request/Answer)
+// Route based on Command Code.
+// Note: The server-side handler uses manual header parsing (no go-diameter/v4 import).
+// go-diameter/v4 is used in internal/diameter/client.go (client-initiated path).
 ```
 
-**Note on SCTP:** The standard library `net.Listen("sctp", addr)` requires the `net` package to be built with SCTP support. SCTP support is available in Linux kernels since 2.6.27 and Go 1.17+. If SCTP is not available at runtime, the server logs a fatal error and exits. The `go-diameter/v4` library handles the Diameter message framing on top of the SCTP byte stream — no application-level changes needed beyond the listener type.
+**Note on SCTP:** The standard library `net.Listen("sctp", addr)` requires the `net` package to be built with SCTP support. SCTP support is available in Linux kernels since 2.6.27 and Go 1.17+. If SCTP is not available at runtime, the server falls back to TCP (see implementation in `diameter_handler.go` line 34-47). Diameter message framing on SCTP is handled by the same manual header-parsing code used for TCP — no go-diameter/v4 needed on the server side.
 
 **Verify SCTP availability** at startup:
 ```go
