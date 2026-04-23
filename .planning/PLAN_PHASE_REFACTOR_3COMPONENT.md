@@ -615,15 +615,19 @@ func (h *DiameterHandler) Listen(ctx context.Context, addr, protocol string) err
 }
 
 // HandleConnection processes an incoming Diameter connection from AAA-S.
-// Spec: RFC 4072 (Diameter EAP), RFC 6733 App H (SCTP)
+// Spec: RFC 4072 (Diameter EAP), RFC 6733 §5.3 (CER/CEA), RFC 6733 §5.5 (DWR/DWA)
 // Command Code 268 = DER/DEA (distinguished by R-bit in header flags)
 // Command Code 274 = ASR/ASA (Abort-Session-Request/Answer)
+// Command Code 280 = DWR/DWA (Device-Watchdog — RFC 6733 §5.5)
 // Route based on Command Code.
-// Note: The server-side handler uses manual header parsing (no go-diameter/v4 import).
+// Note: CER/CEA handshake requires go-diameter/v4/sm state machine on server side.
+// After CER/CEA completes, manual parsing is safe for application messages.
 // go-diameter/v4 is used in internal/diameter/client.go (client-initiated path).
 ```
 
 **Note on CER/CEA:** RFC 6733 §5.3 mandates that **both peers** MUST exchange CER/CEA when establishing a transport connection — regardless of who initiated the TCP/SCTP socket. This means the server-side listener (`HandleConnection`) must also handle CER/CEA using `go-diameter/v4/sm` state machine, not manual parsing. Manual parsing is only safe for messages **after** the handshake completes (e.g. ASR, DEA). Both sides are symmetric peers in the CER/CEA exchange.
+
+**Note on DWR/DWA:** RFC 6733 §5.5 mandates that **both peers** MUST respond to DWR. The server-side handler (`HandleConnection`) MUST handle command code **280** (DWR/DWA). If AAA-S sends DWR, the handler must respond with DWA (same command code 280, R-bit cleared). go-diameter/v4's `sm.Listener` handles this automatically. If using manual parsing, the handler must explicitly send DWA on DWR receipt. DWR is sent when no traffic has been exchanged between peers (typically 30s interval per RFC 6733 §5.5.3).
 
 **Note on SCTP:** The standard library `net.Listen("sctp", addr)` requires the `net` package to be built with SCTP support. SCTP support is available in Linux kernels since 2.6.27 and Go 1.17+. If SCTP is not available at runtime, the server falls back to TCP (see implementation in `diameter_handler.go` line 34-47). Diameter message framing on SCTP is handled by the same manual header-parsing code used for TCP — no go-diameter/v4 needed on the server side for post-handshake message reads.
 
@@ -636,7 +640,7 @@ if err != nil {
 }
 ```
 
-> **Risk (Deferred):** The Diameter client-initiated path (`Forward()`) requires the AAA Gateway to maintain a persistent connection to AAA-S with CER/CEA handshake and DWR/DWA watchdog. See §2.3.5 for the full design and implementation plan.
+> **Risk (Deferred):** The Diameter client-initiated path (`Forward()`) requires the AAA Gateway to maintain a persistent connection to AAA-S with CER/CEA handshake and DWR/DWA watchdog. Additionally, the **server-side listener** (`HandleConnection`) also lacks DWR/DWA handling — RFC 6733 §5.5 requires both peers to respond to DWR. See §2.3.5 for client-side design and §2.3.3 for server-side requirements.
 
 #### 2.3.4 `redis.go`
 
