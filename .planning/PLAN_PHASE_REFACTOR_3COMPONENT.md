@@ -589,47 +589,49 @@ func (h *RadiusHandler) HandlePacket(conn *net.UDPConn, addr *net.UDPAddr, raw [
 
 #### 2.3.3 `diameter_handler.go`
 
-Implement Diameter listener supporting both TCP and SCTP, selected by `aaaGateway.diameterProtocol` config (`"tcp"` | `"sctp"`). The listener starts the protocol-appropriate handler, parses CER/CEA handshake via `go-diameter/v4` state machine, then streams messages. Distinguish client-initiated (Diameter-EAR/EAP) from server-initiated (ASR).
+Implement Diameter listener using `go-diameter/v4/sm.StateMachine` for RFC 6733 §5.3 compliance. Each incoming connection is wrapped via `diam.NewConn()`, which hands it to the state machine. The state machine handles CER/CEA and DWR/DWA internally — registered handlers only fire after handshake. Supports TCP and SCTP (selected by config).
+
+**CER/CEA:** The `sm.StateMachine` is symmetric — it handles both client-initiated and server-initiated handshakes. The AAA Gateway acts as a **Diameter server** (responds to CER with CEA) when AAA-S initiates the connection.
 
 ```go
-// Listen starts the Diameter server on the configured protocol (TCP or SCTP).
-// Spec: PHASE §2.3, §6.3; RFC 6733 App H (SCTP considerations)
-func (h *DiameterHandler) Listen(ctx context.Context, addr, protocol string) error {
-    switch protocol {
-    case "tcp":
-        listener, err := net.Listen("tcp", addr)
-        if err != nil {
-            return fmt.Errorf("diameter tcp listen: %w", err)
-        }
-        go h.serveTCP(listener)
-    case "sctp":
-        listener, err := net.Listen("sctp", addr)
-        if err != nil {
-            return fmt.Errorf("diameter sctp listen: %w", err)
-        }
-        go h.serveSCTP(listener)
-    default:
-        return fmt.Errorf("unsupported diameter protocol: %s (expected tcp or sctp)", protocol)
-    }
-    return nil
-}
+// NewDiameterHandler creates a handler with go-diameter/v4 state machine.
+// The state machine handles CER/CEA and DWR/DWA internally per RFC 6733 §5.3, §5.5.
+func NewDiameterHandler(
+    logger *slog.Logger,
+    publishResponse func(sessionID string, raw []byte),
+    forwardToBiz func(ctx context.Context, sessionID, transportType, messageType string, raw []byte),
+    version, bizURL string,
+    httpClient *http.Client,
+    diamForwarder *diamForwarder,
+    originHost, originRealm string, // AAA Gateway's identity for CEA
+) *DiameterHandler
 
-// HandleConnection processes an incoming Diameter connection from AAA-S.
-// Spec: RFC 4072 (Diameter EAP), RFC 6733 §5.3 (CER/CEA), RFC 6733 §5.5 (DWR/DWA)
-// Command Code 268 = DER/DEA (distinguished by R-bit in header flags)
-// Command Code 274 = ASR/ASA (Abort-Session-Request/Answer)
-// Command Code 280 = DWR/DWA (Device-Watchdog — RFC 6733 §5.5)
-// Route based on Command Code.
-// Note: CER/CEA handshake requires go-diameter/v4/sm state machine on server side.
-// After CER/CEA completes, manual parsing is safe for application messages.
-// go-diameter/v4 is used in internal/diameter/client.go (client-initiated path).
+// Listen starts the Diameter server (TCP or SCTP).
+// Each connection is wrapped with diam.NewConn() + sm.StateMachine.
+func (h *DiameterHandler) Listen(ctx context.Context, addr, protocol string) error
+
+// HandleConnection wraps net.Conn with diam.NewConn(handler=sm.StateMachine).
+// The sm.StateMachine handles CER/CEA and DWR/DWA internally.
+// After handshake, registered handlers (ASR, RAR, STR) are called.
+// ASR: send ASA to AAA-S, then forwardToBiz("ASR", raw).
+// RAR: send RAA to AAA-S, then forwardToBiz("RAR", raw).
+// STR: send STA to AAA-S.
+// DWR/DWA: handled by sm.StateMachine internally (no manual code needed).
 ```
 
-**Note on CER/CEA:** RFC 6733 §5.3 mandates that **both peers** MUST exchange CER/CEA when establishing a transport connection — regardless of who initiated the TCP/SCTP socket. This means the server-side listener (`HandleConnection`) must also handle CER/CEA using `go-diameter/v4/sm` state machine, not manual parsing. Manual parsing is only safe for messages **after** the handshake completes (e.g. ASR, DEA). Both sides are symmetric peers in the CER/CEA exchange.
+**CER/CEA:** Handled by `sm.StateMachine` automatically. The state machine validates:
+- Common applications (App Id intersection)
+- Origin-Host and Origin-Realm
 
-**Note on DWR/DWA:** RFC 6733 §5.5 mandates that **both peers** MUST respond to DWR. The server-side handler (`HandleConnection`) MUST handle command code **280** (DWR/DWA). If AAA-S sends DWR, the handler must respond with DWA (same command code 280, R-bit cleared). go-diameter/v4's `sm.Listener` handles this automatically. If using manual parsing, the handler must explicitly send DWA on DWR receipt. DWR is sent when no traffic has been exchanged between peers (typically 30s interval per RFC 6733 §5.5.3).
+**DWR/DWA:** Handled by `sm.StateMachine` automatically. No manual DWR/DWA handling needed in application code.
 
-**Note on SCTP:** The standard library `net.Listen("sctp", addr)` requires the `net` package to be built with SCTP support. SCTP support is available in Linux kernels since 2.6.27 and Go 1.17+. If SCTP is not available at runtime, the server falls back to TCP (see implementation in `diameter_handler.go` line 34-47). Diameter message framing on SCTP is handled by the same manual header-parsing code used for TCP — no go-diameter/v4 needed on the server side for post-handshake message reads.
+**After handshake:** `sm.StateMachine` dispatches ASR/ASA/RAR/RAA/STR/STA to registered handlers. ASR triggers `forwardToBiz("DIAMETER", "ASR", raw)` — forward to Biz Pod and send ASA back to AAA-S.
+
+**Note on CER/CEA:** RFC 6733 §5.3 mandates that **both peers** MUST exchange CER/CEA when establishing a transport connection — regardless of who initiated the TCP/SCTP socket. The server-side listener uses `go-diameter/v4/sm.StateMachine` via `diam.NewConn()` to handle CER/CEA. Both sides are symmetric peers in the CER/CEA exchange — the state machine is symmetric.
+
+**Note on DWR/DWA:** RFC 6733 §5.5 mandates that **both peers** MUST respond to DWR. The `sm.StateMachine` handles DWR/DWA automatically — no manual code needed. The state machine validates DWR and sends DWA back.
+
+**Note on SCTP:** The standard library `net.Listen("sctp", addr)` requires SCTP support in the kernel. If SCTP is not available, it falls back to TCP. The same `diam.NewConn()` + `sm.StateMachine` pattern works for both TCP and SCTP connections.
 
 **Verify SCTP availability** at startup:
 ```go

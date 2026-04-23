@@ -1,20 +1,36 @@
-// Package gateway provides the AAA Gateway component.
+// Package gateway provides the AAA Gateway component for the NSSAAF 3-component architecture.
+// It handles both client-initiated (Biz Pod → AAA-S) and server-initiated (AAA-S → Biz Pod) flows.
+// Spec: PHASE §2.3, §6.3; RFC 2865, RFC 3579, RFC 6733, RFC 4072, TS 29.561 Ch.16/17
 package gateway
 
 import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"time"
+
+	"github.com/fiorix/go-diameter/v4/diam"
+	"github.com/fiorix/go-diameter/v4/diam/avp"
+	"github.com/fiorix/go-diameter/v4/diam/datatype"
+	"github.com/fiorix/go-diameter/v4/diam/dict"
+	"github.com/fiorix/go-diameter/v4/diam/sm"
+	"github.com/fiorix/go-diameter/v4/diam/sm/smpeer"
 )
 
-// DiameterHandler handles Diameter protocol traffic.
-// It handles the SERVER-INITIATED path (AAA-S → NSSAAF).
-// The client-initiated path (NSSAAF → AAA-S) is handled by diamForwarder.
+// DiameterHandler handles Diameter protocol traffic on the SERVER-INITIATED path
+// (AAA-S → NSSAAF). The client-initiated path (NSSAAF → AAA-S) is handled by
+// diamForwarder.
+//
+// It uses go-diameter/v4/sm.StateMachine for RFC 6733 §5.3 compliance:
+// - CER/CEA handshake on every incoming connection (both sides MUST exchange)
+// - DWR/DWA watchdog (RFC 6733 §5.5)
+// - ASR (Abort-Session-Request) routing to Biz Pod after handshake
+//
+// The sm.StateMachine wraps each raw net.Conn via diam.NewConn(), then manages
+// CER/CEA internally. Registered handlers only fire after the handshake succeeds.
 type DiameterHandler struct {
 	logger          *slog.Logger
 	publishResponse func(sessionID string, raw []byte)
@@ -22,11 +38,60 @@ type DiameterHandler struct {
 	version        string
 	bizURL         string
 	httpClient     *http.Client
-	diamForwarder  *diamForwarder // client-initiated forwarder (optional, for Forward delegation)
+	diamForwarder  *diamForwarder // client-initiated forwarder
+
+	// sm is the state machine for server-side CER/CEA handling.
+	// Created in NewDiameterHandler with the AAA Gateway's identity.
+	sm *sm.StateMachine
+}
+
+// NewDiameterHandler creates a DiameterHandler with a go-diameter/v4 state machine.
+func NewDiameterHandler(
+	logger *slog.Logger,
+	publishResponse func(sessionID string, raw []byte),
+	forwardToBiz func(ctx context.Context, sessionID string, transportType string, messageType string, raw []byte),
+	version, bizURL string,
+	httpClient *http.Client,
+	diamForwarder *diamForwarder,
+	originHost, originRealm string,
+) *DiameterHandler {
+	settings := &sm.Settings{
+		OriginHost:  datatype.DiameterIdentity(originHost),
+		OriginRealm: datatype.DiameterIdentity(originRealm),
+		VendorID:    datatype.Unsigned32(VendorID3GPP),
+		ProductName: "NSSAAF-GW",
+	}
+
+	machine := sm.New(settings)
+
+	h := &DiameterHandler{
+		logger:          logger,
+		publishResponse: publishResponse,
+		forwardToBiz:   forwardToBiz,
+		version:        version,
+		bizURL:         bizURL,
+		httpClient:     httpClient,
+		diamForwarder:  diamForwarder,
+		sm:             machine,
+	}
+
+	// Register ASR handler. It only fires AFTER the peer passes CER/CEA
+	// (sm.StateMachine wraps it with handshakeOK guard).
+	h.sm.Handle("ASR", h.handleASR())
+	h.sm.Handle("ASA", h.handleASA())
+	h.sm.Handle("RAR", h.handleRAR())
+	h.sm.Handle("RAA", h.handleRAA())
+	h.sm.Handle("STR", h.handleSTR())
+	h.sm.Handle("STA", h.handleSTA())
+
+	return h
 }
 
 // Listen starts the Diameter server on the configured protocol (TCP or SCTP).
-// Spec: PHASE §2.3, §6.3; RFC 6733 App H (SCTP considerations)
+// Each incoming connection is wrapped with diam.NewConn() and handed to the
+// sm.StateMachine for CER/CEA handling. After handshake, the StateMachine
+// dispatches ASR/ASA/RAR/RAA/STR/STA to registered handlers.
+// Spec: PHASE §2.3, §6.3; RFC 6733 §5.3 (CER/CEA — both peers MUST exchange)
 func (h *DiameterHandler) Listen(ctx context.Context, addr, protocol string) error {
 	switch protocol {
 	case "tcp":
@@ -55,7 +120,7 @@ func (h *DiameterHandler) Listen(ctx context.Context, addr, protocol string) err
 	return nil
 }
 
-// serveTCP handles incoming Diameter TCP connections.
+// serveTCP accepts incoming TCP connections and handles each with sm.StateMachine.
 func (h *DiameterHandler) serveTCP(listener net.Listener) {
 	defer listener.Close()
 	h.logger.Info("Diameter TCP listener started", "addr", listener.Addr())
@@ -70,7 +135,7 @@ func (h *DiameterHandler) serveTCP(listener net.Listener) {
 	}
 }
 
-// serveSCTP handles incoming Diameter SCTP connections.
+// serveSCTP accepts incoming SCTP connections and handles each with sm.StateMachine.
 func (h *DiameterHandler) serveSCTP(listener net.Listener) {
 	defer listener.Close()
 	h.logger.Info("Diameter SCTP listener started", "addr", listener.Addr())
@@ -85,235 +150,208 @@ func (h *DiameterHandler) serveSCTP(listener net.Listener) {
 	}
 }
 
-// HandleConnection processes an incoming Diameter connection from AAA-S.
-// It reads messages, determines the type, and routes to the appropriate handler.
-// Spec: RFC 6733 App H (SCTP), RFC 4072 (Diameter EAP)
-// Command Code 268 = DER/DEA (distinguished by R-bit)
-// Command Code 274 = Abort-Session-Request (ASR) / Abort-Session-Answer (ASA)
-// Route based on Command Code.
-// Note: go-diameter/v4/sm is used for CER/CEA handshake (RFC 6733 §5.3: both peers
-// MUST exchange). After handshake, manual header parsing is sufficient for ASR/DEA.
+// HandleConnection wraps a raw net.Conn with diam.NewConn() and hands it to the
+// sm.StateMachine. The StateMachine handles CER/CEA and DWR/DWA internally.
+// After the handshake succeeds, registered handlers (ASR, ASA, RAR, RAA, STR, STA)
+// receive messages. ASR is forwarded to the Biz Pod via forwardToBiz.
+// Spec: RFC 6733 §5.3 (CER/CEA — both peers MUST exchange), §5.5 (DWR/DWA)
 func (h *DiameterHandler) HandleConnection(conn net.Conn) {
 	defer conn.Close()
-	h.logger.Info("Diameter connection received", "remote", conn.RemoteAddr())
 
-	for {
-		// Diameter messages have a 20-byte header:
-		// version(1) + flags(1) + command-code(3) + application-id(4) + hop-by-hop(4) + end-to-end(4) + length(3)
-		header := make([]byte, 20)
-		if _, err := io.ReadFull(conn, header); err != nil {
-			if err != io.EOF {
-				h.logger.Error("Diameter read error", "error", err)
-			}
-			return
-		}
-
-		// Parse header fields
-		version := header[0]
-		if version != 1 {
-			h.logger.Warn("unsupported Diameter version", "version", version)
-			return
-		}
-
-		commandCode := binary.BigEndian.Uint32(header[1:4]) >> 8 // top 3 bytes
-		_length := binary.BigEndian.Uint32([]byte{0, header[16], header[17], header[18]})
-		length := int(_length)
-
-		if length < 20 {
-			h.logger.Warn("Diameter message too short", "length", length)
-			return
-		}
-
-		// Read remaining bytes
-		remaining := length - 20
-		if remaining > 0 {
-			msg := make([]byte, remaining)
-			if _, err := io.ReadFull(conn, msg); err != nil {
-				h.logger.Error("Diameter read body error", "error", err)
-				return
-			}
-			header = append(header, msg...)
-		}
-
-		// Route based on Command Code
-		// 268 = DER/DEA (RFC 4072 — distinguished by R-bit in header flags)
-		// 274 = ASR (Abort-Session-Request — server-initiated)
-		// 280 = DWR/DWA (Device-Watchdog — RFC 6733 §5.5, App Id = 0)
-		switch commandCode {
-		case 268:
-			// Client-initiated: response to our DER
-			sessionID := extractDiameterSessionID(header)
-			h.publishResponse(sessionID, header)
-		case 274:
-			// Server-initiated: ASR from AAA-S
-			h.handleServerInitiated(header)
-		case 280:
-			// DWR (R-bit set) or DWA (R-bit cleared) — RFC 6733 §5.5
-			h.handleWatchdog(conn, header)
-		default:
-			h.logger.Debug("Diameter unhandled command code",
-				"command_code", commandCode,
-				"length", length)
-		}
-	}
-}
-
-// handleWatchdog handles DWR/DWA messages per RFC 6733 §5.5.
-// DWR is sent when no traffic exchanged; the peer MUST respond with DWA.
-func (h *DiameterHandler) handleWatchdog(conn net.Conn, raw []byte) {
-	// Check R-bit in header flags to distinguish DWR from DWA.
-	// DWR: R-bit = 1 (is a request). DWA: R-bit = 0 (is an answer).
-	rBitSet := (raw[2] & 0x80) != 0
-
-	if rBitSet {
-		// Received DWR — MUST respond with DWA per RFC 6733 §5.6 state machine.
-		// "R-Rcv-DWR → Process-DWR, R-Snd-DWA"
-		h.logger.Debug("Diameter DWR received, sending DWA")
-		if err := h.sendDWA(conn, raw); err != nil {
-			h.logger.Error("failed to send DWA", "error", err)
-		}
-	} else {
-		// Received DWA — client-initiated path handles this via pending map
-		// (go-diameter sm.Client processes it automatically).
-		h.logger.Debug("Diameter DWA received (server-initiated path)")
-	}
-}
-
-// sendDWA constructs and sends a Device-Watchdog-Answer in response to DWR.
-// Spec: RFC 6733 §5.5.2
-// Message format: Diameter Header (280, R-bit cleared) + Result-Code + Origin-Host + Origin-Realm
-func (h *DiameterHandler) sendDWA(conn net.Conn, dwr []byte) error {
-	// Extract Origin-Host and Origin-Realm from DWR to echo back in DWA.
-	var originHost, originRealm []byte
-	pos := 20
-	for pos+8 <= len(dwr) {
-		avpCode := binary.BigEndian.Uint32([]byte{0, dwr[pos], dwr[pos+1], dwr[pos+2]})
-		avpLen := int(binary.BigEndian.Uint32([]byte{0, dwr[pos+4], dwr[pos+5], dwr[pos+6]}))
-		if avpLen < 8 || pos+avpLen > len(dwr) {
-			break
-		}
-		// AVP flags byte is at dwr[pos+3]
-		vendorFlag := (dwr[pos+3] & 0x80) != 0
-		vendorID := uint32(0)
-		dataStart := 8
-		if vendorFlag {
-			vendorID = binary.BigEndian.Uint32([]byte{0, dwr[pos+8], dwr[pos+9], dwr[pos+10], dwr[pos+11]})
-			dataStart = 12
-		}
-		_ = vendorID
-
-		dataLen := avpLen - dataStart
-		value := dwr[pos+dataStart : pos+avpLen]
-		if avpCode == 264 && !vendorFlag { // Origin-Host (code 264, no vendor)
-			originHost = make([]byte, dataLen)
-			copy(originHost, value)
-		} else if avpCode == 296 && !vendorFlag { // Origin-Realm (code 296, no vendor)
-			originRealm = make([]byte, dataLen)
-			copy(originRealm, value)
-		}
-		pos += avpLen
-	}
-
-	// Build DWA: 20-byte header + Result-Code(1) + Origin-Host(264) + Origin-Realm(296) + Origin-State-Id(278)
-	// Result-Code = DIAMETER_OK (1)
-	resultCode := []byte{0, 0, 0, 1}
-	originStateID := []byte{0, 0, 0, 1} // Origin-State-Id = 1
-
-	// Calculate total length
-	totalLen := 20 + 8+4 + 8+len(originHost) + 8+len(originRealm) + 8+4
-	// Pad to 8-byte boundary
-	pad := (8 - (totalLen % 8)) % 8
-	totalLen += pad
-
-	// Build message
-	buf := make([]byte, 20)
-	buf[0] = 1                                          // version
-	buf[2] = 0x80 | 0                                  // flags: R-bit cleared, P=0, E=0, T=0
-	buf[3] = 0                                          // reserved
-	binary.BigEndian.PutUint32(buf[4:8], 280)           // command code 280
-	binary.BigEndian.PutUint32(buf[8:12], 0)            // App Id = 0 (base protocol)
-	// hop-by-hop: echo from DWR header[12:16]
-	copy(buf[12:16], dwr[12:16])
-	// end-to-end: generate new
-	endToEnd := uint32(time.Now().Unix()) & 0xFFFF
-	binary.BigEndian.PutUint32(buf[16:20], endToEnd)
-	// length in bytes 16-18 (3 bytes, little-endian of 20-bit value)
-	buf[16] = byte(totalLen >> 16)
-	buf[17] = byte(totalLen >> 8)
-	buf[18] = byte(totalLen)
-
-	avpOffset := 20
-
-	// Result-Code AVP (code 296, M-bit set, vendor 0)
-	avpLen := 8 + 4
-	buf = append(buf, 0, 0, 1, 0x40) // code 296, M-bit, vendor 0
-	buf = append(buf, 0, 0, 0, byte(avpLen))
-	buf = append(buf, resultCode...)
-	avpOffset += avpLen
-
-	// Origin-Host AVP (code 264, M-bit set, vendor 0)
-	avpLen = 8 + len(originHost)
-	buf = append(buf, 0, 0, 1, 0x08) // code 264, M-bit, vendor 0
-	buf = append(buf, 0, 0, 0, byte(avpLen))
-	buf = append(buf, originHost...)
-	avpOffset += avpLen
-
-	// Origin-Realm AVP (code 296, M-bit set, vendor 0)
-	avpLen = 8 + len(originRealm)
-	buf = append(buf, 0, 0, 1, 0x28) // code 296, M-bit, vendor 0
-	buf = append(buf, 0, 0, 0, byte(avpLen))
-	buf = append(buf, originRealm...)
-	avpOffset += avpLen
-
-	// Origin-State-Id AVP (code 278, M-bit set, vendor 0)
-	avpLen = 8 + 4
-	buf = append(buf, 0, 0, 1, 0x16) // code 278, M-bit, vendor 0
-	buf = append(buf, 0, 0, 0, byte(avpLen))
-	buf = append(buf, originStateID...)
-	avpOffset += avpLen
-
-	// Pad
-	buf = append(buf, make([]byte, pad)...)
-
-	_, err := conn.Write(buf)
-	return err
-}
-
-// handleServerInitiated handles ASR (Abort-Session-Request) from AAA-S.
-func (h *DiameterHandler) handleServerInitiated(raw []byte) {
-	sessionID := extractDiameterSessionID(raw)
-	if sessionID == "" {
-		h.logger.Warn("ASR: no session ID found")
+	// Wrap raw net.Conn with diam.Conn interface.
+	// diam.NewConn starts a goroutine that reads messages and dispatches to the handler.
+	// The sm.StateMachine handles CER/CEA and DWR/DWA internally.
+	// After handshake, ASR/ASA/RAR/RAA/STR/STA are dispatched to registered handlers.
+	if _, err := diam.NewConn(conn, conn.RemoteAddr().String(), h.sm, dict.Default); err != nil {
+		h.logger.Error("diameter: failed to wrap connection", "error", err, "remote", conn.RemoteAddr())
 		return
 	}
 
-	h.logger.Info("Diameter ASR received",
-		"session_id", sessionID)
+	h.logger.Info("Diameter connection opened",
+		"remote", conn.RemoteAddr(),
+		"local", conn.LocalAddr(),
+	)
 
-	h.forwardToBiz(context.Background(), sessionID, "DIAMETER", "ASR", raw)
+	// Wait for handshake completion or connection close.
+	// HandshakeNotify() sends the diam.Conn after CER/CEA succeeds.
+	select {
+	case peerConn := <-h.sm.HandshakeNotify():
+		// Handshake succeeded. Log peer metadata.
+		if meta, ok := smpeer.FromContext(peerConn.Context()); ok {
+			h.logger.Info("Diameter handshake completed",
+				"peer_host", meta.OriginHost,
+				"peer_realm", meta.OriginRealm,
+				"peer_apps", meta.Applications,
+			)
+		}
+		// Connection remains open; sm.StateMachine continues reading and dispatching.
+		// Application messages (ASR, etc.) will be handled by registered handlers.
+		// Block until the connection is closed.
+		<-make(chan struct{})
+	case <-time.After(60 * time.Second):
+		h.logger.Warn("Diameter handshake timeout", "remote", conn.RemoteAddr())
+	}
+}
+
+// handleASR handles Abort-Session-Request from AAA-S (server-initiated).
+// This handler only fires after CER/CEA handshake succeeds.
+func (h *DiameterHandler) handleASR() diam.HandlerFunc {
+	return func(conn diam.Conn, m *diam.Message) {
+		sessionID := extractSessionIDFromMsg(m)
+		if sessionID == "" {
+			sessionID = "unknown"
+		}
+
+		h.logger.Info("Diameter ASR received",
+			"session_id", sessionID,
+			"hop_by_hop", m.Header.HopByHopID,
+			"end_to_end", m.Header.EndToEndID,
+		)
+
+		// Send ASA back to AAA-S.
+		h.sendASA(conn, m)
+
+		// Serialize the raw ASR message and forward to Biz Pod.
+		raw, err := m.Serialize()
+		if err != nil {
+			h.logger.Error("failed to serialize ASR", "error", err)
+			return
+		}
+		h.forwardToBiz(context.Background(), sessionID, "DIAMETER", "ASR", raw)
+	}
+}
+
+// handleASA handles Abort-Session-Answer from AAA-S (response to our STR).
+func (h *DiameterHandler) handleASA() diam.HandlerFunc {
+	return func(conn diam.Conn, m *diam.Message) {
+		sessionID := extractSessionIDFromMsg(m)
+		h.logger.Debug("Diameter ASA received", "session_id", sessionID)
+		raw, _ := m.Serialize()
+		h.publishResponse(sessionID, raw)
+	}
+}
+
+// handleRAR handles Re-Auth-Request from AAA-S (server-initiated reauth).
+func (h *DiameterHandler) handleRAR() diam.HandlerFunc {
+	return func(conn diam.Conn, m *diam.Message) {
+		sessionID := extractSessionIDFromMsg(m)
+		if sessionID == "" {
+			sessionID = "unknown"
+		}
+
+		h.logger.Info("Diameter RAR received", "session_id", sessionID)
+
+		// Send RAA back.
+		h.sendRAA(conn, m)
+
+		raw, _ := m.Serialize()
+		h.forwardToBiz(context.Background(), sessionID, "DIAMETER", "RAR", raw)
+	}
+}
+
+// handleRAA handles Re-Auth-Answer from AAA-S.
+func (h *DiameterHandler) handleRAA() diam.HandlerFunc {
+	return func(conn diam.Conn, m *diam.Message) {
+		sessionID := extractSessionIDFromMsg(m)
+		h.logger.Debug("Diameter RAA received", "session_id", sessionID)
+		raw, _ := m.Serialize()
+		h.publishResponse(sessionID, raw)
+	}
+}
+
+// handleSTR handles Session-Termination-Request from AAA-S.
+func (h *DiameterHandler) handleSTR() diam.HandlerFunc {
+	return func(conn diam.Conn, m *diam.Message) {
+		sessionID := extractSessionIDFromMsg(m)
+		h.logger.Info("Diameter STR received", "session_id", sessionID)
+
+		// Send STA back.
+		h.sendSTA(conn, m)
+
+		raw, _ := m.Serialize()
+		h.publishResponse(sessionID, raw)
+	}
+}
+
+// handleSTA handles Session-Termination-Answer from AAA-S.
+func (h *DiameterHandler) handleSTA() diam.HandlerFunc {
+	return func(conn diam.Conn, m *diam.Message) {
+		sessionID := extractSessionIDFromMsg(m)
+		h.logger.Debug("Diameter STA received", "session_id", sessionID)
+		raw, _ := m.Serialize()
+		h.publishResponse(sessionID, raw)
+	}
+}
+
+// sendASA sends Abort-Session-Answer in response to ASR.
+// Result-Code = DIAMETER_SUCCESS (2001).
+func (h *DiameterHandler) sendASA(conn diam.Conn, m *diam.Message) {
+	ans := m.Answer(diam.Success)
+	ans.Header.HopByHopID = m.Header.HopByHopID
+	ans.Header.EndToEndID = m.Header.EndToEndID
+	ans.NewAVP(avp.OriginHost, avp.Mbit, 0, h.sm.Settings().OriginHost)
+	ans.NewAVP(avp.OriginRealm, avp.Mbit, 0, h.sm.Settings().OriginRealm)
+	_, err := ans.WriteTo(conn)
+	if err != nil {
+		h.logger.Error("failed to send ASA", "error", err)
+	}
+}
+
+// sendRAA sends Re-Auth-Answer in response to RAR.
+func (h *DiameterHandler) sendRAA(conn diam.Conn, m *diam.Message) {
+	ans := m.Answer(diam.Success)
+	ans.Header.HopByHopID = m.Header.HopByHopID
+	ans.Header.EndToEndID = m.Header.EndToEndID
+	ans.NewAVP(avp.OriginHost, avp.Mbit, 0, h.sm.Settings().OriginHost)
+	ans.NewAVP(avp.OriginRealm, avp.Mbit, 0, h.sm.Settings().OriginRealm)
+	_, err := ans.WriteTo(conn)
+	if err != nil {
+		h.logger.Error("failed to send RAA", "error", err)
+	}
+}
+
+// sendSTA sends Session-Termination-Answer in response to STR.
+func (h *DiameterHandler) sendSTA(conn diam.Conn, m *diam.Message) {
+	ans := m.Answer(diam.Success)
+	ans.Header.HopByHopID = m.Header.HopByHopID
+	ans.Header.EndToEndID = m.Header.EndToEndID
+	ans.NewAVP(avp.OriginHost, avp.Mbit, 0, h.sm.Settings().OriginHost)
+	ans.NewAVP(avp.OriginRealm, avp.Mbit, 0, h.sm.Settings().OriginRealm)
+	_, err := ans.WriteTo(conn)
+	if err != nil {
+		h.logger.Error("failed to send STA", "error", err)
+	}
 }
 
 // Forward delegates to the diamForwarder for the client-initiated path.
-// This is the CLIENT-INITIATED path: NSSAAF → AAA-S (DER/DEA).
-// The diamForwarder handles CER/CEA handshake, DWR/DWA watchdog, DER encoding,
-// hop-by-hop correlation, and reconnection on failure.
-// Spec: PHASE §2.3.5; RFC 6733 §5.3 (CER/CEA), RFC 6733 §5.5 (DWR/DWA), RFC 4072 (DER/DEA)
 func (h *DiameterHandler) Forward(ctx context.Context, payload []byte, sessionID string) ([]byte, error) {
 	if h.diamForwarder == nil {
 		return nil, fmt.Errorf("diameter_forward: forwarder not configured")
 	}
-	// Note: Forward() signature lacks Sst/Sd — the caller (gateway.ForwardEAP)
-	// calls diamForwarder.Forward() directly with full parameters.
 	return nil, fmt.Errorf("diameter_forward: use diamForwarder.Forward() directly with Sst/Sd")
 }
 
-// extractDiameterSessionID extracts the Session-Id AVP from a Diameter message.
-// The Session-Id AVP is in the message body after the 20-byte header.
+// extractSessionIDFromMsg extracts the Session-Id AVP from a decoded diam.Message.
+func extractSessionIDFromMsg(m *diam.Message) string {
+	for _, avp := range m.AVP {
+		if avp.Code == 263 { // Session-Id AVP code
+			if os, ok := avp.Data.(datatype.UTF8String); ok {
+				return string(os)
+			}
+			if os, ok := avp.Data.(datatype.OctetString); ok {
+				return string(os)
+			}
+		}
+	}
+	return ""
+}
+
+// extractDiameterSessionID extracts the Session-Id AVP from raw bytes.
+// This is used for the legacy manual-parsing path.
 func extractDiameterSessionID(raw []byte) string {
 	if len(raw) < 24 {
 		return ""
 	}
-	// Session-Id AVP: AVP code 263, flags, length (4 bytes), followed by UTF8String value
 	pos := 20
 	for pos+8 <= len(raw) {
 		avpCode := binary.BigEndian.Uint32([]byte{0, raw[pos], raw[pos+1], raw[pos+2]})
@@ -321,8 +359,7 @@ func extractDiameterSessionID(raw []byte) string {
 		if avpLen < 8 || pos+avpLen > len(raw) {
 			break
 		}
-		if avpCode == 263 { // Session-Id AVP
-			// Value starts at pos+8 (after code[4] + flags[1] + length[3])
+		if avpCode == 263 { // Session-Id
 			return string(raw[pos+8 : pos+avpLen])
 		}
 		pos += avpLen
