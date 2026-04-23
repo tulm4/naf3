@@ -623,7 +623,9 @@ func (h *DiameterHandler) Listen(ctx context.Context, addr, protocol string) err
 // go-diameter/v4 is used in internal/diameter/client.go (client-initiated path).
 ```
 
-**Note on SCTP:** The standard library `net.Listen("sctp", addr)` requires the `net` package to be built with SCTP support. SCTP support is available in Linux kernels since 2.6.27 and Go 1.17+. If SCTP is not available at runtime, the server falls back to TCP (see implementation in `diameter_handler.go` line 34-47). Diameter message framing on SCTP is handled by the same manual header-parsing code used for TCP — no go-diameter/v4 needed on the server side.
+**Note on CER/CEA:** RFC 6733 §5.3 mandates that **both peers** MUST exchange CER/CEA when establishing a transport connection — regardless of who initiated the TCP/SCTP socket. This means the server-side listener (`HandleConnection`) must also handle CER/CEA using `go-diameter/v4/sm` state machine, not manual parsing. Manual parsing is only safe for messages **after** the handshake completes (e.g. ASR, DEA). Both sides are symmetric peers in the CER/CEA exchange.
+
+**Note on SCTP:** The standard library `net.Listen("sctp", addr)` requires the `net` package to be built with SCTP support. SCTP support is available in Linux kernels since 2.6.27 and Go 1.17+. If SCTP is not available at runtime, the server falls back to TCP (see implementation in `diameter_handler.go` line 34-47). Diameter message framing on SCTP is handled by the same manual header-parsing code used for TCP — no go-diameter/v4 needed on the server side for post-handshake message reads.
 
 **Verify SCTP availability** at startup:
 ```go

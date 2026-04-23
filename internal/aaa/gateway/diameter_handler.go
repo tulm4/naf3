@@ -87,8 +87,8 @@ func (h *DiameterHandler) serveSCTP(listener net.Listener) {
 // Command Code 268 = DER/DEA (distinguished by R-bit)
 // Command Code 274 = Abort-Session-Request (ASR) / Abort-Session-Answer (ASA)
 // Route based on Command Code.
-// Note: go-diameter/v4 is used in internal/diameter/client.go (client-initiated path NSSAAF→AAA-S).
-// This server-side handler uses manual header parsing — no go-diameter/v4 import needed.
+// Note: go-diameter/v4/sm is used for CER/CEA handshake (RFC 6733 §5.3: both peers
+// MUST exchange). After handshake, manual header parsing is sufficient for ASR/DEA.
 func (h *DiameterHandler) HandleConnection(conn net.Conn) {
 	defer conn.Close()
 	h.logger.Info("Diameter connection received", "remote", conn.RemoteAddr())
