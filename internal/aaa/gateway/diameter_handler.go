@@ -13,13 +13,16 @@ import (
 )
 
 // DiameterHandler handles Diameter protocol traffic.
+// It handles the SERVER-INITIATED path (AAA-S → NSSAAF).
+// The client-initiated path (NSSAAF → AAA-S) is handled by diamForwarder.
 type DiameterHandler struct {
 	logger          *slog.Logger
 	publishResponse func(sessionID string, raw []byte)
 	forwardToBiz   func(ctx context.Context, sessionID string, transportType string, messageType string, raw []byte)
-	version         string
+	version        string
 	bizURL         string
 	httpClient     *http.Client
+	diamForwarder  *diamForwarder // client-initiated forwarder (optional, for Forward delegation)
 }
 
 // Listen starts the Diameter server on the configured protocol (TCP or SCTP).
@@ -290,19 +293,18 @@ func (h *DiameterHandler) handleServerInitiated(raw []byte) {
 	h.forwardToBiz(context.Background(), sessionID, "DIAMETER", "ASR", raw)
 }
 
-// Forward sends a Diameter-EAP-Request to AAA-S and returns the DEA response.
-// Spec: PHASE §2.3.5; RFC 6733 §2.1 (CER/CEA), RFC 4072 (Diameter EAP DER/DEA)
-// NOTE: This is a STUB. The actual implementation requires diameter_forward.go
-// which maintains a persistent TCP/SCTP connection with CER/CEA handshake and DWR/DWA
-// watchdog. See PLAN §2.3.5 for the full design. Until implemented, DIAMETER
-// transport silently fails — every DER gets an empty response.
+// Forward delegates to the diamForwarder for the client-initiated path.
+// This is the CLIENT-INITIATED path: NSSAAF → AAA-S (DER/DEA).
+// The diamForwarder handles CER/CEA handshake, DWR/DWA watchdog, DER encoding,
+// hop-by-hop correlation, and reconnection on failure.
+// Spec: PHASE §2.3.5; RFC 6733 §5.3 (CER/CEA), RFC 6733 §5.5 (DWR/DWA), RFC 4072 (DER/DEA)
 func (h *DiameterHandler) Forward(ctx context.Context, payload []byte, sessionID string) ([]byte, error) {
-	// TODO: Implement diameter_forward.go per PLAN §2.3.5
-	// - Connect to AAA-S, perform CER/CEA (go-diameter/v4 sm.Client)
-	// - Build DER from EAP payload (Session-Id, Auth-Application-Id=5, EAP-Payload AVP=209)
-	// - Register hop-by-hop ID → pending channel, send, wait for DEA
-	// - DWR watchdog and reconnect on failure
-	return []byte{}, fmt.Errorf("diameter_forward: not implemented (see PLAN §2.3.5)")
+	if h.diamForwarder == nil {
+		return nil, fmt.Errorf("diameter_forward: forwarder not configured")
+	}
+	// Note: Forward() signature lacks Sst/Sd — the caller (gateway.ForwardEAP)
+	// calls diamForwarder.Forward() directly with full parameters.
+	return nil, fmt.Errorf("diameter_forward: use diamForwarder.Forward() directly with Sst/Sd")
 }
 
 // extractDiameterSessionID extracts the Session-Id AVP from a Diameter message.

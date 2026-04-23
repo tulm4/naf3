@@ -70,6 +70,11 @@ type AAAgwConfig struct {
 	DiameterRealm        string `yaml:"diameterRealm"`         // e.g. "operator.com"
 	DiameterHost         string `yaml:"diameterHost"`          // Origin-Host for CER
 
+	// RADIUS client-initiated config:
+	// Required for Access-Request forwarding to AAA-S.
+	RadiusServerAddress string `yaml:"radiusServerAddress"` // e.g. "nss-aaa-server:1812"
+	RadiusSharedSecret string `yaml:"radiusSharedSecret"`  // Shared secret with AAA-S
+
 	RedisMode         string `yaml:"redisMode"`          // "standalone" or "sentinel"
 	KeepalivedStatePath string `yaml:"keepalivedStatePath"` // "/var/run/keepalived/state"
 }
@@ -268,5 +273,6 @@ func applyDefaults(cfg *Config) {
 		if cfg.AAAgw.DiameterHost == "" {
 			cfg.AAAgw.DiameterHost = "nssaa-gw.operator.com"
 		}
+		// RADIUS client config defaults — no required fields (disabled if RadiusServerAddress empty)
 	}
 }

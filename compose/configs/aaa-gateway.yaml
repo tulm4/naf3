@@ -24,6 +24,10 @@ aaaGateway:
   diameterServerAddress: "nss-aaa-server:3868"   # AAA-S address
   diameterRealm: "operator.com"                     # AAA-S realm (Origin-Realm in CER)
   diameterHost: "nssaa-gw.operator.com"            # Origin-Host for CER (AAA Gateway identity)
+  # RADIUS client-initiated config:
+  # Required for Access-Request forwarding to AAA-S. Disabled if empty.
+  radiusServerAddress: "nss-aaa-server:1812"      # AAA-S RADIUS address
+  radiusSharedSecret: "secret"                      # Shared secret with AAA-S
   redisMode: "standalone"
   keepalivedStatePath: "/var/run/keepalived/state"
 

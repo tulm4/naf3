@@ -25,7 +25,9 @@ type httpAAAClient struct {
 	redis         *redis.Client
 	podID         string
 
-	// pending maps AuthCtxID → response channel
+	// pending maps SessionID → response channel.
+	// This is used by subscribeResponses to dispatch Redis pub/sub events.
+	// The gateway stores pending[SessionID] and publishes AaaResponseEvent{AuthCtxID} on Redis.
 	pending   map[string]chan []byte
 	pendingMu sync.RWMutex
 }
@@ -109,8 +111,11 @@ func (c *httpAAAClient) subscribeResponses(ctx context.Context) {
 				continue
 			}
 
+			// Fix: lookup by SessionID (same key used by AAA Gateway pending map).
+			// Previously this looked up by event.AuthCtxID which never matched because
+			// the gateway stored pending[SessionID] but the event had AuthCtxID="".
 			c.pendingMu.RLock()
-			pendingCh, ok := c.pending[event.AuthCtxID]
+			pendingCh, ok := c.pending[event.SessionID]
 			c.pendingMu.RUnlock()
 
 			if !ok {

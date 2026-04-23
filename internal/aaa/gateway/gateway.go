@@ -29,10 +29,15 @@ type Config struct {
 	DiameterProtocol  string // "tcp" or "sctp"
 
 	// Diameter client-initiated config (PLAN §2.3.5):
-	// Required for DER/DEA forwarding to AAA-S. Without these, Forward() returns an error.
+	// Required for DER/DEA forwarding to AAA-S.
 	DiameterServerAddress string // e.g. "nss-aaa-server:3868"
 	DiameterRealm        string // e.g. "operator.com"
 	DiameterHost         string // Origin-Host for CER (AAA Gateway identity)
+
+	// RADIUS client-initiated config:
+	// Required for Access-Request forwarding to AAA-S.
+	RadiusServerAddress string // e.g. "nss-aaa-server:1812"
+	RadiusSharedSecret string // Shared secret for Message-Authenticator
 
 	RedisMode          string // "standalone" or "sentinel"
 	KeepalivedStatePath string // path to keepalived state file
@@ -47,16 +52,26 @@ type Gateway struct {
 	version       string
 	logger        *slog.Logger
 
-	radiusHandler   *RadiusHandler
-	diameterHandler *DiameterHandler
+	radiusHandler    *RadiusHandler
+	diameterHandler  *DiameterHandler
+	radiusForwarder *radiusForwarder // RADIUS client (client-initiated path)
+	diamForwarder   *diamForwarder   // Diameter client (client-initiated path)
 
-	// pending maps SessionID → response channel (used for client-initiated flow)
-	pending   map[string]chan []byte
+	// pending maps SessionID → pendingEntry (for client-initiated response routing).
+	// Fix: store both SessionID and AuthCtxID so AaaResponseEvent.AuthCtxID is populated.
+	pending   map[string]*pendingEntry
 	pendingMu sync.RWMutex
 
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+}
+
+// pendingEntry holds the response channel and auth context metadata for a pending request.
+type pendingEntry struct {
+	authCtxID string
+	sessionID string
+	ch       chan []byte
 }
 
 // New creates a new AAA Gateway.
@@ -65,7 +80,7 @@ func New(cfg Config) *Gateway {
 		cfg:     cfg,
 		version: cfg.Version,
 		logger:  cfg.Logger,
-		pending: make(map[string]chan []byte),
+		pending: make(map[string]*pendingEntry),
 	}
 
 	g.redis = newRedisClient(cfg.RedisAddr, cfg.RedisMode)
@@ -77,6 +92,29 @@ func New(cfg Config) *Gateway {
 		forwardToBiz:    g.forwardToBiz,
 	}
 
+	// Create the RADIUS forwarder for client-initiated path.
+	// It wraps EAP payload in Access-Request with EAP-Message and Message-Authenticator.
+	if cfg.RadiusServerAddress != "" {
+		g.radiusForwarder = newRadiusForwarder(
+			cfg.RadiusServerAddress,
+			1812, // Default RADIUS port
+			cfg.RadiusSharedSecret,
+			cfg.Logger,
+		)
+	}
+
+	// Create the persistent Diameter forwarder for client-initiated path.
+	// This maintains CER/CEA handshake and DWR/DWA watchdog to AAA-S.
+	g.diamForwarder = newDiamForwarder(
+		cfg.DiameterServerAddress,
+		cfg.DiameterProtocol,
+		cfg.DiameterHost,
+		cfg.DiameterRealm,
+		cfg.DiameterServerAddress, // destHost: use server address as host identifier
+		cfg.DiameterRealm,        // destRealm
+		cfg.Logger,
+	)
+
 	g.diameterHandler = &DiameterHandler{
 		logger:          cfg.Logger,
 		publishResponse: g.publishResponseBytes,
@@ -84,6 +122,7 @@ func New(cfg Config) *Gateway {
 		version:        cfg.Version,
 		bizURL:        cfg.BizServiceURL,
 		httpClient:     g.bizHTTPClient,
+		diamForwarder:  g.diamForwarder, // for delegation
 	}
 
 	return g
@@ -120,6 +159,20 @@ func (g *Gateway) Start(ctx context.Context) error {
 		g.subscribeResponses(g.ctx)
 	}()
 
+	// Connect Diameter forwarder to AAA-S (client-initiated path).
+	// This performs CER/CEA handshake and starts DWR/DWA watchdog.
+	if g.diamForwarder != nil && g.cfg.DiameterServerAddress != "" {
+		g.wg.Add(1)
+		go func() {
+			defer g.wg.Done()
+			if err := g.diamForwarder.Connect(g.ctx); err != nil {
+				g.logger.Error("diameter_forward_connect_failed",
+					"addr", g.cfg.DiameterServerAddress,
+					"error", err)
+			}
+		}()
+	}
+
 	return nil
 }
 
@@ -131,6 +184,12 @@ func (g *Gateway) Stop() {
 	g.wg.Wait()
 	if g.redis != nil {
 		g.redis.Close()
+	}
+	if g.diamForwarder != nil {
+		g.diamForwarder.Close()
+	}
+	if g.radiusForwarder != nil {
+		g.radiusForwarder.Close()
 	}
 }
 
@@ -150,10 +209,15 @@ func (g *Gateway) ForwardEAP(ctx context.Context, req *proto.AaaForwardRequest) 
 		return nil, fmt.Errorf("aaa-gateway: failed to write session corr: %w", err)
 	}
 
-	// 2. Set up response channel for this session
-	ch := make(chan []byte, 1)
+	// 2. Set up response channel for this session.
+	// pendingEntry stores both SessionID and AuthCtxID for correct response routing.
+	pendingEntry := &pendingEntry{
+		authCtxID: req.AuthCtxID,
+		sessionID: req.SessionID,
+		ch:        make(chan []byte, 1),
+	}
 	g.pendingMu.Lock()
-	g.pending[req.SessionID] = ch
+	g.pending[req.SessionID] = pendingEntry
 	g.pendingMu.Unlock()
 
 	defer func() {
@@ -167,9 +231,11 @@ func (g *Gateway) ForwardEAP(ctx context.Context, req *proto.AaaForwardRequest) 
 	var err error
 	switch req.TransportType {
 	case proto.TransportRADIUS:
-		response, err = g.radiusHandler.Forward(ctx, req.Payload, req.SessionID)
+		response, err = g.radiusForwarder.Forward(ctx, req.Payload, req.SessionID, req.Sst, req.Sd)
 	case proto.TransportDIAMETER:
-		response, err = g.diameterHandler.Forward(ctx, req.Payload, req.SessionID)
+		// Use diamForwarder directly for the client-initiated path.
+		// It handles CER/CEA handshake, DER encoding, DWR watchdog, and DEA correlation.
+		response, err = g.diamForwarder.Forward(ctx, req.Payload, req.SessionID, req.Sst, req.Sd)
 	default:
 		return nil, fmt.Errorf("aaa-gateway: unknown transport type: %s", req.TransportType)
 	}
@@ -222,9 +288,10 @@ func (g *Gateway) HandleForward(w http.ResponseWriter, r *http.Request) {
 }
 
 // dispatchResponse dispatches a response event to the appropriate pending channel.
+// This is called from subscribeResponses (Redis pub/sub) for server-initiated responses.
 func (g *Gateway) dispatchResponse(event *proto.AaaResponseEvent) {
 	g.pendingMu.RLock()
-	ch, ok := g.pending[event.SessionID]
+	p, ok := g.pending[event.SessionID]
 	g.pendingMu.RUnlock()
 
 	if !ok {
@@ -232,7 +299,7 @@ func (g *Gateway) dispatchResponse(event *proto.AaaResponseEvent) {
 	}
 
 	select {
-	case ch <- event.Payload:
+	case p.ch <- event.Payload:
 	default:
 	}
 }
@@ -250,10 +317,17 @@ func (g *Gateway) writeSessionCorr(ctx context.Context, sessionID string, entry 
 // publishResponseBytes publishes raw response bytes to Redis pub/sub.
 // This is the low-level publish used by RadiusHandler and DiameterHandler.
 func (g *Gateway) publishResponseBytes(sessionID string, raw []byte) {
+	var authCtxID string
+	g.pendingMu.RLock()
+	if p, ok := g.pending[sessionID]; ok {
+		authCtxID = p.authCtxID
+	}
+	g.pendingMu.RUnlock()
+
 	event := proto.AaaResponseEvent{
 		Version:   g.version,
 		SessionID: sessionID,
-		AuthCtxID: "",
+		AuthCtxID: authCtxID, // Populated from pending entry (fixes routing bug)
 		Payload:   raw,
 	}
 	if err := g.publishResponse(g.ctx, &event); err != nil {

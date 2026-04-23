@@ -3,6 +3,7 @@ package gateway
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net"
 	"time"
@@ -78,12 +79,11 @@ func (h *RadiusHandler) handlePacket(conn *net.UDPConn, addr *net.UDPAddr, raw [
 	}
 }
 
-// Forward sends an EAP payload to AAA-S and returns the response.
-// This is a stub — the actual implementation forwards to AAA-S.
+// Forward is no longer used for the client-initiated path.
+// The Gateway.ForwardEAP() now calls radiusForwarder.Forward() directly.
+// This method is kept for backwards compatibility with any direct callers.
 func (h *RadiusHandler) Forward(ctx context.Context, payload []byte, sessionID string) ([]byte, error) {
-	// TODO: Implement actual RADIUS forwarding to AAA-S server
-	// For now, return a placeholder RAR-Nak response
-	return []byte{2, 0, 0, 12}, nil
+	return nil, fmt.Errorf("radius_forward: use radiusForwarder.Forward() directly (deprecated)")
 }
 
 // handleServerInitiated handles server-initiated RADIUS packets (CoA, DM).
