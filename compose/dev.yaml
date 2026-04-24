@@ -4,6 +4,9 @@
 version: "3.8"
 
 services:
+  # ---------------------------------------------------------------------------
+  # Redis — shared session correlation store
+  # ---------------------------------------------------------------------------
   redis:
     image: redis:7-alpine
     ports: ["6379:6379"]
@@ -13,6 +16,9 @@ services:
       timeout: 3s
       retries: 5
 
+  # ---------------------------------------------------------------------------
+  # mock-aaa-s — Simulates AAA Server (RADIUS + Diameter)
+  # ---------------------------------------------------------------------------
   mock-aaa-s:
     build:
       context: .
@@ -22,7 +28,13 @@ services:
     networks:
       - backend
 
+  # ---------------------------------------------------------------------------
+  # AAA Gateway — Diameter/RADIUS transport to AAA-S
+  # ---------------------------------------------------------------------------
   aaa-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.aaa-gateway
     image: nssAAF-aaa-gw:latest
     depends_on:
       redis:
@@ -30,8 +42,8 @@ services:
       mock-aaa-s:
         condition: service_started
     volumes:
-      - ./configs/aaa-gateway.yaml:/etc/nssAAF/aaa-gateway.yaml:ro
-    ports: ["9090:9090"]
+      - ./compose/configs/aaa-gateway.yaml:/etc/nssAAF/aaa-gateway.yaml:ro
+    ports: ["9090:9090", "1812:1812/udp", "3868:3868"]
     network_mode: host  # Dev only: keepalived needs host networking for VIP
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:9090/health || exit 1"]
@@ -39,7 +51,13 @@ services:
       timeout: 5s
       retries: 3
 
+  # ---------------------------------------------------------------------------
+  # Biz Pod — EAP engine + N58/N60 SBI
+  # ---------------------------------------------------------------------------
   biz:
+    build:
+      context: .
+      dockerfile: Dockerfile.biz
     image: nssAAF-biz:latest
     depends_on:
       redis:
@@ -47,19 +65,25 @@ services:
       aaa-gateway:
         condition: service_healthy
     volumes:
-      - ./configs/biz.yaml:/etc/nssAAF/biz.yaml:ro
+      - ./compose/configs/biz.yaml:/etc/nssAAF/biz.yaml:ro
     ports: ["8080:8080"]
     networks:
       - backend
 
+  # ---------------------------------------------------------------------------
+  # HTTP Gateway — TLS terminator, routes AMF → Biz Pod
+  # ---------------------------------------------------------------------------
   http-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.http-gateway
     image: nssAAF-http-gw:latest
     depends_on:
       biz:
         condition: service_started
     volumes:
-      - ./configs/http-gateway.yaml:/etc/nssAAF/http-gateway.yaml:ro
-    ports: ["8443:443"]
+      - ./compose/configs/http-gateway.yaml:/etc/nssAAF/http-gateway.yaml:ro
+    ports: ["8443:8443"]
     networks:
       - backend
 

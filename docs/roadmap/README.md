@@ -33,11 +33,16 @@
 ## Quick Start
 
 ```
-1. Read this README
-2. Read relevant PHASE_*.md (below)
-3. Read relevant design doc from docs/design/
-4. Implement module
-5. Update PHASE status
+# 1. Build all 3 components
+make build
+
+# 2. Run with Docker Compose (local dev)
+make compose-up
+
+# 3. Or run each component individually
+make run-biz          # Biz Pod on :8080
+make run-http-gateway # HTTP GW on :8443
+make run-aaa-gateway  # AAA GW on :9090
 ```
 
 ---
@@ -104,36 +109,47 @@
 ```
 nssAAF/
 ├── cmd/
-│   ├── nssAAF/            # All-in-one binary (DEPRECATED, dev mode only)
-│   ├── biz/               # Business Logic Pod binary (Phase R)
-│   ├── http-gateway/      # HTTP Gateway Pod binary (Phase R)
-│   └── aaa-gateway/      # AAA Gateway Pod binary (Phase R)
+│   ├── biz/               # Biz Pod binary (EAP engine + N58/N60 SBI)
+│   ├── http-gateway/      # HTTP Gateway binary (TLS terminator)
+│   └── aaa-gateway/      # AAA Gateway binary (Diameter/RADIUS transport)
 ├── internal/
 │   ├── proto/             # Internal component communication contracts (Phase R) [NEW]
 │   ├── aaa/
-│   │   └── gateway/       # AAA Gateway library (Phase R) [NEW]
-│   ├── api/               # HTTP handlers
-│   ├── types/             # Data types
-│   ├── eap/               # EAP engine
-│   ├── radius/            # RADIUS encode/decode (used by Biz Pod)
-│   ├── diameter/          # Diameter encode/decode (used by Biz Pod)
-│   ├── storage/           # PostgreSQL
-│   ├── cache/             # Redis
-│   ├── nrf/               # NRF client
-│   ├── udm/               # UDM client
-│   ├── auth/               # Authentication
-│   └── resilience/         # HA patterns
-├── pkg/                   # Public packages
-├── deployments/            # K8s manifests (Phase R: 3-component charts)
-├── test/                   # Integration/E2E
-├── scripts/                # Build tools
+│   │   └── gateway/      # AAA Gateway library (Phase R) [NEW]
+│   ├── api/              # HTTP handlers
+│   ├── types/            # Data types
+│   ├── eap/              # EAP engine
+│   ├── radius/           # RADIUS encode/decode (used by Biz Pod)
+│   ├── diameter/         # Diameter encode/decode (used by Biz Pod)
+│   ├── storage/          # PostgreSQL
+│   ├── cache/            # Redis
+│   ├── nrf/             # NRF client
+│   ├── udm/             # UDM client
+│   ├── auth/             # Authentication
+│   └── resilience/       # HA patterns
+├── compose/              # Docker Compose for local dev
+│   ├── dev.yaml          # 3-component topology (HTTP GW → Biz → AAA GW → Redis)
+│   └── configs/          # Per-component config files
+│       ├── biz.yaml
+│       ├── aaa-gateway.yaml
+│       └── http-gateway.yaml
+├── configs/              # ⚠️ DEPRECATED — monolithic config files removed (Phase R)
+├── pkg/                  # Public packages
+├── deployments/          # K8s manifests (Phase R: 3-component charts)
+├── test/                # Integration/E2E
+├── scripts/              # Build tools
+├── Dockerfile.biz        # Biz Pod container image
+├── Dockerfile.http-gateway # HTTP Gateway container image
+├── Dockerfile.aaa-gateway # AAA Gateway container image
+├── Dockerfile.mock-aaa-s  # Mock AAA Server for local dev
+├── Makefile             # 3-component build targets
 └── docs/
-    ├── roadmap/            # ← Roadmap files
-    ├── design/             # Design documents
-    └── 3gppfilter/        # Filtered specs
+    ├── roadmap/          # ← Roadmap files
+    ├── design/          # Design documents
+    └── 3gppfilter/     # Filtered specs
 ```
 
-**Note:** After Phase R, `internal/radius/` and `internal/diameter/` are used only by the Biz Pod. The AAA Gateway (`cmd/aaa-gateway/`) uses raw sockets only and does not depend on these packages.
+**Note:** After Phase R, `internal/radius/` and `internal/diameter/` are used only by the Biz Pod. The AAA Gateway (`cmd/aaa-gateway/`) uses go-diameter/v4 directly and does not depend on these packages.
 
 ---
 

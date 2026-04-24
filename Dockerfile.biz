@@ -1,0 +1,52 @@
+# Dockerfile.biz — Multi-stage build for NSSAAF Biz Pod
+# Spec: TS 29.526 v18.7.0; 3-component architecture (Phase R)
+#
+# The Biz Pod handles:
+# - N58 (Nnssaaf_NSSAA) and N60 (Nnssaaf_AIW) SBI endpoints
+# - EAP engine (EAP-TLS, EAP-AKA')
+# - HTTP communication with AAA Gateway
+#
+# Stage 1: Build
+FROM golang:1.22-alpine AS builder
+
+RUN apk add --no-cache git ca-certificates
+
+WORKDIR /build
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+# Build with symbol table and DWARF stripped for smaller size
+RUN CGO_ENABLED=0 go build \
+    -ldflags="-s -w" \
+    -o biz ./cmd/biz/
+
+# Stage 2: Runtime
+FROM alpine:3.19 AS runtime
+
+RUN apk --no-cache add ca-certificates tzdata curl
+
+# Create non-root user for security
+RUN adduser -D -g '' appuser
+
+WORKDIR /app
+
+# Copy binary and configs from builder
+COPY --from=builder /build/biz .
+COPY --from=builder /build/compose/configs/biz.yaml /etc/nssAAF/biz.yaml
+
+RUN chown -R appuser:appuser /app
+
+USER appuser
+
+# Expose N58/N60 SBI port
+EXPOSE 8080
+
+# Health check: Biz Pod exposes /health endpoint
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget -qO- http://localhost:8080/health || exit 1
+
+ENTRYPOINT ["/app/biz"]
+CMD ["-config", "/etc/nssAAF/biz.yaml"]

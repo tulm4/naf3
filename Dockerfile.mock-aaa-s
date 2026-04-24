@@ -1,0 +1,17 @@
+# Dockerfile.mock-aaa-s — Mock AAA Server for local development
+# Simulates both RADIUS and Diameter EAP endpoints.
+#
+# In production, this is replaced by a real AAA Server (e.g., FreeRADIUS, OpenDiameter).
+# For local dev, it responds to Access-Request (RADIUS) and DER (Diameter).
+FROM alpine:3.19 AS runtime
+
+RUN apk --no-cache add socat
+
+# RADIUS UDP port 1812: respond with Access-Challenge
+# Diameter TCP port 3868: respond with DEA (success)
+#
+# This is a placeholder. Real mock should implement:
+# - RADIUS: Access-Challenge with EAP-Message containing EAP-Request/Identity
+# - Diameter: CER/CEA handshake then DEA with EAP-Payload
+
+ENTRYPOINT ["socat", "-v", "UDP-LISTEN:1812,fork", "EXEC:'echo mock-aaa-s radius'", "TCP-LISTEN:3868,fork", "EXEC:'echo mock-aaa-s diameter'"]

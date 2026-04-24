@@ -1,0 +1,52 @@
+# Dockerfile.aaa-gateway — Multi-stage build for NSSAAF AAA Gateway Pod
+# Spec: TS 29.526 v18.7.0; 3-component architecture (Phase R)
+#
+# The AAA Gateway is a 2-replica active-standby component that:
+# - Maintains persistent Diameter (CER/CEA, DWR/DWA) and RADIUS connections to AAA-S
+# - Receives forward requests from Biz Pods (HTTP POST /aaa/forward)
+# - Handles server-initiated ASR/CoA from AAA-S and forwards to Biz Pods
+# - Uses Redis for session correlation and response routing
+#
+# Stage 1: Build
+FROM golang:1.22-alpine AS builder
+
+RUN apk add --no-cache git ca-certificates
+
+WORKDIR /build
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+RUN CGO_ENABLED=0 go build \
+    -ldflags="-s -w" \
+    -o aaa-gateway ./cmd/aaa-gateway/
+
+# Stage 2: Runtime
+FROM alpine:3.19 AS runtime
+
+RUN apk --no-cache add ca-certificates tzdata curl
+
+RUN adduser -D -g '' appuser
+
+WORKDIR /app
+
+COPY --from=builder /build/aaa-gateway .
+COPY --from=builder /build/compose/configs/aaa-gateway.yaml /etc/nssAAF/aaa-gateway.yaml
+
+RUN chown -R appuser:appuser /app
+
+USER appuser
+
+# Expose:
+# 9090 — HTTP endpoints (/aaa/forward, /health, /health/vip)
+# 1812 — RADIUS UDP (Access-Request from AAA Gateway to AAA-S)
+# 3868 — Diameter TCP/SCTP (AAA-S → NSSAAF, NSSAAF → AAA-S)
+EXPOSE 9090 1812 3868
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget -qO- http://localhost:9090/health || exit 1
+
+ENTRYPOINT ["/app/aaa-gateway"]
+CMD ["-config", "/etc/nssAAF/aaa-gateway.yaml"]

@@ -1,0 +1,48 @@
+# Dockerfile.http-gateway — Multi-stage build for NSSAAF HTTP Gateway Pod
+# Spec: TS 29.526 v18.7.0; 3-component architecture (Phase R)
+#
+# The HTTP Gateway is a stateless TLS terminator that:
+# - Receives Nnssaaf_NSSAA requests from AMF (HTTP/2)
+# - Forwards to Biz Pods via round-robin load balancing
+# - Handles mutual TLS (mTLS) with AMF
+#
+# Stage 1: Build
+FROM golang:1.22-alpine AS builder
+
+RUN apk add --no-cache git ca-certificates
+
+WORKDIR /build
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+RUN CGO_ENABLED=0 go build \
+    -ldflags="-s -w" \
+    -o http-gateway ./cmd/http-gateway/
+
+# Stage 2: Runtime
+FROM alpine:3.19 AS runtime
+
+RUN apk --no-cache add ca-certificates tzdata curl
+
+RUN adduser -D -g '' appuser
+
+WORKDIR /app
+
+COPY --from=builder /build/http-gateway .
+COPY --from=builder /build/compose/configs/http-gateway.yaml /etc/nssAAF/http-gateway.yaml
+
+RUN chown -R appuser:appuser /app
+
+USER appuser
+
+# Expose Nhpp_Nnssaaf port (HTTPS)
+EXPOSE 443 8443
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget -qO- http://localhost:8443/health || exit 1
+
+ENTRYPOINT ["/app/http-gateway"]
+CMD ["-config", "/etc/nssAAF/http-gateway.yaml"]
