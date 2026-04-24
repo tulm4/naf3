@@ -115,15 +115,17 @@ func New(cfg Config) *Gateway {
 		cfg.Logger,
 	)
 
-	g.diameterHandler = &DiameterHandler{
-		logger:          cfg.Logger,
-		publishResponse: g.publishResponseBytes,
-		forwardToBiz:   g.forwardToBiz,
-		version:        cfg.Version,
-		bizURL:        cfg.BizServiceURL,
-		httpClient:     g.bizHTTPClient,
-		diamForwarder:  g.diamForwarder, // for delegation
-	}
+	g.diameterHandler = NewDiameterHandler(
+		cfg.Logger,
+		g.publishResponseBytes,
+		g.forwardToBiz,
+		cfg.Version,
+		cfg.BizServiceURL,
+		g.bizHTTPClient,
+		g.diamForwarder,
+		cfg.DiameterHost,
+		cfg.DiameterRealm,
+	)
 
 	return g
 }
