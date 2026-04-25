@@ -154,6 +154,7 @@ func (c *Client) Register(ctx context.Context) error {
 	if resp.StatusCode != http.StatusCreated {
 		return fmt.Errorf("nrf: unexpected status %d", resp.StatusCode)
 	}
+	c.registered.Store(true)
 	return nil
 }
 
