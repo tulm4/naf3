@@ -180,7 +180,60 @@ func Load(path string) (*Config, error) {
 	// Apply defaults
 	applyDefaults(&cfg)
 
+	// Validate component-specific required fields
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+
 	return &cfg, nil
+}
+
+// Validate checks that required fields are present for the configured component.
+// Returns an error describing the first missing field found.
+func (c *Config) Validate() error {
+	switch c.Component {
+	case ComponentBiz:
+		if c.Biz == nil {
+			return fmt.Errorf("config.biz is required for component=biz")
+		}
+		if c.Biz.AAAGatewayURL == "" {
+			return fmt.Errorf("config.biz.aaaGatewayUrl is required")
+		}
+		if c.Biz.UseMTLS {
+			if c.Biz.TLSCert == "" {
+				return fmt.Errorf("config.biz.tlsCert is required when useMTLS is true")
+			}
+			if c.Biz.TLSKey == "" {
+				return fmt.Errorf("config.biz.tlsKey is required when useMTLS is true")
+			}
+			if c.Biz.TLSCA == "" {
+				return fmt.Errorf("config.biz.tlsCa is required when useMTLS is true")
+			}
+		}
+
+	case ComponentAAAGateway:
+		if c.AAAgw == nil {
+			return fmt.Errorf("config.aaaGateway is required for component=aaa-gateway")
+		}
+		if c.AAAgw.BizServiceURL == "" {
+			return fmt.Errorf("config.aaaGateway.bizServiceUrl is required")
+		}
+
+	case ComponentHTTPGateway:
+		if c.HTTPgw == nil {
+			return fmt.Errorf("config.httpGateway is required for component=http-gateway")
+		}
+		if c.HTTPgw.TLS != nil {
+			if c.HTTPgw.TLS.Cert == "" {
+				return fmt.Errorf("config.httpGateway.tls.cert is required when TLS is configured")
+			}
+			if c.HTTPgw.TLS.Key == "" {
+				return fmt.Errorf("config.httpGateway.tls.key is required when TLS is configured")
+			}
+		}
+	}
+
+	return nil
 }
 
 // expandEnv expands ${VAR} and ${VAR:-default} placeholders.

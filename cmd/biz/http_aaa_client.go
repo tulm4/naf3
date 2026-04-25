@@ -52,6 +52,19 @@ func newHTTPAAAClient(aaaGatewayURL, redisAddr, podID, version string, httpClien
 	return c
 }
 
+// newHTTPAAAClientForTest creates a new HTTP AAA client with a provided Redis client.
+// This is for unit tests that need to inject a mock Redis client.
+func newHTTPAAAClientForTest(aaaGatewayURL, podID, version string, httpClient *http.Client, redisClient *redis.Client) *httpAAAClient {
+	return &httpAAAClient{
+		aaaGatewayURL: aaaGatewayURL,
+		httpClient:    httpClient,
+		version:       version,
+		redis:         redisClient,
+		podID:         podID,
+		pending:       make(map[string]chan []byte),
+	}
+}
+
 // SendEAP satisfies eap.AAAClient.
 // Spec: PHASE §1.1 pattern
 func (c *httpAAAClient) SendEAP(ctx context.Context, authCtxID string, eapPayload []byte) ([]byte, error) {
@@ -98,6 +111,9 @@ func (c *httpAAAClient) SendEAP(ctx context.Context, authCtxID string, eapPayloa
 
 // subscribeResponses listens to nssaa:aaa-response and dispatches to pending channels.
 func (c *httpAAAClient) subscribeResponses(ctx context.Context) {
+	if c.redis == nil {
+		return
+	}
 	ch := c.redis.PSubscribe(ctx, proto.AaaResponseChannel)
 	defer ch.Close()
 
@@ -132,7 +148,10 @@ func (c *httpAAAClient) subscribeResponses(ctx context.Context) {
 
 // Close shuts down the HTTP AAA client.
 func (c *httpAAAClient) Close() error {
-	return c.redis.Close()
+	if c.redis != nil {
+		return c.redis.Close()
+	}
+	return nil
 }
 
 var _ eap.AAAClient = (*httpAAAClient)(nil)
