@@ -5,58 +5,62 @@ alwaysApply: true
 
 # NSSAAF Design Document Standard
 
+Every design document in `docs/design/` must follow this standard.
+
 ## Mandatory Metadata Header
 
-Every design document MUST start with this metadata block:
+Every design document MUST start with this block:
 
 ```markdown
 ---
-spec: TS 29.526 v18.7.0  # Always specify exact spec version
-section: §14.4.1.2       # Which spec section this implements
-interface: N58           # N58 (AMF-NSSAAF), N60 (AUSF-NSSAAF), N59 (NSSAAF-UDM)
-service: Nnssaaf_NSSAA   # Nnssaaf_NSSAA or Nnssaaf_AIW
-operation: Authenticate   # Service operation name
-eapMethod: EAP-TLS        # EAP-TLS, EAP-AKA', EAP-TTLS, etc.
-aaaProtocol: RADIUS      # RADIUS or Diameter
+spec: TS 29.526 v18.7.0   # Always specify exact spec version
+section: §14.4.1.2         # Which spec section this implements
+interface: N58              # N58 (AMF-NSSAAF), N60 (AUSF-NSSAAF), N59 (NSSAAF-UDM)
+service: Nnssaaf_NSSAA      # Nnssaaf_NSSAA or Nnssaaf_AIW
+operation: Authenticate      # Service operation name
+eapMethod: EAP-TLS           # EAP-TLS, EAP-AKA', EAP-TTLS, etc.
+aaaProtocol: RADIUS          # RADIUS or Diameter
 ---
 ```
 
-## Design Document Sections (in order)
+## Required Sections (in order)
 
-1. **Overview** - One paragraph: what does this do and why
-2. **Prerequisites** - What must be true before this feature runs
-3. **API Design** - Endpoints, request/response schemas (cite TS29526)
-4. **Procedure Flow** - Step-by-step with step numbers matching spec (cite TS23502)
-5. **State Machine** - NssaaStatus transitions
-6. **AAA Protocol Mapping** - How SBI maps to RADIUS/Diameter (cite TS29561)
-7. **Security Considerations** - EAP method details, key derivation (cite TS33501)
-8. **Error Handling** - HTTP status codes and ProblemDetails (cite TS29526)
-9. **NRM Impact** - Management interface changes (cite TS28541)
-10. **Acceptance Criteria** - Each criterion MUST cite a spec paragraph
+1. **Overview** — One paragraph: what does this do and why
+2. **Prerequisites** — What must be true before this feature runs
+3. **API Design** — Endpoints, request/response schemas (cite TS 29.526)
+4. **Procedure Flow** — Step-by-step with step numbers matching spec (cite TS 23.502)
+5. **State Machine** — NssaaStatus transitions
+6. **AAA Protocol Mapping** — How SBI maps to RADIUS/Diameter (cite TS 29.561)
+7. **Security Considerations** — EAP method details, key derivation (cite TS 33.501)
+8. **Error Handling** — HTTP status codes and ProblemDetails (cite TS 29.526)
+9. **NRM Impact** — Management interface changes (cite TS 28.541)
+10. **Acceptance Criteria** — Each criterion MUST cite a spec paragraph
 
 ## Writing Rules
 
 ### API Descriptions
-- Use exact field names from TS29526 OpenAPI schemas
+- Use exact field names from TS 29.526 OpenAPI schemas
 - Always specify `required` vs `optional` for each field
 - Never invent field names not in the spec
 
 ### Procedure Flows
-- Use exact step numbers from TS23502 §4.2.9.x
+- Use exact step numbers from TS 23.502 §4.2.9.x
 - If adding new steps, label as "Extended step X" and explain why
 - Always include the "negative path" (failure cases)
 
-### Error Codes (from TS29526)
+### Error Codes (from TS 29.526)
+
 | Code | Meaning |
 |------|---------|
-| 400 | Bad Request - invalid EAP payload or missing required fields |
-| 403 | Forbidden - slice authentication rejected by AAA-S |
+| 400 | Bad Request — invalid EAP payload or missing required fields |
+| 403 | Forbidden — slice authentication rejected by AAA-S |
 | 404 | User does not exist (GPSI not found) |
 | 502 | NSSAAF cannot reach AAA-S |
 | 503 | AAA-S temporarily unavailable |
 | 504 | Timeout between NSSAAF and AAA-S |
 
-### Data Types (from TS29571)
+### Data Types (from TS 29.571)
+
 Always use these canonical names:
 - `Snssai` with `sst` (0-255) and `sd` (3-byte hex string)
 - `Gpsi` pattern: `^5[0-9]{8,14}$`
@@ -64,17 +68,20 @@ Always use these canonical names:
 - `NssaaStatus` with `snssai` + `status` (AuthStatus enum)
 - `EapMessage` as Base64-encoded string
 
-### Validation Rules
-- If the design mentions "AMF sends Nnssaaf_NSSAA_Authenticate", it MUST cite TS29526
-- If the design mentions "AAA-S triggers reauth", it MUST cite TS23502 §4.2.9.3
-- If the design mentions "EAP-TLS", it MUST cite TS33501 Annex B.2
-- If the design mentions "RADIUS attribute", it MUST cite TS29561 §16.3
-- If the design mentions "NSSAAF NRM", it MUST cite TS28541 §5.3.145
+### Spec Citation Rules
+
+| Mention | Must cite |
+|---------|-----------|
+| AMF sends Nnssaaf_NSSAA_Authenticate | TS 29.526 |
+| AAA-S triggers reauth | TS 23.502 §4.2.9.3 |
+| EAP-TLS | TS 33.501 Annex B.2 |
+| RADIUS attribute | TS 29.561 §16.3 |
+| NSSAAF NRM | TS 28.541 §5.3.145 |
 
 ## Anti-Patterns (Never Do These)
 
-1. **Never** invent an API field not in TS29526 (e.g., don't add `authResult` to SliceAuthInfo)
-2. **Never** skip the NssaaStatus state machine (PENDING is a required intermediate state)
-3. **Never** omit the AAA-P path (third-party AAA-S MUST go through AAA-P)
-4. **Never** use generic error codes - always use 3GPP ProblemDetails with `cause`
-5. **Never** design without GPSI (TS23502 §4.2.9.1: "The NSSAA procedure requires a GPSI")
+1. **Never** invent an API field not in TS 29.526 (e.g., do not add `authResult` to SliceAuthInfo)
+2. **Never** skip the NssaaStatus state machine — PENDING is a required intermediate state
+3. **Never** omit the AAA-P path — third-party AAA-S MUST go through AAA-P
+4. **Never** use generic error codes — always use 3GPP ProblemDetails with `cause`
+5. **Never** design without GPSI — TS 23.502 §4.2.9.1: "The NSSAA procedure requires a GPSI"

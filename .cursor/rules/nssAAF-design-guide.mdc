@@ -1,5 +1,5 @@
 ---
-description: NSSAAF design methodology - which 3GPP docs to read and how
+description: NSSAAF design methodology — which 3GPP docs to read and how
 alwaysApply: true
 ---
 
@@ -7,9 +7,21 @@ alwaysApply: true
 
 This project implements the 3GPP NSSAAF (Network Slice-Specific Authentication and Authorization Function) for 5G. All design decisions MUST trace back to 3GPP specifications.
 
+## Before Reading Any Design Docs
+
+Always read the GSD state files first:
+
+```
+1. .planning/STATE.md        ← Current phase and position
+2. .planning/PROJECT.md       ← Core value and constraints
+3. .planning/REQUIREMENTS.md ← Active requirements
+```
+
+These tell you which phase is active and what the current goals are. Design docs are read within that context.
+
 ## Reading Strategy: Never Load All Docs at Once
 
-The 3GPP documentation for NSSAAF is split across 8 spec files. **NEVER** ask Cursor to read all files in a single prompt. Instead, use the chunked structure in `docs/3gppfilter/`.
+The 3GPP documentation for NSSAAF is split across 8 spec files. **Never read all files in a single prompt.** Use the chunked structure in `docs/3gppfilter/` instead.
 
 ### Decision Tree: Which File to Read
 
@@ -50,7 +62,7 @@ What are you designing?
 
 ### Reference Only: TS29571_CommonData.yaml
 
-`TS29571_CommonData.yaml` (6740 lines) is the shared OpenAPI schema library. Do NOT read it directly. Instead, reference schemas by name in design docs (e.g., `Snssai`, `Gpsi`, `ProblemDetails`). They are already defined in `05_data_management/NSSAAF_DataTypes.md`.
+`TS29571_CommonData.yaml` (6740 lines) is the shared OpenAPI schema library. Do not read it directly. Reference schemas by name in design docs (e.g., `Snssai`, `Gpsi`, `ProblemDetails`). They are already defined in `05_data_management/NSSAAF_DataTypes.md`.
 
 ## Design Document Must-Haves
 
@@ -64,6 +76,8 @@ Every design document for NSSAAF MUST include:
 6. **AAA Protocol**: RADIUS or Diameter
 7. **Error Handling**: Which 3GPP error codes apply (400, 403, 404, 502, 503, 504)
 8. **Acceptance Criteria**: Traceable to specific spec paragraphs
+
+Design documents live in `docs/design/` and are indexed by module in `docs/roadmap/module_index.md`. Create a new design doc by following the template in `nssAAF-design-doc-standard.mdc`.
 
 ## NSSAAF Architecture Summary
 
@@ -89,12 +103,28 @@ UE ←─────── NAS (EAP) ────────→ AMF (EAP Authe
 - **NotificationType**: `SLICE_RE_AUTH | SLICE_REVOCATION`
 - **AuthCtxId**: Opaque string ID for slice authentication context resource
 
+## GSD Workflow Integration
+
+Design docs feed into the GSD workflow as follows:
+
+```
+discuss-phase → captures decisions in NN-CONTEXT.md
+plan-phase    → uses design docs + NN-CONTEXT.md to create NN-PLAN.md
+execute-phase → implements code per NN-PLAN.md, following validation checklists below
+```
+
+After completing a phase, update the module status in `docs/roadmap/module_index.md`: `TBD` → `IN_PROGRESS` → `READY`.
+
 ## Validation Checklist
 
 Before finalizing any NSSAAF design:
-- [ ] All API fields validated against TS29526 schema definitions
-- [ ] Procedure flow steps validated against TS23502 §4.2.9
-- [ ] Security requirements validated against TS33501 §16.3-16.5
-- [ ] AAA protocol mapping validated against TS29561 Ch.16/17
-- [ ] Data types validated against TS29571 §5.4.4.60-61
-- [ ] NRM attributes validated against TS28541 §5.3.145-148
+
+- [ ] All API fields validated against TS 29.526 schema definitions
+- [ ] Procedure flow steps validated against TS 23.502 §4.2.9
+- [ ] Security requirements validated against TS 33.501 §16.3-16.5
+- [ ] AAA protocol mapping validated against TS 29.561 Ch.16/17
+- [ ] Data types validated against TS 29.571 §5.4.4.60-61
+- [ ] NRM attributes validated against TS 28.541 §5.3.145-148
+- [ ] Design document has mandatory metadata header (spec, section, interface, service, operation)
+- [ ] All acceptance criteria cite specific spec paragraphs
+- [ ] Negative paths (failure cases) documented

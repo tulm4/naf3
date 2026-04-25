@@ -1,39 +1,46 @@
 ---
-description: NSSAAF implementation methodology - how to write code from design docs
+description: NSSAAF implementation methodology — how to write code from design docs
 alwaysApply: true
 ---
 
 # NSSAAF Implementation Methodology
 
-## Golden Rule: Always Start with Roadmap
+## Golden Rule: Always Start with GSD State
 
-When implementing any NSSAAF code:
+When implementing any NSSAAF code, follow this reading order:
 
 ```
-1. ALWAYS read: docs/quickref.md (50 lines) ← Start here
-2. THEN read: docs/roadmap/README.md (100 lines)
-3. THEN read: docs/roadmap/PHASE_*.md (relevant phase)
-4. THEN read: docs/design/XX_*.md (relevant design doc)
-5. THEN write code
+1. ALWAYS read: .planning/STATE.md           ← Start here (50 lines)
+2. ALWAYS read: .planning/PROJECT.md         ← Project context
+3. THEN read:   docs/quickref.md             ← 5G domain quick reference
+4. THEN read:   .planning/REQUIREMENTS.md    ← Active requirements
+5. THEN read:   docs/roadmap/PHASE_*.md       ← Relevant phase plan
+6. THEN read:   docs/design/XX_*.md          ← Relevant design doc
+7. THEN write code
 ```
 
-## Never Overflow Strategy
+For the current phase (Phase 4), also read:
+```
+8. .planning/phases/04-NFIntegration_Observability/04-CONTEXT.md
+   ← Captured implementation decisions
+```
 
-### Problem
-NSSAAF has 20 design docs (~11,000 lines). Loading all at once overflows context.
+## Context Budget
 
-### Solution: Progressive Disclosure
-
-**Never load more than 200 lines at once.**
+NSSAAF has 20 design docs (~11,000 lines). Load no more than **200 lines at a time.**
 
 | What you need | Read this | Lines |
 |---|---|---|
-| Any context | `docs/quickref.md` | 50 |
+| Current position | `.planning/STATE.md` | 50 |
+| Project overview | `.planning/PROJECT.md` | 120 |
+| Active requirements | `.planning/REQUIREMENTS.md` | 150 |
 | Phase overview | `docs/roadmap/PHASE_*.md` | 150 |
 | Design detail | `docs/design/02_nssaa_api.md` | 574 |
-| Quick lookup | `docs/roadmap/module_index.md` | 50 |
+| Quick reference | `docs/roadmap/module_index.md` | 50 |
 
-## Module → Design Doc Mapping
+When orchestrating subagents, read only frontmatter/summaries for phases outside the current active work. See `references/universal-anti-patterns.md` for full context budget rules.
+
+## Module to Design Doc Mapping
 
 | Module | Read first | Then read |
 |--------|-----------|-----------|
@@ -45,26 +52,57 @@ NSSAAF has 20 design docs (~11,000 lines). Loading all at once overflows context
 | `internal/diameter/` | `docs/quickref.md` | `docs/design/08_diameter_client.md` |
 | `internal/storage/` | `docs/quickref.md` | `docs/design/11_database_ha.md` |
 | `internal/cache/` | `docs/quickref.md` | `docs/design/12_redis_ha.md` |
+| `internal/nrf/` | `docs/quickref.md` | `docs/design/05_nf_profile.md` |
+| `internal/udm/` | `docs/quickref.md` | `docs/design/22_udm_integration.md` |
+| `internal/amf/` | `docs/quickref.md` | `docs/design/21_amf_integration.md` |
+| `internal/ausf/` | `docs/quickref.md` | `docs/design/23_ausf_integration.md` |
+| `internal/resilience/` | `docs/quickref.md` | `docs/design/10_ha_architecture.md` |
+| `internal/metrics/` | `docs/quickref.md` | `docs/design/19_observability.md` |
+| `internal/logging/` | `docs/quickref.md` | `docs/design/19_observability.md` |
+| `internal/tracing/` | `docs/quickref.md` | `docs/design/19_observability.md` |
 
-## Implementation Order
+## GSD Workflow Integration
 
-### Phase 1: Foundation (Start Here)
+### Per-Phase Workflow
+
+For every phase, follow the GSD workflow in order:
 
 ```
-1. internal/types/           ← MUST DO FIRST
-   - snssai.go: GPSI, SUPI, Snssai validation
-   - nssaa_status.go: NssaaStatus enum
-
-2. internal/api/nssaa/
-   - handler.go: POST/PUT endpoints
-   - request.go, response.go types
-
-3. internal/api/aiw/
-   - Same pattern as nssaa/
-
-4. cmd/nssAAF/main.go
-   - Wire everything together
+/gsd-discuss-phase <n>  →  /gsd-plan-phase <n>  →  /gsd-execute-phase <n>  →  /gsd-transition
 ```
+
+Do not skip the discuss-phase — it captures decisions in `.planning/phases/<phase>/NN-CONTEXT.md` that inform planning and execution.
+
+### Discuss-Phase Outputs
+
+After `/gsd-discuss-phase`, these files must exist:
+
+| File | Purpose |
+|------|---------|
+| `.planning/phases/NN-Name/NN-CONTEXT.md` | Captured decisions, boundaries, spec references |
+| `.planning/phases/NN-Name/NN-DISCUSSION-LOG.md` | Audit trail of Q&A choices |
+
+### Plan-Phase Outputs
+
+After `/gsd-plan-phase`, these files must exist:
+
+| File | Purpose |
+|------|---------|
+| `.planning/phases/NN-Name/NN-PLAN.md` | Wave-based task breakdown |
+| `.planning/phases/NN-Name/NN-PLAN-CHECK.md` | Blockers and warnings from plan-checker |
+
+If `NN-PLAN-CHECK.md` has BLOCKER items, resolve them before executing.
+
+### Transition Outputs
+
+After `/gsd-transition`, these files must be updated:
+
+| File | Action |
+|------|--------|
+| `.planning/STATE.md` | Refresh project reference, update phase progress |
+| `.planning/PROJECT.md` | Move REQs: Active → Validated or Out of Scope |
+| `docs/roadmap/README.md` | Mark phase status: Pending → Done |
+| `docs/roadmap/module_index.md` | Update module status: TBD → READY |
 
 ## Code Template
 
@@ -97,7 +135,7 @@ func (h *Handler) [Method](w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-## Validation Checklist (Per Module)
+## Per-Module Validation Checklist
 
 ### Types
 - [ ] GPSI regex: `^5[0-9]{8,14}$`
@@ -133,6 +171,8 @@ func (h *Handler) [Method](w http.ResponseWriter, r *http.Request) {
 | RADIUS | TS 29.561 | Ch.16 |
 | Diameter | TS 29.561 | Ch.17 |
 | Data types | TS 29.571 | §5.4.4.60-61 |
+| NF profile | TS 29.510 | §6 |
+| NRM | TS 28.541 | §5.3.145-148 |
 
 ## Key Validation Rules
 
@@ -159,81 +199,83 @@ supiRegex := regexp.MustCompile(`^imu-[0-9]{15}$`)
 // 504: Gateway Timeout (AAA timeout)
 ```
 
-## Anti-Patterns to Avoid
+## Anti-Patterns
 
-1. **Don't hardcode values** — Use constants from `internal/types/`
-2. **Don't skip validation** — Always validate GPSI, Snssai, etc.
-3. **Don't use magic numbers** — Use constants from design docs
-4. **Don't ignore errors** — Return proper ProblemDetails
-5. **Don't forget correlation ID** — Use X-Request-ID header
+1. **Do not hardcode values** — use constants from `internal/types/`
+2. **Do not skip validation** — always validate GPSI, Snssai, etc.
+3. **Do not use magic numbers** — use constants from design docs
+4. **Do not ignore errors** — return proper ProblemDetails
+5. **Do not forget correlation ID** — use X-Request-ID header
+6. **Never invent API fields** not in TS 29.526
+7. **Never skip the NssaaStatus state machine** — PENDING is a required intermediate state
+8. **Never use generic error codes** — always use 3GPP ProblemDetails with `cause`
 
-## Roadmap Status Tracking (MANDATORY)
+## Roadmap Status Tracking
 
-Sau khi implement code xong, **BẮT BUỘC** cập nhật roadmap. Không được implement mà không cập nhật.
+After implementing code, **mandatory** — update the roadmap before committing.
 
-### File cần cập nhật
+### Files to Update
 
-#### 1. `docs/roadmap/module_index.md` — Bảng Module → Design Doc
+#### 1. `docs/roadmap/module_index.md`
 
-Khi hoàn thành một module, cập nhật cột **Status** từ `TBD` → `IN_PROGRESS` → `READY`:
+When a module is complete, update the **Status** column: `TBD` → `IN_PROGRESS` → `READY`
 
-```markdown
-| `internal/api/nssaa/` | `docs/design/02_nssaa_api.md` | 1 | READY |  ← đổi TBD → READY
+```
+| `internal/api/nssaa/` | `docs/design/02_nssaa_api.md` | 1 | READY |
 ```
 
-#### 2. `docs/roadmap/README.md` — Bảng Phase Status
+#### 2. `docs/roadmap/README.md`
 
-Khi hoàn thành một phase, cập nhật icon trạng thái:
+When a phase is complete, update the phase status icon:
 
-```markdown
-| Phase 1: Foundation | ✅ DONE | internal/api/nssaa/, internal/api/aiw/, internal/types/ |
+```
+| Phase 4: NF Integration | ✅ DONE | internal/nrf/, internal/udm/, ... |
 ```
 
-Trạng thái icons:
-- `⏳ PENDING` — Chưa bắt đầu
-- `🔄 IN_PROGRESS` — Đang implement
-- `✅ DONE` — Hoàn thành
-- `🚫 BLOCKED` — Bị chặn (dependency chưa xong)
+Status icons:
+- `⏳ PENDING` — Not started
+- `🔄 IN_PROGRESS` — Being implemented
+- `✅ DONE` — Complete
+- `🚫 BLOCKED` — Blocked by dependency
 
-#### 3. `docs/roadmap/PHASE_*.md` — Phase detail file
+#### 3. Phase detail file (`docs/roadmap/PHASE_*.md`)
 
-Trong mỗi phase file, checklist cần check off khi hoàn thành:
+Check off validation items:
 
 ```markdown
 ## Validation Checklist
 
-- [x] `go build ./...` compiles without errors     ← check khi xong
-- [x] `go test ./...` passes                       ← check khi xong
-- [ ] `golangci-lint run ./...` passes             ← chưa xong
+- [x] `go build ./...` compiles without errors
+- [x] `go test ./...` passes
+- [ ] `golangci-lint run ./...` passes
 ```
 
-### Quy trình cập nhật
+#### 4. GSD State Files
 
-Mỗi khi implement xong một module/phase:
+After completing a phase, also update GSD state:
 
 ```
-1. ✓ Code compile: go build ./...
-2. ✓ Tests pass: go test ./...
-3. ✓ Lint clean: golangci-lint run ./...
-4. ✓ Cập nhật module_index.md → Status = READY
-5. ✓ Cập nhật README.md → Phase Status
-6. ✓ Cập nhật PHASE_*.md → Checklist
-7. ✓ Commit với message format: "feat(module): <module> — <mô tả>"
+5. Update .planning/STATE.md → Phase progress
+6. Update .planning/PROJECT.md → Move REQs from Active to Validated
+7. Update .planning/REQUIREMENTS.md → Check off completed requirements
 ```
 
 ### Tracking Checklist
 
-Trước khi commit code, đảm bảo đã cập nhật:
+Before committing code, confirm all of the following:
 
 - [ ] `docs/roadmap/module_index.md` — Module Status updated
-- [ ] `docs/roadmap/README.md` — Phase Status updated (nếu phase hoàn tất)
+- [ ] `docs/roadmap/README.md` — Phase Status updated (if phase complete)
 - [ ] `docs/roadmap/PHASE_*.md` — Deliverable checklist checked off
-- [ ] Commit message có prefix đúng: `feat/`, `fix/`, `refactor/`, `docs/`
+- [ ] `.planning/STATE.md` — Phase progress updated
+- [ ] `.planning/PROJECT.md` — REQs moved to Validated (if phase complete)
+- [ ] Commit message uses correct prefix: `feat/`, `fix/`, `refactor/`, `docs/`
 
-### Anti-Patterns về Roadmap
+### Anti-Patterns
 
-1. **Không bao giờ** để `TBD` nếu module đã có code
-2. **Không bao giờ** commit code mà không cập nhật roadmap
-3. **Không bao giờ** để Phase `⏳ PENDING` nếu đã có module `READY` trong phase đó
-4. **Không bao giờ** xóa checklist items — chỉ check `[x]` hoặc `[ ]`
-5. **Không bao giờ** bỏ qua bước lint/test trước khi đánh dấu READY
+1. **Never leave `TBD`** if module code exists
+2. **Never commit code** without updating the roadmap
+3. **Never mark phase `⏳ PENDING`** if modules inside are `READY`
+4. **Never delete checklist items** — only check `[x]` or `[ ]`
+5. **Never skip lint/test** before marking a module READY
+6. **Never skip the GSD discuss-phase** — decisions must be captured in `NN-CONTEXT.md`
