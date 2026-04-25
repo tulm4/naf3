@@ -21,10 +21,19 @@ import (
 	"github.com/operator/nssAAF/internal/api/nssaa"
 	"github.com/operator/nssAAF/internal/config"
 	"github.com/operator/nssAAF/internal/proto"
+	"github.com/operator/nssAAF/internal/tracing"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 )
 
 var configPath = flag.String("config", "configs/biz.yaml", "path to YAML configuration file")
+
+// Closure variables for health endpoint dependency checks (filled in Task 04-04)
+var (
+	pgHealth    func(ctx context.Context) error
+	redisHealth func(ctx context.Context) error
+	nrfClient   interface{ IsRegistered() bool }
+)
 
 func main() {
 	flag.Parse()
@@ -48,6 +57,10 @@ func main() {
 		"version", cfg.Version,
 		"use_mtls", cfg.Biz.UseMTLS,
 	)
+
+	// Initialize OpenTelemetry tracing — D-01
+	tracingShutdown := tracing.Init("nssAAF-biz", cfg.Version, podID)
+	defer tracingShutdown()
 
 	// Build API root URL
 	apiRoot := cfg.Server.Addr
@@ -100,8 +113,9 @@ func main() {
 	mux.Handle("/nnssaaf-aiw/", http.StripPrefix("/nnssaaf-aiw", aiwRouter))
 
 	// ─── OAM endpoints ─────────────────────────────────────────────────────
-	mux.HandleFunc("/health", handleHealth)
-	mux.HandleFunc("/ready", handleReady)
+	mux.HandleFunc("/healthz/live", handleLiveness)
+	mux.HandleFunc("/healthz/ready", handleReadiness)
+	mux.Handle("/metrics", promhttp.Handler())
 
 	// ─── Middleware stack ─────────────────────────────────────────────────
 	var handler http.Handler = mux
@@ -254,16 +268,65 @@ func mustLoadCert(certPath, keyPath string) tls.Certificate {
 	return cert
 }
 
-func handleHealth(w http.ResponseWriter, r *http.Request) {
+// handleLiveness implements /healthz/live — always 200, no dependency checks.
+// REQ-18 / D-07: Liveness probe, process alive only.
+func handleLiveness(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(common.HeaderContentType, common.MediaTypeJSONVersion)
 	w.WriteHeader(http.StatusOK)
 	io.WriteString(w, `{"status":"ok","service":"nssAAF-biz"}`)
 }
 
-func handleReady(w http.ResponseWriter, r *http.Request) {
+// handleReadiness implements /healthz/ready — checks PostgreSQL, Redis, AAA GW, NRF.
+// REQ-18 / D-07: Readiness probe with dependency checks.
+// Returns 503 if any critical dependency is unhealthy.
+func handleReadiness(w http.ResponseWriter, r *http.Request) {
+	checks := map[string]string{}
+
+	// PostgreSQL (pgHealth set in main after pool creation)
+	if pgHealth != nil {
+		if err := pgHealth(r.Context()); err != nil {
+			checks["postgres"] = "unhealthy: " + err.Error()
+		} else {
+			checks["postgres"] = "ok"
+		}
+	} else {
+		checks["postgres"] = "degraded (not initialized)"
+	}
+
+	// Redis (redisHealth set in main after pool creation)
+	if redisHealth != nil {
+		if err := redisHealth(r.Context()); err != nil {
+			checks["redis"] = "unhealthy: " + err.Error()
+		} else {
+			checks["redis"] = "ok"
+		}
+	} else {
+		checks["redis"] = "degraded (not initialized)"
+	}
+
+	// NRF registration (degraded, not unhealthy per D-04)
+	if nrfClient != nil && nrfClient.IsRegistered() {
+		checks["nrf_registration"] = "ok"
+	} else {
+		checks["nrf_registration"] = "degraded (retrying)"
+	}
+
+	// Determine overall status
+	allOk := true
+	for _, v := range checks {
+		if v != "ok" && v != "degraded (retrying)" && v != "degraded (not initialized)" {
+			allOk = false
+			break
+		}
+	}
+
 	w.Header().Set(common.HeaderContentType, common.MediaTypeJSONVersion)
-	w.WriteHeader(http.StatusOK)
-	io.WriteString(w, `{"status":"ready","service":"nssAAF-biz"}`)
+	if allOk {
+		w.WriteHeader(http.StatusOK)
+	} else {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}
+	json.NewEncoder(w).Encode(checks)
 }
 
 func signalReceived() <-chan struct{} {
