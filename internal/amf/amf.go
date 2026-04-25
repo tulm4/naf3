@@ -189,24 +189,25 @@ func (c *Client) sendNotification(ctx context.Context, typ NotificationType, uri
 func extractHostPort(uri string) string {
 	if len(uri) > 7 && uri[:7] == "http://" {
 		rest := uri[7:]
+		// Find the colon after the host
 		for i := 0; i < len(rest); i++ {
-			if rest[i] == ':' && i > 0 {
+			if rest[i] == ':' {
+				// Found colon — port starts at i+1
 				end := i + 1
 				for end < len(rest) && rest[end] != '/' {
 					end++
 				}
-				return rest[i-1 : end]
+				return rest[:end] // host:port
 			}
-		}
-		// fallback: no port found, return up to first slash
-		for i, ch := range rest {
-			if ch == '/' {
+			if rest[i] == '/' {
+				// No port found — return host only
 				return rest[:i]
 			}
 		}
+		// No colon or slash found — return the rest as host
 		return rest
 	}
-	// No http:// prefix
+	// No http:// prefix — parse as-is
 	for i, ch := range uri {
 		if ch == ':' {
 			return uri[:i+1] + uri[i+1:min(i+6, len(uri))]
