@@ -1,0 +1,11 @@
+# Mock AAA-S: lightweight Go binary with RADIUS (UDP/1812) + Diameter (TCP/3868).
+# No external dependencies beyond stdlib.
+FROM golang:1.22-alpine AS builder
+WORKDIR /src
+COPY compose/mock_aaa_s.go .
+RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/mock-aaa-s ./compose/mock_aaa_s.go
+
+FROM alpine:3.19
+COPY --from=builder /bin/mock-aaa-s /bin/mock-aaa-s
+EXPOSE 1812/udp 3868/tcp
+CMD ["/bin/mock-aaa-s"]
