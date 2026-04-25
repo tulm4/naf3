@@ -82,8 +82,8 @@
 | | `- [ ] 04-02-PLAN.md — NF Core: NRF client, PostgreSQL session store, handler options` |
 | | `- [ ] 04-03-PLAN.md — Observability: Prometheus metrics, OTel tracing, health endpoints` |
 | | `- [ ] 04-04-PLAN.md — NF Wiring: UDM, AMF, AUSF, DLQ, main wiring` |
-| | `- [ ] 04-05-PLAN.md — Validation: ServiceMonitor CRDs, alerting rules, config fixture` |
-| **Status** | Pending |
+| | `- [x] 04-05-PLAN.md — Validation: ServiceMonitor CRDs, alerting rules, config fixture` |
+| **Status** | Done |
 | **Depends on** | Phase R |
 
 ### Phase 5: Security & Crypto
