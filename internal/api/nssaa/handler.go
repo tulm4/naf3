@@ -89,9 +89,15 @@ func (s *InMemoryStore) Close() error {
 // It receives HTTP requests validated by the oapi-codegen router and
 // delegates to the business logic layer.
 type Handler struct {
-	store   AuthCtxStore
-	aaa     AAARouter
-	apiRoot string
+	store      AuthCtxStore
+	aaa        AAARouter
+	apiRoot    string
+	nrfClient  interface {
+		IsRegistered() bool
+	}
+	udmClient  interface {
+		GetAuthContext(ctx context.Context, supi string) (interface{}, error)
+	}
 }
 
 // HandlerOption configures a Handler.
@@ -105,6 +111,20 @@ func WithAAA(aaa AAARouter) HandlerOption {
 // WithAPIRoot sets the API root URL for Location header generation.
 func WithAPIRoot(apiRoot string) HandlerOption {
 	return func(h *Handler) { h.apiRoot = apiRoot }
+}
+
+// WithNRFClient sets the NRF client for service discovery.
+func WithNRFClient(nrf interface {
+	IsRegistered() bool
+}) HandlerOption {
+	return func(h *Handler) { h.nrfClient = nrf }
+}
+
+// WithUDMClient sets the UDM client for subscription data retrieval.
+func WithUDMClient(udm interface {
+	GetAuthContext(ctx context.Context, supi string) (interface{}, error)
+}) HandlerOption {
+	return func(h *Handler) { h.udmClient = udm }
 }
 
 // NewHandler creates a new NSSAA handler.
