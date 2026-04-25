@@ -1,0 +1,64 @@
+# ServiceMonitor for NSSAAF Biz Pod
+# REQ-15: ServiceMonitor CRDs for HTTP Gateway, Biz Pod, AAA Gateway
+# Spec: docs/design/19_observability.md §2.2
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: nssaa-biz-monitor
+  labels:
+    team: platform
+    app: nssaa-biz
+spec:
+  selector:
+    matchLabels:
+      app: nssaa-biz
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+  namespaceSelector:
+    matchNames:
+      - nssaa-system
+---
+# ServiceMonitor for NSSAAF HTTP Gateway
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: nssaa-http-gw-monitor
+  labels:
+    team: platform
+    app: nssaa-http-gw
+spec:
+  selector:
+    matchLabels:
+      app: nssaa-http-gw
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+  namespaceSelector:
+    matchNames:
+      - nssaa-system
+---
+# ServiceMonitor for NSSAAF AAA Gateway
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: nssaa-aaa-gw-monitor
+  labels:
+    team: platform
+    app: nssaa-aaa-gw
+spec:
+  selector:
+    matchLabels:
+      app: nssaa-aaa-gw
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+  namespaceSelector:
+    matchNames:
+      - nssaa-system
