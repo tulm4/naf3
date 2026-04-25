@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"flag"
+	"fmt"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -19,20 +20,27 @@ import (
 	"github.com/operator/nssAAF/internal/api/aiw"
 	"github.com/operator/nssAAF/internal/api/common"
 	"github.com/operator/nssAAF/internal/api/nssaa"
+	"github.com/operator/nssAAF/internal/amf"
+	"github.com/operator/nssAAF/internal/ausf"
+	"github.com/operator/nssAAF/internal/cache/redis"
 	"github.com/operator/nssAAF/internal/config"
+	"github.com/operator/nssAAF/internal/nrf"
 	"github.com/operator/nssAAF/internal/proto"
+	"github.com/operator/nssAAF/internal/resilience"
+	"github.com/operator/nssAAF/internal/storage/postgres"
 	"github.com/operator/nssAAF/internal/tracing"
+	"github.com/operator/nssAAF/internal/udm"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/redis/go-redis/v9"
+	goredis "github.com/redis/go-redis/v9"
 )
 
 var configPath = flag.String("config", "configs/biz.yaml", "path to YAML configuration file")
 
-// Closure variables for health endpoint dependency checks (filled in Task 04-04)
+// Health check closure variables (set during initialization)
 var (
 	pgHealth    func(ctx context.Context) error
 	redisHealth func(ctx context.Context) error
-	nrfClient   interface{ IsRegistered() bool }
+	nrfHealth   interface{ IsRegistered() bool }
 )
 
 func main() {
@@ -62,15 +70,95 @@ func main() {
 	tracingShutdown := tracing.Init("nssAAF-biz", cfg.Version, podID)
 	defer tracingShutdown()
 
+	// Context for initialization (long-running operations)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	// Build API root URL
 	apiRoot := cfg.Server.Addr
 	if !hasScheme(apiRoot) {
 		apiRoot = "http://" + apiRoot
 	}
 
-	// ─── Data stores ────────────────────────────────────────────────────────
-	nssaaStore := nssaa.NewInMemoryStore()
-	aiwStore := aiw.NewInMemoryStore()
+	// ─── PostgreSQL pool + session stores ────────────────────────────────
+	// REQ-09: PostgreSQL session store replaces in-memory store
+	pgPool, err := postgres.NewPool(ctx, postgres.Config{
+		DSN:               fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
+			cfg.Database.User, cfg.Database.Password, cfg.Database.Host,
+			cfg.Database.Port, cfg.Database.Name, cfg.Database.SSLMode),
+		MaxConns:          int32(cfg.Database.MaxConns),
+		MinConns:          int32(cfg.Database.MinConns),
+		MaxConnLifetime:   cfg.Database.ConnMaxLifetime,
+		MaxConnIdleTime:   10 * time.Minute,
+		HealthCheckPeriod: 30 * time.Second,
+	})
+	if err != nil {
+		slog.Error("postgres pool", "error", err)
+		os.Exit(1)
+	}
+	defer pgPool.Close()
+
+	// Encryption key from config — use empty key for dev (Phase 4)
+	// Phase 5 will add proper key management
+	var encryptor *postgres.Encryptor
+	encryptor, _ = postgres.NewEncryptor([]byte{}) // empty key = no encryption for now
+
+	// REQ-09: NewSessionStore/NewAIWSessionStore per D-06
+	nssaaStore := postgres.NewSessionStore(pgPool, encryptor)
+	aiwStore := postgres.NewAIWSessionStore(pgPool, encryptor)
+
+	// ─── Redis pool + DLQ ───────────────────────────────────────────────
+	redisPool, err := redis.NewPool(ctx, redis.Config{
+		Addrs:        []string{cfg.Redis.Addr},
+		Password:     cfg.Redis.Password,
+		DB:           cfg.Redis.DB,
+		PoolSize:     cfg.Redis.PoolSize,
+		MinIdleConns: 10,
+		DialTimeout:  100 * time.Millisecond,
+		ReadTimeout:  100 * time.Millisecond,
+		WriteTimeout: 100 * time.Millisecond,
+	})
+	if err != nil {
+		slog.Error("redis pool", "error", err)
+		os.Exit(1)
+	}
+	defer redisPool.Close()
+
+	// REQ-10: DLQ for AMF notification failures
+	dlq := redis.NewDLQ(redisPool)
+	go dlq.Process(ctx)
+
+	// Wire health check closures
+	pgHealth = pgPool.Ping
+	redisHealth = func(ctx context.Context) error {
+		return redisPool.Client().Ping(ctx).Err()
+	}
+
+	// ─── Resilience ─────────────────────────────────────────────────────
+	// REQ-11: Per host:port circuit breaker registry
+	cbRegistry := resilience.NewRegistry(
+		cfg.AAA.FailureThreshold,
+		cfg.AAA.RecoveryTimeout,
+		3*time.Second, // successThreshold: 3 consecutive successes to close
+	)
+
+	// ─── NRF client ──────────────────────────────────────────────────────
+	// REQ-01 / D-04: Startup in degraded mode — NRF registration in background
+	nrf := nrf.NewClient(cfg.NRF)
+	go nrf.RegisterAsync(ctx)
+	go nrf.StartHeartbeat(ctx)
+	nrfHealth = nrf
+
+	// ─── UDM client ─────────────────────────────────────────────────────
+	udmClient := udm.NewClient(cfg.UDM, nrf)
+
+	// ─── AUSF client ────────────────────────────────────────────────────
+	ausfClient := ausf.NewClient(cfg.AUSF)
+
+	// ─── AMF notifier ──────────────────────────────────────────────────
+	// amfClient sends AMF re-auth/revocation notifications with retry + DLQ
+	// Wire to handler via amf.WithClient in future phases
+	_ = amf.NewClient(30*time.Second, cbRegistry, dlq)
 
 	// ─── HTTP AAA client (satisfies eap.AAAClient = AAARouter) ────────────────
 	tlsCfg := &tls.Config{}
@@ -91,15 +179,21 @@ func main() {
 	)
 
 	// ─── N58: Nnssaaf_NSSAA ────────────────────────────────────────────────
+	// REQ-04: UDM Nudm_UECM_Get wired to N58 handler via WithUDMClient
+	// REQ-01: NRF client for service discovery via WithNRFClient
 	nssaaHandler := nssaa.NewHandler(nssaaStore,
 		nssaa.WithAPIRoot(apiRoot),
-		nssaa.WithAAA(aaaClient), // aaaClient satisfies eap.AAAClient
+		nssaa.WithAAA(aaaClient),
+		nssaa.WithNRFClient(nrf),
+		nssaa.WithUDMClient(udmClient),
 	)
 	nssaaRouter := nssaa.NewRouter(nssaaHandler, apiRoot)
 
 	// ─── N60: Nnssaaf_AIW ─────────────────────────────────────────────────
+	// REQ-08: AUSF client wired to AIW handler via WithAUSFClient
 	aiwHandler := aiw.NewHandler(aiwStore,
 		aiw.WithAPIRoot(apiRoot),
+		aiw.WithAUSFClient(ausfClient),
 	)
 	aiwRouter := aiw.NewRouter(aiwHandler, apiRoot)
 
@@ -151,6 +245,14 @@ func main() {
 		slog.Info("shutdown signal received")
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
+
+		// Graceful shutdown: deregister from NRF
+		if nrf != nil {
+			nrfCtx, nrfCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer nrfCancel()
+			_ = nrf.Deregister(nrfCtx) // best-effort
+		}
+
 		srv.Shutdown(ctx)
 		aaaClient.Close()
 	}
@@ -217,7 +319,7 @@ func handleCoA(ctx context.Context, req *proto.AaaServerInitiatedRequest) []byte
 // podHeartbeat registers the Biz Pod in the Redis SET and refreshes every 30 seconds.
 // On context cancellation, it removes the pod from the SET.
 func podHeartbeat(ctx context.Context, redisAddr, podID string) {
-	rdb := redis.NewClient(&redis.Options{Addr: redisAddr})
+	rdb := goredis.NewClient(&goredis.Options{Addr: redisAddr})
 	defer rdb.Close()
 
 	// Register immediately on startup
@@ -305,7 +407,7 @@ func handleReadiness(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// NRF registration (degraded, not unhealthy per D-04)
-	if nrfClient != nil && nrfClient.IsRegistered() {
+	if nrfHealth != nil && nrfHealth.IsRegistered() {
 		checks["nrf_registration"] = "ok"
 	} else {
 		checks["nrf_registration"] = "degraded (retrying)"

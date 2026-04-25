@@ -26,15 +26,28 @@ const (
 // DLQItem represents an item in the AMF notification DLQ.
 // D-02: Redis LPUSH/BRPOP, key `nssAAF:dlq:amf-notifications`.
 type DLQItem struct {
-	ID          string          `json:"id"`
+	ID          string           `json:"id"`
 	Type        NotificationType `json:"type"`
-	URI         string          `json:"uri"`
-	Payload     json.RawMessage `json:"payload"`
-	AuthCtxID   string          `json:"authCtxId"`
-	Attempt     int             `json:"attempt"`
-	MaxAttempts int             `json:"maxAttempts"`
-	CreatedAt   time.Time       `json:"createdAt"`
-	LastError   string          `json:"lastError"`
+	URI         string           `json:"uri"`
+	Payload     json.RawMessage  `json:"payload"`
+	AuthCtxID   string           `json:"authCtxId"`
+	Attempt     int              `json:"attempt"`
+	MaxAttempts int              `json:"maxAttempts"`
+	CreatedAt   time.Time        `json:"createdAt"`
+	LastError   string           `json:"lastError"`
+}
+
+// redisAMFDLQItem is the DLQItem variant stored in Redis.
+// Field types match redis.AMFDLQItem for serialization compatibility.
+type redisAMFDLQItem struct {
+	ID        string           `json:"id"`
+	Type      string           `json:"type"`
+	URI       string           `json:"uri"`
+	Payload   json.RawMessage  `json:"payload"`
+	AuthCtxID string           `json:"authCtxId"`
+	Attempt   int              `json:"attempt"`
+	CreatedAt time.Time        `json:"createdAt"`
+	LastError string           `json:"lastError"`
 }
 
 // Client sends notifications to the AMF.
@@ -44,14 +57,14 @@ type DLQItem struct {
 type Client struct {
 	httpClient    *http.Client
 	cbRegistry    *resilience.Registry
-	dlq           interface{ Enqueue(ctx context.Context, item *DLQItem) error }
+	dlq           interface{ Enqueue(ctx context.Context, item interface{}) error }
 	notifyTimeout time.Duration
 	maxRetries    int
 }
 
 // NewClient creates a new AMF notifier.
 func NewClient(timeout time.Duration, cbRegistry *resilience.Registry, dlq interface {
-	Enqueue(ctx context.Context, item *DLQItem) error
+	Enqueue(ctx context.Context, item interface{}) error
 }) *Client {
 	if timeout == 0 {
 		timeout = 30 * time.Second
@@ -139,7 +152,18 @@ func (c *Client) sendNotification(ctx context.Context, typ NotificationType, uri
 
 	if err != nil {
 		item.LastError = err.Error()
-		if dlqErr := c.dlq.Enqueue(ctx, item); dlqErr != nil {
+		// Convert to redis.AMFDLQItem for storage
+		dlqItem := &redisAMFDLQItem{
+			ID:        item.ID,
+			Type:      string(item.Type),
+			URI:       item.URI,
+			Payload:   item.Payload,
+			AuthCtxID: item.AuthCtxID,
+			Attempt:   item.Attempt,
+			CreatedAt: item.CreatedAt,
+			LastError: item.LastError,
+		}
+		if dlqErr := c.dlq.Enqueue(ctx, dlqItem); dlqErr != nil {
 			slog.Error("amf notification: dlq enqueue failed",
 				"auth_ctx_id", authCtxID,
 				"type", typ,

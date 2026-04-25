@@ -17,6 +17,7 @@ import (
 	"github.com/operator/nssAAF/internal/api/common"
 	nssaanats "github.com/operator/nssAAF/oapi-gen/gen/nssaa"
 	"github.com/operator/nssAAF/oapi-gen/gen/specs"
+	"github.com/operator/nssAAF/internal/udm"
 )
 
 // AAARouter forwards EAP payloads to AAA-S (RADIUS or Diameter).
@@ -95,9 +96,7 @@ type Handler struct {
 	nrfClient  interface {
 		IsRegistered() bool
 	}
-	udmClient  interface {
-		GetAuthContext(ctx context.Context, supi string) (interface{}, error)
-	}
+	udmClient *udm.Client
 }
 
 // HandlerOption configures a Handler.
@@ -121,10 +120,8 @@ func WithNRFClient(nrf interface {
 }
 
 // WithUDMClient sets the UDM client for subscription data retrieval.
-func WithUDMClient(udm interface {
-	GetAuthContext(ctx context.Context, supi string) (interface{}, error)
-}) HandlerOption {
-	return func(h *Handler) { h.udmClient = udm }
+func WithUDMClient(udmClient *udm.Client) HandlerOption {
+	return func(h *Handler) { h.udmClient = udmClient }
 }
 
 // NewHandler creates a new NSSAA handler.

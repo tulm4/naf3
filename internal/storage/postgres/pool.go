@@ -107,3 +107,8 @@ func (p *Pool) Stats() *pgxpool.Stat {
 func (p *Pool) Close() {
 	p.pool.Close()
 }
+
+// Ping checks database connectivity.
+func (p *Pool) Ping(ctx context.Context) error {
+	return p.pool.Ping(ctx)
+}

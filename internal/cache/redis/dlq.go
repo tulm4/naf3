@@ -37,7 +37,7 @@ func NewDLQ(pool *Pool) *DLQ {
 	return &DLQ{pool: pool}
 }
 
-// Enqueue adds an item to the DLQ using LPUSH.
+// Enqueue adds an AMF notification DLQ item to the queue using LPUSH.
 // D-02: Redis LPUSH for queue insertion.
 func (d *DLQ) Enqueue(ctx context.Context, item interface{}) error {
 	data, err := json.Marshal(item)
@@ -97,8 +97,6 @@ func (d *DLQ) Process(ctx context.Context) {
 			)
 
 			// Re-enqueue for next cycle (DLQ items are inspected, not auto-retried here).
-			// Actual delivery retry is the responsibility of the AMF notifier or
-			// an external DLQ worker that reads from this queue.
 			if reErr := d.Enqueue(ctx, item); reErr != nil {
 				slog.Warn("dlq: re-enqueue failed",
 					"id", item.ID,
