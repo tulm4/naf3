@@ -1,6 +1,8 @@
-// Package aaa provides AAA proxy (AAA-P) functionality for routing between
-// NSSAAF and NSS-AAA servers over RADIUS or Diameter.
-// Spec: TS 29.561 §16-17
+// Package aaa provides AAA proxy (AAA-P) functionality.
+// DEPRECATED: This package is no longer used by any binary.
+// Routing decisions are now in internal/biz/router.go.
+// AAA transport is now in internal/aaa/gateway/.
+// This file is kept for reference only.
 package aaa
 
 import (
