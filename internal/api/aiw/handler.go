@@ -90,9 +90,12 @@ func (s *InMemoryStore) Close() error {
 
 // Handler implements aiwnats.ServerInterface.
 type Handler struct {
-	store   AuthCtxStore
-	aaa     AAARouter
-	apiRoot string
+	store      AuthCtxStore
+	aaa        AAARouter
+	apiRoot    string
+	ausfClient interface {
+		ForwardMSK(ctx context.Context, authCtxID string, msk []byte) error
+	}
 }
 
 // HandlerOption configures a Handler.
@@ -106,6 +109,13 @@ func WithAAA(aaa AAARouter) HandlerOption {
 // WithAPIRoot sets the API root URL for Location header generation.
 func WithAPIRoot(apiRoot string) HandlerOption {
 	return func(h *Handler) { h.apiRoot = apiRoot }
+}
+
+// WithAUSFClient sets the AUSF client for MSK forwarding.
+func WithAUSFClient(ausf interface {
+	ForwardMSK(ctx context.Context, authCtxID string, msk []byte) error
+}) HandlerOption {
+	return func(h *Handler) { h.ausfClient = ausf }
 }
 
 // NewHandler creates a new AIW handler.
