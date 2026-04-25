@@ -21,18 +21,18 @@
 | `internal/aaa/` | `docs/design/09_aaa_proxy.md` | 2 | READY |
 | `internal/storage/postgres/` | `docs/design/11_database_ha.md` | 3 | READY |
 | `internal/cache/redis/` | `docs/design/12_redis_ha.md` | 3 | READY |
-| `internal/nrf/` | `docs/design/05_nf_profile.md` | 4 | STUB — NRF client needs wiring in cmd/biz/main.go |
-| `internal/udm/` | `docs/design/22_udm_integration.md` | 4 | STUB — Nudm_UECM_Get needs integration in N58 handler |
-| `internal/amf/` | `docs/design/21_amf_integration.md` | 4 | STUB — AMF notification sender needs wiring in handleReAuth/handleRevocation |
-| `internal/ausf/` | `docs/design/23_ausf_integration.md` | 4 | TBD — N60 client for MSK forwarding; directory does NOT exist |
-| `internal/resilience/` | `docs/design/10_ha_architecture.md`, `docs/roadmap/PHASE_4_NFIntegration_Observability.md` | 4 | TBD |
-| `internal/metrics/` | `docs/roadmap/PHASE_4_NFIntegration_Observability.md` | 4 | TBD |
-| `internal/logging/` | `docs/roadmap/PHASE_4_NFIntegration_Observability.md` | 4 | TBD |
-| `internal/tracing/` | `docs/roadmap/PHASE_4_NFIntegration_Observability.md` | 4 | TBD |
+| `internal/nrf/` | `docs/design/05_nf_profile.md` | 4 | READY |
+| `internal/udm/` | `docs/design/22_udm_integration.md` | 4 | READY |
+| `internal/amf/` | `docs/design/21_amf_integration.md` | 4 | READY |
+| `internal/ausf/` | `docs/design/23_ausf_integration.md` | 4 | READY |
+| `internal/resilience/` | `docs/design/10_ha_architecture.md`, `docs/roadmap/PHASE_4_NFIntegration_Observability.md` | 4 | READY |
+| `internal/metrics/` | `docs/roadmap/PHASE_4_NFIntegration_Observability.md` | 4 | READY |
+| `internal/logging/` | `docs/roadmap/PHASE_4_NFIntegration_Observability.md` | 4 | READY |
+| `internal/tracing/` | `docs/roadmap/PHASE_4_NFIntegration_Observability.md` | 4 | READY |
 | `internal/auth/` | `docs/design/15_sbi_security.md`, `docs/design/16_aaa_security.md`, `docs/roadmap/PHASE_5_Security_Crypto.md` | 5 | TBD |
 | `internal/crypto/` | `docs/design/17_crypto.md`, `docs/roadmap/PHASE_5_Security_Crypto.md` | 5 | TBD |
 | `internal/nrm/` | `docs/design/18_nrm_fcaps.md`, `docs/roadmap/PHASE_6_Testing_NRM.md` | 6 | TBD |
-| *(cross-cutting)* | `docs/design/19_observability.md` | 4 | TBD |
+| *(cross-cutting)* | `docs/design/19_observability.md` | 4 | READY |
 | *(cross-cutting)* | `docs/design/20_config_management.md` | ALL | TBD |
 | *(cross-cutting)* | `docs/design/24_test_strategy.md` | 6 | TBD |
 | `deployments/helm/nssaa-http-gateway/` | `docs/roadmap/PHASE_7_K8s.md` | 7 | TBD |
@@ -164,10 +164,10 @@ These modules span multiple phases and are referenced by all components.
 
 || Module | Description | Phase | Status |
 |--------|-------------|-------|--------|
-| `internal/resilience/` | Circuit breaker, retry, timeout | 4 | TBD |
-| `internal/metrics/` | Prometheus metrics | 4 | TBD |
-| `internal/logging/` | Structured JSON logging | 4 | TBD |
-| `internal/tracing/` | OpenTelemetry distributed tracing | 4 | TBD |
+| `internal/resilience/` | Circuit breaker, retry, timeout | 4 | READY |
+| `internal/metrics/` | Prometheus metrics | 4 | READY |
+| `internal/logging/` | Structured JSON logging | 4 | READY |
+| `internal/tracing/` | OpenTelemetry distributed tracing | 4 | READY |
 | `internal/auth/` | OAuth2/JWT validation, mTLS | 5 | TBD |
 | `internal/crypto/` | AES-256-GCM, KEK/DEK hierarchy | 5 | TBD |
 | `internal/nrm/` | NRM/FCAPS management | 6 | TBD |
