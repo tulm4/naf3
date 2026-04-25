@@ -1,0 +1,84 @@
+# Prometheus alerting rules for NSSAAF
+# REQ-19: Error rate >1%, P99 >500ms, circuit breaker open, session table full
+# Spec: docs/design/19_observability.md §5
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: nssaa-alerts
+  labels:
+    team: platform
+    app: nssaa-biz
+spec:
+  groups:
+    - name: nssaa-biz.alerts
+      rules:
+        # High error rate — REQ-19: error rate > 1%
+        - alert: NssaaHighErrorRate
+          expr: |
+            sum(rate(nssAAF_requests_total{status_code=~"5.."}[5m]))
+            / sum(rate(nssAAF_requests_total[5m])) > 0.01
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "NSSAAF error rate > 1%"
+            description: "Error rate: {{ $value | humanizePercentage }}"
+
+        # High latency P99 — REQ-19: P99 > 500ms
+        - alert: NssaaHighLatency
+          expr: |
+            histogram_quantile(0.99,
+              sum(rate(nssAAF_request_duration_seconds_bucket[5m]))
+              by (le)) > 0.5
+          for: 5m
+          labels:
+            severity: major
+          annotations:
+            summary: "NSSAAF P99 latency > 500ms"
+
+        # Circuit breaker open — REQ-19
+        - alert: NssaaCircuitBreakerOpen
+          expr: nssAAF_circuit_breaker_state == 1
+          for: 1m
+          labels:
+            severity: major
+          annotations:
+            summary: "Circuit breaker OPEN for {{ $labels.server }}"
+
+        # Session table near capacity — REQ-19
+        - alert: NssaaSessionTableFull
+          expr: nssAAF_eap_sessions_active > 45000
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "EAP sessions approaching limit (45k/50k)"
+
+        # Database unavailable
+        - alert: NssaaDatabaseUnreachable
+          expr: nssAAF_db_query_duration_seconds_count{operation="query"}[1m] == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Database queries stopped"
+
+        # AAA server high failure rate
+        - alert: NssaaAaaServerFailures
+          expr: |
+            sum(rate(nssAAF_aaa_requests_total{result="failure"}[5m]))
+            by (server) > 10
+          for: 3m
+          labels:
+            severity: major
+          annotations:
+            summary: "High failure rate for AAA server {{ $labels.server }}"
+
+        # DLQ depth warning
+        - alert: NssaaDLQDepthHigh
+          expr: nssAAF_dlq_depth > 100
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "AMF notification DLQ depth is high ({{ $value }} items)"
