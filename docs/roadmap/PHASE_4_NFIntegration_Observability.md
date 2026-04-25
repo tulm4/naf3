@@ -1109,48 +1109,48 @@ spec:
 
 ### NF Integration (Priority: P0)
 
-- [ ] NSSAAF registers with NRF on startup (Nnrf_NFRegistration) — blocks 5G discovery
-- [ ] Nnrf_NFHeartBeat sent every 5 minutes
-- [ ] AMF discovered via Nnrf_NFDiscovery before sending notifications
-- [ ] UDM Nudm_UECM_Get wired to N58 handler (gates AAA routing)
-- [ ] UDM Nudm_UECM_UpdateAuthContext called after EAP completion
-- [ ] AMF Re-Auth notification POSTed to reauthNotifUri (on RADIUS CoA-Request)
-- [ ] AMF Revocation notification POSTed to revocNotifUri (on Diameter ASR)
-- [ ] AUSF N60 handler created (internal/ausf/)
-- [ ] AUSF MSK forwarding implemented (POST /nausf-auth/v1/.../msk)
-- [ ] PostgreSQL session store wired in cmd/biz/main.go
-- [ ] In-memory store replaced with persistent storage
+- [x] NSSAAF registers with NRF on startup (Nnrf_NFRegistration) — blocks 5G discovery
+- [x] Nnrf_NFHeartBeat sent every 5 minutes
+- [x] AMF discovered via Nnrf_NFDiscovery before sending notifications
+- [x] UDM Nudm_UECM_Get wired to N58 handler (gates AAA routing)
+- [x] UDM Nudm_UECM_UpdateAuthContext called after EAP completion
+- [x] AMF Re-Auth notification POSTed to reauthNotifUri (on RADIUS CoA-Request)
+- [x] AMF Revocation notification POSTed to revocNotifUri (on Diameter ASR)
+- [x] AUSF N60 handler created (internal/ausf/)
+- [x] AUSF MSK forwarding implemented (POST /nausf-auth/v1/.../msk)
+- [x] PostgreSQL session store wired in cmd/biz/main.go
+- [x] In-memory store replaced with persistent storage
 
 ### Resilience Patterns
 
-- [ ] Circuit breaker: CLOSED → OPEN (5 consecutive failures) → HALF_OPEN (30s) → CLOSED
-- [ ] Per-AAA-S circuit breaker prevents cascade to healthy servers
-- [ ] Per-S-NSSAI circuit breaker for slice-specific AAA routing
-- [ ] Retry: exponential backoff 1s, 2s, 4s with max 3 retries
-- [ ] Timeout: 30s EAP round, 10s AAA request, 5s DB, 100ms Redis
-- [ ] Health endpoint /healthz/live returns 200 if process alive
-- [ ] Health endpoint /healthz/ready returns 200 only if ready to serve traffic
-- [ ] Unit test coverage >90%
+- [x] Circuit breaker: CLOSED → OPEN (5 consecutive failures) → HALF_OPEN (30s) → CLOSED
+- [x] Per-AAA-S circuit breaker prevents cascade to healthy servers
+- [x] Per-S-NSSAI circuit breaker for slice-specific AAA routing
+- [x] Retry: exponential backoff 1s, 2s, 4s with max 3 retries
+- [x] Timeout: 30s EAP round, 10s AAA request, 5s DB, 100ms Redis
+- [x] Health endpoint /healthz/live returns 200 if process alive
+- [x] Health endpoint /healthz/ready returns 200 only if ready to serve traffic
+- [x] Unit test coverage >90%
 
 ### Observability
 
-- [ ] Prometheus metrics: requests, latency, EAP sessions, AAA stats
-- [ ] ServiceMonitor CRDs for all 3 components (HTTP GW, Biz, AAA GW)
-- [ ] Structured JSON logs with trace context (slog/json)
-- [ ] OpenTelemetry traces with W3C TraceContext propagation
-- [ ] Trace spans: per handler, DB, AAA, notification
-- [ ] P99 latency tracking per component
-- [ ] Alert rules: error rate >1%, P99 >500ms, circuit breaker open
+- [x] Prometheus metrics: requests, latency, EAP sessions, AAA stats
+- [x] ServiceMonitor CRDs for all 3 components (HTTP GW, Biz, AAA GW)
+- [x] Structured JSON logs with trace context (slog/json)
+- [x] OpenTelemetry traces with W3C TraceContext propagation
+- [x] Trace spans: per handler, DB, AAA, notification
+- [x] P99 latency tracking per component
+- [x] Alert rules: error rate >1%, P99 >500ms, circuit breaker open
 
 ### Integration
 
-- [ ] `go build ./...` compiles without errors
-- [ ] `go test ./internal/resilience/...` passes
-- [ ] `go test ./internal/metrics/...` passes
-- [ ] `go test ./internal/logging/...` passes
-- [ ] `go test ./internal/tracing/...` passes
-- [ ] Prometheus scrape targets discoverable
-- [ ] Grafana dashboards show per-component metrics
+- [x] `go build ./...` compiles without errors
+- [x] `go test ./internal/resilience/...` passes
+- [x] `go test ./internal/metrics/...` passes
+- [x] `go test ./internal/logging/...` passes
+- [x] `go test ./internal/tracing/...` passes
+- [x] Prometheus scrape targets discoverable
+- [x] Grafana dashboards show per-component metrics
 
 ---
 

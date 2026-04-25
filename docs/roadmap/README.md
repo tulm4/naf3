@@ -57,7 +57,7 @@ make run-aaa-gateway  # AAA GW on :9090
 | Phase 2: Protocol | ✅ DONE | `internal/eap/`, `internal/radius/` (Biz Pod only), `internal/diameter/` (Biz Pod only), `internal/aaa/` |
 | Phase 3: Data & Storage | ✅ DONE | `internal/storage/`, `internal/cache/` |
 | **Phase R: 3-Component Refactor** | ✅ DONE | `internal/proto/`, `cmd/biz/`, `cmd/http-gateway/`, `cmd/aaa-gateway/`, `internal/aaa/gateway/` |
-| Phase 4: NF Integration & Observability | ⏳ PENDING | `internal/nrf/` (NRF client wired, startup registration, heartbeat), `internal/udm/` (Nudm_UECM_Get wired to N58 handler, UpdateAuthContext), `internal/amf/` (AMF notifier wired, Re-Auth/Revocation POSTs), `internal/resilience/`, `internal/metrics/`, `internal/logging/`, `internal/tracing/` |
+| Phase 4: NF Integration & Observability | ✅ DONE | `internal/nrf/` (NRF client wired, startup registration, heartbeat), `internal/udm/` (Nudm_UECM_Get wired to N58 handler, UpdateAuthContext), `internal/amf/` (AMF notifier wired, Re-Auth/Revocation POSTs), `internal/ausf/` (AUSF N60 client, MSK forwarding), `internal/resilience/` (circuit breaker, retry), `internal/metrics/` (Prometheus metrics), `internal/logging/` (structured JSON logging), `internal/tracing/` (OpenTelemetry), `cmd/biz/main.go` (full NF wiring) |
 | Phase 5: Security & Crypto | ⏳ PENDING | `internal/auth/`, `internal/crypto/` |
 | Phase 6: Integration Testing & NRM | ⏳ PENDING | `test/`, `internal/nrm/` |
 | Phase 7: Kubernetes Deployment | ⏳ PENDING | `deployments/helm/`, `deployments/kustomize/`, `deployments/argo/` |
@@ -111,25 +111,25 @@ make run-aaa-gateway  # AAA GW on :9090
 ## Quality Gates
 
 ### Phase 4: NF Integration & Observability
-- [ ] NSSAAF registers with NRF on startup (Nnrf_NFRegistration)
-- [ ] Nnrf_NFHeartBeat sent every 5 minutes
-- [ ] AMF discovered via Nnrf_NFDiscovery before sending notifications
-- [ ] UDM Nudm_UECM_Get wired to N58 handler (gates AAA routing)
-- [ ] UDM Nudm_UECM_UpdateAuthContext called after EAP completion
-- [ ] AMF Re-Auth notification POSTed to reauthNotifUri (on RADIUS CoA-Request)
-- [ ] AMF Revocation notification POSTed to revocNotifUri (on Diameter ASR)
-- [ ] AUSF N60 handler created (internal/ausf/)
-- [ ] AUSF MSK forwarding implemented (POST /nausf-auth/v1/.../msk)
-- [ ] PostgreSQL session store wired in cmd/biz/main.go
-- [ ] Circuit breaker: CLOSED → OPEN (5 failures) → HALF_OPEN (30s) → CLOSED
-- [ ] Retry with exponential backoff 1s, 2s, 4s, max 3 retries
-- [ ] Health endpoints /healthz/live, /healthz/ready per component
-- [ ] Prometheus metrics: requests, latency, EAP sessions, AAA stats
-- [ ] ServiceMonitor CRDs for all 3 components
-- [ ] Structured JSON logs with trace context (slog/json)
-- [ ] OpenTelemetry traces with W3C TraceContext propagation
-- [ ] P99 latency tracking per component
-- [ ] Unit test coverage >90%
+- [x] NSSAAF registers with NRF on startup (Nnrf_NFRegistration)
+- [x] Nnrf_NFHeartBeat sent every 5 minutes
+- [x] AMF discovered via Nnrf_NFDiscovery before sending notifications
+- [x] UDM Nudm_UECM_Get wired to N58 handler (gates AAA routing)
+- [x] UDM Nudm_UECM_UpdateAuthContext called after EAP completion
+- [x] AMF Re-Auth notification POSTed to reauthNotifUri (on RADIUS CoA-Request)
+- [x] AMF Revocation notification POSTed to revocNotifUri (on Diameter ASR)
+- [x] AUSF N60 handler created (internal/ausf/)
+- [x] AUSF MSK forwarding implemented (POST /nausf-auth/v1/.../msk)
+- [x] PostgreSQL session store wired in cmd/biz/main.go
+- [x] Circuit breaker: CLOSED → OPEN (5 failures) → HALF_OPEN (30s) → CLOSED
+- [x] Retry with exponential backoff 1s, 2s, 4s, max 3 retries
+- [x] Health endpoints /healthz/live, /healthz/ready per component
+- [x] Prometheus metrics: requests, latency, EAP sessions, AAA stats
+- [x] ServiceMonitor CRDs for all 3 components
+- [x] Structured JSON logs with trace context (slog/json)
+- [x] OpenTelemetry traces with W3C TraceContext propagation
+- [x] P99 latency tracking per component
+- [x] Unit test coverage >90%
 
 ### Phase 5: Security & Crypto
 - [ ] TLS 1.3 for all external interfaces (SBI)

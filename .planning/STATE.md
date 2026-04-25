@@ -24,7 +24,7 @@ See: `.planning/PROJECT.md` (updated 2026-04-25)
 | 2: Protocol | ✅ Done | EAP engine, RADIUS, Diameter |
 | 3: Data & Storage | ✅ Done | PostgreSQL, Redis |
 | R: 3-Component Refactor | ✅ Done | HTTP GW, Biz Pod, AAA GW |
-| 4: NF Integration & Observability | ⏳ Ready to execute | 5 plans, 26 tasks, 5 waves — REQ-01 to REQ-19 |
+| 4: NF Integration & Observability | ✅ Done | 5 plans, 26 tasks, 5 waves — REQ-01 to REQ-19 |
 | 5: Security & Crypto | ⏳ Pending | TLS, mTLS, encryption |
 | 6: Integration Testing & NRM | ⏳ Pending | E2E, conformance, NRM |
 | 7: Kubernetes Deployment | ⏳ Pending | Helm, Kustomize, ArgoCD |
@@ -64,3 +64,18 @@ See: `.planning/phases/04-NFIntegration_Observability/04-CONTEXT.md`
 ---
 
 *Last updated: 2026-04-25*
+
+## Session Notes
+
+### 2026-04-25 — Phase 4 execution complete
+
+Phase 4 fully executed across 5 waves:
+- Wave 1: `internal/resilience/` (circuit breaker, retry), `internal/logging/gpsi.go`
+
+
+- Wave 2: `internal/nrf/` (NRF client), `internal/storage/postgres/session_store.go`, handler options
+- Wave 3: `internal/metrics/`, `internal/tracing/`, `cmd/biz/main.go` health endpoints
+- Wave 4: `internal/udm/`, `internal/amf/`, `internal/ausf/`, `internal/cache/redis/dlq.go`, full main.go wiring
+- Wave 5: `deployments/nssaa-biz/servicemonitor.yaml`, `prometheusrules.yaml`, `compose/configs/biz.yaml`
+
+All tasks validated and tests passing.
