@@ -31,8 +31,9 @@ type Config struct {
 	RateLimit RateLimitConfig `yaml:"rateLimit"`
 	Logging   LoggingConfig   `yaml:"logging"`
 	Metrics   MetricsConfig   `yaml:"metrics"`
-	NRF       NRFConfig     `yaml:"nrf"`
-	UDM       UDMConfig     `yaml:"udm"`
+	NRF       NRFConfig      `yaml:"nrf"`
+	UDM       UDMConfig      `yaml:"udm"`
+	AUSF      AUSFConfig     `yaml:"ausf"`
 
 	// Per-component config (only one is non-nil based on Component field)
 	Biz     *BizConfig     `yaml:"biz,omitempty"`
@@ -157,6 +158,12 @@ type NRFConfig struct {
 
 // UDMConfig holds UDM API settings.
 type UDMConfig struct {
+	BaseURL string        `yaml:"baseURL"`
+	Timeout time.Duration `yaml:"timeout"`
+}
+
+// AUSFConfig holds AUSF API settings.
+type AUSFConfig struct {
 	BaseURL string        `yaml:"baseURL"`
 	Timeout time.Duration `yaml:"timeout"`
 }
@@ -327,5 +334,13 @@ func applyDefaults(cfg *Config) {
 			cfg.AAAgw.DiameterHost = "nssaa-gw.operator.com"
 		}
 		// RADIUS client config defaults — no required fields (disabled if RadiusServerAddress empty)
+	}
+
+	// AUSF defaults (Phase 4 — N60 interface integration)
+	if cfg.AUSF.BaseURL == "" {
+		cfg.AUSF.BaseURL = cfg.NRF.BaseURL // Default: discover via NRF
+	}
+	if cfg.AUSF.Timeout == 0 {
+		cfg.AUSF.Timeout = 10 * time.Second
 	}
 }
