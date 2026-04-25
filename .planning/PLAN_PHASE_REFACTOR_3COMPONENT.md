@@ -1,7 +1,7 @@
 # Phase Plan: Refactor 3-Component Architecture
 
 **Phase:** Refactor-3Component
-**Plan:** 01 (the only plan for this phase — it is self-contained and sequential by nature)
+**Plan:** 01 (the only plan for this phase — self-contained and sequential by nature)
 **Type:** execute
 **Wave:** 1
 **depends_on:** []
@@ -48,11 +48,35 @@ From `internal/eap/engine_client.go`:
 
 From `internal/config/config.go`:
 ```go
-// Monolithic Config struct — will be extended with Component enum + BizConfig + AAAgwConfig
-// Current fields: Server, Database, Redis, EAP, AAA, RateLimit, Logging, Metrics, NRF, UDM
+// Config struct has per-component fields:
+//   Biz     *BizConfig     `yaml:"biz,omitempty"`
+//   AAAgw   *AAAgwConfig   `yaml:"aaaGateway,omitempty"`
+//   HTTPgw  *HTTPgwConfig  `yaml:"httpGateway,omitempty"`
+// HTTP Gateway TLS config is at cfg.HTTPgw.TLS.Cert (NOT cfg.TLS.Cert)
 ```
 
 </context>
+
+<intentional_boundaries>
+
+## Import Boundaries (Corrected)
+
+The following rules replace the plan's previous incorrect import isolation claim ("no radius/diameter imports in internal/aaa/gateway/"):
+
+**`internal/biz/` isolation:** `internal/biz/` must NOT import `internal/radius/` or `internal/diameter/`. All AAA transport happens via HTTP to the AAA Gateway.
+
+**`internal/aaa/gateway/` boundary:** `internal/aaa/gateway/` may import `internal/radius/` (for RADIUS UDP client) but must NOT import `internal/diameter/` — it uses `go-diameter/v4` directly for Diameter transport.
+
+**`internal/aaa/router.go`:** Deprecated — kept for reference but not used by any binary. Contains the old monolithic AAA routing logic that is now split between `internal/biz/router.go` (routing decisions only) and `internal/aaa/gateway/` (transport only).
+
+**Import graph rule for success criterion #3:**
+```bash
+# CORRECT: Radius reachable from gateway, Diameter only via go-diameter/v4
+go mod graph | grep "internal/radius" | grep -v "internal/aaa/gateway" && echo "FAIL" || echo "PASS"
+go mod graph | grep "internal/diameter" && echo "FAIL: internal/diameter should not be used" || echo "PASS"
+```
+
+</intentional_boundaries>
 
 <tasks>
 
@@ -327,7 +351,7 @@ go build ./internal/proto/... && go test ./internal/proto/... -v
 
 **Files to create:** `internal/biz/router.go`, `internal/biz/router_test.go`
 **Files to modify:** All files that import `github.com/operator/nssAAF/internal/aaa` (update imports to `internal/biz`)
-**Files to delete:** None yet (keep `internal/aaa/router.go` during transition, delete in Task 2.4)
+**Files to deprecate:** `internal/aaa/router.go` (keep for reference, not used by any binary)
 
 **Action:**
 
@@ -421,11 +445,13 @@ grep -E "radius|diameter" internal/biz/*.go  # should return nothing
 
 ### Task 2.3: Create `internal/aaa/gateway/` package
 
-**Files:** `internal/aaa/gateway/gateway.go`, `internal/aaa/gateway/radius_handler.go`, `internal/aaa/gateway/diameter_handler.go`, `internal/aaa/gateway/redis.go`, `internal/aaa/gateway/keepalived.go`, plus corresponding `*_test.go` files
+**Files:** `internal/aaa/gateway/gateway.go`, `internal/aaa/gateway/radius_handler.go`, `internal/aaa/gateway/diameter_handler.go`, `internal/aaa/gateway/redis.go`, `internal/aaa/gateway/keepalived.go`, `internal/aaa/gateway/radius_forward.go`, `internal/aaa/gateway/diameter_forward.go`, plus corresponding `*_test.go` files
 
 **Action:**
 
 Create `internal/aaa/gateway/` as a new sub-package. This package is the entry point for `cmd/aaa-gateway/main.go`.
+
+**Import boundary note:** `internal/aaa/gateway/` uses `internal/radius/` for the RADIUS client-initiated path (raw UDP). It does NOT use `internal/diameter/` — all Diameter transport uses `go-diameter/v4` directly. This is the correct architecture.
 
 #### 2.3.1 `gateway.go`
 
@@ -457,29 +483,17 @@ type Config struct {
     RedisMode string
     // Path to keepalived state file (from aaaGateway.keepalivedStatePath config)
     KeepalivedStatePath string
-}
-
-// Gateway is the AAA Gateway component. It runs in a separate process from Biz Pods.
-// Handles both client-initiated (Biz Pod → AAA-S) and server-initiated (AAA-S → Biz Pod) flows.
-// Spec: PHASE §2.3
-type Gateway struct {
-    bizServiceURL string
-    redis         *redis.Client
-    bizHTTPClient *http.Client
-    version       string
-    logger        *slog.Logger
-
-    // pending maps SessionID → response channel (used for client-initiated flow)
-    pending   map[string]chan []byte
-    pendingMu sync.RWMutex
-
-    ctx    context.Context
-    cancel context.CancelFunc
-    wg     sync.WaitGroup
+    // Diameter server config for client-initiated path
+    DiameterServerAddress string
+    DiameterRealm        string
+    DiameterHost         string
+    // RADIUS server config for client-initiated path
+    RadiusServerAddress string
+    RadiusSharedSecret  string
 }
 ```
 
-Wire in `RadiusHandler`, `DiameterHandler`, and Redis subscription. Implement the `BizAAAClient` interface so the AAA Gateway can receive forward requests:
+Wire in `RadiusHandler`, `DiameterHandler`, `RadiusForwarder`, `DiamForwarder`, and Redis subscription. Implement the `BizAAAClient` interface so the AAA Gateway can receive forward requests:
 
 ```go
 // ForwardEAP satisfies proto.BizAAAClient.
@@ -489,7 +503,7 @@ func (g *Gateway) ForwardEAP(ctx context.Context, req *proto.AaaForwardRequest) 
     // 1. Write session correlation entry to Redis (before forwarding)
     entry := proto.SessionCorrEntry{
         AuthCtxID: req.AuthCtxID,
-        PodID:     "", // Populated by Biz Pod via Biz Pod heartbeat; AAA GW writes read-only
+        PodID:     "",
         Sst:       req.Sst,
         Sd:        req.Sd,
         CreatedAt: time.Now().Unix(),
@@ -515,9 +529,9 @@ func (g *Gateway) ForwardEAP(ctx context.Context, req *proto.AaaForwardRequest) 
     var err error
     switch req.TransportType {
     case proto.TransportRADIUS:
-        response, err = g.radiusHandler.Forward(ctx, req.Payload, req.SessionID)
+        response, err = g.radiusForwarder.Forward(ctx, req.Payload, req.SessionID, req.Sst, req.Sd)
     case proto.TransportDIAMETER:
-        response, err = g.diameterHandler.Forward(ctx, req.Payload, req.SessionID)
+        response, err = g.diamForwarder.Forward(ctx, req.Payload, req.SessionID, req.Sst, req.Sd)
     default:
         return nil, fmt.Errorf("aaa-gateway: unknown transport type: %s", req.TransportType)
     }
@@ -534,7 +548,6 @@ func (g *Gateway) ForwardEAP(ctx context.Context, req *proto.AaaForwardRequest) 
     }
     if err := g.publishResponse(ctx, &event); err != nil {
         g.logger.Error("failed to publish response event", "error", err, "session_id", req.SessionID)
-        // Continue — the response was already received, just couldn't publish
     }
 
     return &proto.AaaForwardResponse{
@@ -549,8 +562,8 @@ func (g *Gateway) ForwardEAP(ctx context.Context, req *proto.AaaForwardRequest) 
 #### 2.3.2 `radius_handler.go`
 
 Implement UDP listener on `:1812`. Handle both directions:
-- **Client-initiated**: Receive raw EAP from Biz Pod (already encoded), send to AAA-S, receive response.
-- **Server-initiated (RAR/CoA/DM)**: Parse message type (43=CoA, 40=DM), look up session from Redis, call `serverInitiatedHandler`, return response.
+- **Client-initiated**: AAA-S responding to our Access-Request — publish response to Redis.
+- **Server-initiated (RAR/CoA/DM)**: Parse message type (43=CoA, 40=DM), call `forwardToBiz` which handles Redis lookup and Biz Pod notification.
 
 ```go
 const (
@@ -587,23 +600,70 @@ func (h *RadiusHandler) HandlePacket(conn *net.UDPConn, addr *net.UDPAddr, raw [
 }
 ```
 
-#### 2.3.3 `diameter_handler.go`
+#### 2.3.3 `radius_forward.go` (Client-Initiated RADIUS)
 
-Implement Diameter listener using `go-diameter/v4/sm.StateMachine` for RFC 6733 §5.3 compliance. Each incoming connection is wrapped via `diam.NewConn()`, which hands it to the state machine. The state machine handles CER/CEA and DWR/DWA internally — registered handlers only fire after handshake. Supports TCP and SCTP (selected by config).
+Uses `internal/radius` package for the client-initiated path. This is the correct architecture — the gateway IS the AAA transport layer.
+
+```go
+// radiusForwarder manages a RADIUS client for the AAA Gateway.
+// It handles EAP forwarding to AAA-S via RADIUS Access-Request/Accept/Reject/Challen
+
+// Spec: RFC 2865, RFC 3579, TS 29.561 Ch.16
+type radiusForwarder struct {
+    client *radius.Client
+    logger *slog.Logger
+}
+
+// Forward sends a raw EAP payload to AAA-S via RADIUS Access-Request and returns the response.
+// Spec: RFC 2865 §3, RFC 3579 §3.2 (EAP-Message + Message-Authenticator)
+func (rf *radiusForwarder) Forward(ctx context.Context, eapPayload []byte, sessionID string, sst uint8, sd string) ([]byte, error) {
+    if rf.client == nil {
+        return nil, fmt.Errorf("radius_forward: client not configured")
+    }
+    // Extract userName from sessionID, build attributes, send Access-Request
+    // ... (use radius.FragmentEAPMessage for 253-byte chunks per RFC 3579)
+    return rf.client.SendAccessRequest(ctx, attrs)
+}
+```
+
+#### 2.3.4 `diameter_handler.go` (Server-Initiated Diameter)
+
+Implement Diameter listener using `go-diameter/v4/sm.StateMachine` for RFC 6733 §5.3 compliance. Each incoming connection is wrapped via `diam.NewConn()`, which hands it to the state machine. The state machine handles CER/CEA and DWR/DWA internally — registered handlers only fire after handshake.
 
 **CER/CEA:** The `sm.StateMachine` is symmetric — it handles both client-initiated and server-initiated handshakes. The AAA Gateway acts as a **Diameter server** (responds to CER with CEA) when AAA-S initiates the connection.
 
 ```go
+// DiameterHandler handles Diameter protocol traffic on the SERVER-INITIATED path
+// (AAA-S → NSSAAF). The client-initiated path (NSSAAF → AAA-S) is handled by
+// diamForwarder.
+//
+// It uses go-diameter/v4/sm.StateMachine for RFC 6733 §5.3 compliance:
+// - CER/CEA handshake on every incoming connection (both sides MUST exchange)
+// - DWR/DWA watchdog (RFC 6733 §5.5)
+// - ASR (Abort-Session-Request) routing to Biz Pod after handshake
+//
+// The sm.StateMachine wraps each raw net.Conn via diam.NewConn(), then manages
+// CER/CEA internally. Registered handlers only fire after the handshake succeeds.
+type DiameterHandler struct {
+    sm              *sm.StateMachine
+    logger          *slog.Logger
+    publishResponse func(sessionID string, raw []byte)
+    forwardToBiz   func(ctx context.Context, sessionID string, transportType string, messageType string, raw []byte)
+    diamForwarder  *diamForwarder // client-initiated forwarder
+    bizURL         string
+    httpClient     *http.Client
+    version        string
+}
+
 // NewDiameterHandler creates a handler with go-diameter/v4 state machine.
-// The state machine handles CER/CEA and DWR/DWA internally per RFC 6733 §5.3, §5.5.
 func NewDiameterHandler(
     logger *slog.Logger,
     publishResponse func(sessionID string, raw []byte),
-    forwardToBiz func(ctx context.Context, sessionID, transportType, messageType string, raw []byte),
+    forwardToBiz func(ctx context.Context, sessionID string, transportType string, messageType string, raw []byte),
     version, bizURL string,
     httpClient *http.Client,
     diamForwarder *diamForwarder,
-    originHost, originRealm string, // AAA Gateway's identity for CEA
+    originHost, originRealm string,
 ) *DiameterHandler
 
 // Listen starts the Diameter server (TCP or SCTP).
@@ -613,8 +673,8 @@ func (h *DiameterHandler) Listen(ctx context.Context, addr, protocol string) err
 // HandleConnection wraps net.Conn with diam.NewConn(handler=sm.StateMachine).
 // The sm.StateMachine handles CER/CEA and DWR/DWA internally.
 // After handshake, registered handlers (ASR, RAR, STR) are called.
-// ASR: send ASA to AAA-S, then forwardToBiz("ASR", raw).
-// RAR: send RAA to AAA-S, then forwardToBiz("RAR", raw).
+// ASR: send ASA to AAA-S, then forwardToBiz("DIAMETER", "ASR", raw).
+// RAR: send RAA to AAA-S, then forwardToBiz("DIAMETER", "RAR", raw).
 // STR: send STA to AAA-S.
 // DWR/DWA: handled by sm.StateMachine internally (no manual code needed).
 ```
@@ -625,137 +685,41 @@ func (h *DiameterHandler) Listen(ctx context.Context, addr, protocol string) err
 
 **DWR/DWA:** Handled by `sm.StateMachine` automatically. No manual DWR/DWA handling needed in application code.
 
-**After handshake:** `sm.StateMachine` dispatches ASR/ASA/RAR/RAA/STR/STA to registered handlers. ASR triggers `forwardToBiz("DIAMETER", "ASR", raw)` — forward to Biz Pod and send ASA back to AAA-S.
+**After handshake:** `sm.StateMachine` dispatches ASR/ASA/RAR/RAA/STR/STA to registered handlers.
 
-**Note on CER/CEA:** RFC 6733 §5.3 mandates that **both peers** MUST exchange CER/CEA when establishing a transport connection — regardless of who initiated the TCP/SCTP socket. The server-side listener uses `go-diameter/v4/sm.StateMachine` via `diam.NewConn()` to handle CER/CEA. Both sides are symmetric peers in the CER/CEA exchange — the state machine is symmetric.
+**Note on CER/CEA:** RFC 6733 §5.3 mandates that **both peers** MUST exchange CER/CEA when establishing a transport connection — regardless of who initiated the TCP/SCTP socket. The server-side listener uses `go-diameter/v4/sm.StateMachine` via `diam.NewConn()` to handle CER/CEA.
 
-**Note on DWR/DWA:** RFC 6733 §5.5 mandates that **both peers** MUST respond to DWR. The `sm.StateMachine` handles DWR/DWA automatically — no manual code needed. The state machine validates DWR and sends DWA back.
-
-**Note on SCTP:** The standard library `net.Listen("sctp", addr)` requires SCTP support in the kernel. If SCTP is not available, it falls back to TCP. The same `diam.NewConn()` + `sm.StateMachine` pattern works for both TCP and SCTP connections.
-
-**Verify SCTP availability** at startup:
-```go
-ln, err := net.Listen("sctp", ":3868")
-if err != nil {
-    slog.Warn("SCTP not available on this host", "error", err)
-    // Fall back to TCP
-}
-```
-
-> **Risk (Deferred):** The Diameter client-initiated path (`Forward()`) requires the AAA Gateway to maintain a persistent connection to AAA-S with CER/CEA handshake and DWR/DWA watchdog. Additionally, the **server-side listener** (`HandleConnection`) also lacks DWR/DWA handling — RFC 6733 §5.5 requires both peers to respond to DWR. See §2.3.5 for client-side design and §2.3.3 for server-side requirements.
-
-#### 2.3.4 `redis.go`
-
-Implement the Redis pub/sub and session correlation functions. The `aaaGateway.redisMode` config controls the Redis topology:
-
-- `"standalone"` (default): single Redis node at `redisAddr`. Pub/sub works correctly on a single node.
-- `"sentinel"`: Redis Sentinel for HA. The AAA Gateway connects to the Sentinel address; Sentinel redirects to the primary. Pub/sub works on the primary node.
-
-**Important:** Redis Cluster is NOT supported for pub/sub — sharded pub/sub is not supported by Redis. If the operator deploys Redis Cluster for data storage, use a separate single-node/Sentinel Redis instance (or a dedicated channel on the Sentinel primary) for pub/sub. Document this constraint in the Helm chart values file.
-
-```go
-// newRedisClient creates a Redis client based on the configured mode.
-// Spec: PHASE §2.3.4
-func newRedisClient(redisAddr, mode string) *redis.Client {
-    opts := &redis.Options{
-        Addr: redisAddr,
-    }
-    switch mode {
-    case "sentinel":
-        // Use Sentinel mode: the Addr is the Sentinel address, not the primary.
-        // go-redis/v9 auto-discovers the primary through Sentinel.
-        opts.SentinelAddrs = strings.Split(redisAddr, ",")
-        opts.MasterName = "nssAAF-primary"
-        opts.SentinelPassword = os.Getenv("REDIS_SENTINEL_PASSWORD")
-    case "standalone":
-        // Default: direct connection to single Redis node.
-    default:
-        slog.Warn("unknown redis mode, defaulting to standalone", "mode", mode)
-    }
-    return redis.NewClient(opts)
-}
-
-// writeSessionCorr writes SessionCorrEntry to Redis with TTL = DefaultPayloadTTL.
-func (g *Gateway) writeSessionCorr(ctx context.Context, sessionID string, entry *proto.SessionCorrEntry) error {
-    key := proto.SessionCorrKey(sessionID)
-    data, err := json.Marshal(entry)
-    if err != nil {
-        return err
-    }
-    return g.redis.Set(ctx, key, data, proto.DefaultPayloadTTL).Err()
-}
-
-// publishResponse publishes AaaResponseEvent to the nssaa:aaa-response channel.
-func (g *Gateway) publishResponse(ctx context.Context, event *proto.AaaResponseEvent) error {
-    data, err := json.Marshal(event)
-    if err != nil {
-        return err
-    }
-    return g.redis.Publish(ctx, proto.AaaResponseChannel, data).Err()
-}
-
-// subscribeResponses subscribes to nssaa:aaa-response and dispatches to pending handlers.
-func (g *Gateway) subscribeResponses(ctx context.Context) {
-    ch := g.redis.PSubscribe(ctx, proto.AaaResponseChannel)
-    defer ch.Close()
-
-    for {
-        select {
-        case <-ctx.Done():
-            return
-        case msg := <-ch.Channel():
-            var event proto.AaaResponseEvent
-            if err := json.Unmarshal([]byte(msg.Payload), &event); err != nil {
-                g.logger.Error("failed to unmarshal response event", "error", err)
-                continue
-            }
-            g.dispatchResponse(&event)
-        }
-    }
-}
-```
+**Note on SCTP:** The standard library `net.Listen("sctp", addr)` requires SCTP support in the kernel. If SCTP is not available, fall back to TCP with a warning log.
 
 #### 2.3.5 `diameter_forward.go` — Client-Initiated Connection Management
 
-> **BLOCKER (Deferred):** This section was missing from the original plan. The `diameter_handler.Forward()` method is currently a stub returning `[]byte{}`, which silently breaks every DIAMETER-based NSSAA procedure. This must be implemented before DIAMETER transport is usable.
+**Background:** Unlike RADIUS (stateless UDP), Diameter over TCP/SCTP requires a pre-existing, persistent connection with mandatory CER/CEA handshake before any application messages. RFC 6733 §2.1: "A Diameter peer MUST send a CER to the peer before sending any other message."
 
-**Background:** Unlike RADIUS (stateless UDP), Diameter over TCP/SCTP requires a pre-existing, persistent connection with mandatory CER/CEA handshake before any application messages. RFC 6733 §2.1: "A Diameter peer MUST send a CER to the peer before sending any other message." The AAA Gateway's `ForwardEAP()` calls `diameterHandler.Forward()` to send DER to AAA-S — this is the client-initiated path that needs the full Diameter client stack.
-
-**Architecture decision:** The AAA Gateway creates its own Diameter client using `go-diameter/v4/sm` directly (not importing `internal/diameter/`). This avoids the `internal/proto/` zero-dependency constraint since the gateway is not proto. The `proto.AaaForwardRequest.Payload` carries raw EAP bytes; the forwarder wraps them in DER AVPs.
-
-##### Config Additions (AAAgwConfig)
+**Architecture decision:** The AAA Gateway creates its own Diameter client using `go-diameter/v4/sm` directly (not importing `internal/diameter/`). The `proto.AaaForwardRequest.Payload` carries raw EAP bytes; the forwarder wraps them in DER AVPs.
 
 ```go
-// New fields in compose/configs/aaa-gateway.yaml
-aaaGateway:
-  diameterServerAddress: "aaa-server:3868"   // AAA-S address
-  diameterRealm:         "operator.com"        // AAA-S realm
-  diameterHost:         "nssaa-gw.operator.com" // Origin-Host for CER
-```
-
-##### Implementation Pattern
-
-```go
-// diameter_forward.go — lightweight Diameter client for AAA Gateway
+// diamForwarder manages a persistent connection to AAA-S.
 // Uses go-diameter/v4/sm directly (not internal/diameter/)
-
 import (
     "github.com/fiorix/go-diameter/v4/diam"
     "github.com/fiorix/go-diameter/v4/diam/sm"
     "github.com/fiorix/go-diameter/v4/diam/sm/smpeer"
 )
 
-// diamForwarder manages a persistent connection to AAA-S.
 type diamForwarder struct {
-    addr      string
-    network   string  // "tcp" or "sctp"
-    settings  *sm.Settings
-    machine   *sm.StateMachine
-    smClient  *sm.Client
-    conn      diam.Conn
-    pending   map[uint32]chan *diam.Message  // hop-by-hop → response
-    pendingMu sync.RWMutex
-    logger    *slog.Logger
+    addr        string
+    network     string  // "tcp" or "sctp"
+    originHost  string
+    originRealm string
+    destHost    string
+    destRealm   string
+    settings    *sm.Settings
+    machine     *sm.StateMachine
+    smClient    *sm.Client
+    conn        diam.Conn
+    pending     map[uint32]chan *diam.Message  // hop-by-hop → response
+    pendingMu   sync.RWMutex
+    logger      *slog.Logger
 }
 
 // On startup (in Gateway.Start):
@@ -763,26 +727,23 @@ func (df *diamForwarder) Connect(ctx context.Context) error {
     // 1. Dial AAA-S
     // 2. go-diameter sm.Client handles CER/CEA automatically
     // 3. Register handler for DEA responses
-    // 4. Start DWR watchdog goroutine (go-diameter handles this via EnableWatchdog)
+    // 4. EnableWatchdog for DWR/DWA (go-diameter handles this)
     // 5. Handle disconnection: reconnect with exponential backoff
 }
 
 // Forward encodes EAP payload into DER and returns DEA response bytes.
-func (df *diamForwarder) Forward(ctx context.Context, eapPayload []byte, sessionID string) ([]byte, error) {
+func (df *diamForwarder) Forward(ctx context.Context, eapPayload []byte, sessionID string, sst uint8, sd string) ([]byte, error) {
     // 1. Build DER: Session-Id, Auth-Application-Id=5, Auth-Request-Type=1,
     //               User-Name, EAP-Payload (AVP 209), 3GPP-S-NSSAI AVP
     // 2. Register hop-by-hop ID → session channel in pending map
     // 3. Send DER, wait on channel (with deadline from context)
     // 4. Return DEA bytes (caller publishes to Redis)
 }
-
-// handleDEA: lookup pending hop-by-hop, send to channel
-// watchDog: monitor connection, reconnect on failure
 ```
 
 **CER/CEA:** Handled automatically by `go-diameter/v4/sm` state machine. The `sm.Client` sends CER on connect, validates CEA, and starts watchdog (DWR/DWA every 30s).
 
-**DER encoding:** Unlike `internal/diameter/client.go` which receives an already-built DER, this forwarder builds DER from raw EAP bytes. The AaaForwardRequest.Payload is the EAP message bytes; the forwarder wraps them in:
+**DER encoding:** The AaaForwardRequest.Payload is the EAP message bytes; the forwarder wraps them in:
 - Session-Id AVP (263)
 - Origin-Host, Origin-Realm AVPs (from config)
 - Destination-Host, Destination-Realm AVPs (from config)
@@ -792,63 +753,73 @@ func (df *diamForwarder) Forward(ctx context.Context, eapPayload []byte, session
 - EAP-Payload AVP (code **209**, per RFC 4072)
 - 3GPP-S-NSSAI AVP (code 310)
 
-**Pending map:** Same pattern as `internal/diameter/client.go` — hop-by-hop ID → response channel. The `sm.Client` handler dispatches incoming DEA by hop-by-hop.
+**Reconnection:** On connection failure, exponential backoff: 1s, 2s, 4s, max 30s.
 
-**Reconnection:** On connection failure, exponential backoff: 1s, 2s, 4s, max 30s. After 3 consecutive failures, log error and return context deadline exceeded.
-
-##### Wire into Gateway
-
+**Wire into Gateway:**
 ```go
-// In Gateway.New():
-df, err := newDiamForwarder(cfg.DiameterServerAddress, cfg.DiameterProtocol, cfg.Logger)
-if err != nil {
-    return nil, fmt.Errorf("diameter forwarder: %w", err)
-}
-g.diamForwarder = df
-
-// In Gateway.Start():
-if err := g.diamForwarder.Connect(ctx); err != nil {
-    g.logger.Error("diameter connect failed", "addr", cfg.DiameterServerAddress, "error", err)
-    // Do not fail startup — AAA-S may be temporarily unavailable
-}
-
-// In Gateway.ForwardEAP() — replace the diameterHandler.Forward() call:
+// In Gateway.ForwardEAP():
 // case proto.TransportDIAMETER:
-//     response, err = g.diamForwarder.Forward(ctx, req.Payload, req.SessionID)
+//     response, err = g.diamForwarder.Forward(ctx, req.Payload, req.SessionID, req.Sst, req.Sd)
 ```
 
-**Note:** The `diamForwarder` runs inside the AAA Gateway process. It maintains one persistent TCP/SCTP connection to AAA-S (shared across all Biz Pod requests). The `diameterHandler` (server-side listener) continues to handle server-initiated ASR messages independently.
+**Note:** The `diamForwarder` runs inside the AAA Gateway process. It maintains one persistent TCP/SCTP connection to AAA-S (shared across all Biz Pod requests). The `DiameterHandler` (server-side listener) handles server-initiated ASR messages independently.
 
 Spec: RFC 6733 §2.1 (CER/CEA), RFC 6733 §5.4 (DWR/DWA), RFC 4072 (Diameter EAP DER/DEA), TS 29.561 §17
 
----
+#### 2.3.6 `redis.go`
 
-#### 2.3.6 `keepalived.go`
+Implement the Redis pub/sub and session correlation functions. The `aaaGateway.redisMode` config controls the Redis topology:
+
+```go
+// newRedisClient creates a Redis client based on the configured mode.
+func newRedisClient(redisAddr, mode string) *redis.Client {
+    opts := &redis.Options{Addr: redisAddr}
+    switch mode {
+    case "sentinel":
+        opts.SentinelAddrs = strings.Split(redisAddr, ",")
+        opts.MasterName = "nssAAF-primary"
+        opts.SentinelPassword = os.Getenv("REDIS_SENTINEL_PASSWORD")
+    case "standalone":
+        // Default: direct connection to single Redis node.
+    }
+    return redis.NewClient(opts)
+}
+
+// writeSessionCorr writes SessionCorrEntry to Redis with TTL = DefaultPayloadTTL.
+func (g *Gateway) writeSessionCorr(ctx context.Context, sessionID string, entry *proto.SessionCorrEntry) error
+
+// publishResponse publishes AaaResponseEvent to the nssaa:aaa-response channel.
+func (g *Gateway) publishResponse(ctx context.Context, event *proto.AaaResponseEvent) error
+
+// subscribeResponses subscribes to nssaa:aaa-response and dispatches to pending handlers.
+func (g *Gateway) subscribeResponses(ctx context.Context)
+
+// getSessionCorr reads the SessionCorrEntry from Redis for a given sessionID.
+func (g *Gateway) getSessionCorr(ctx context.Context, sessionID string) (*proto.SessionCorrEntry, error)
+```
+
+Write `internal/aaa/gateway/redis_test.go` testing `writeSessionCorr` and `publishResponse` with a redis mock.
+
+#### 2.3.7 `keepalived.go`
 
 Implement VIP health check for keepalived integration. The AAA Gateway exposes a `/health/vip` endpoint that keepalived's `chk_aaa_gw` script calls to determine if this replica owns the VIP.
 
-The state file path is configurable via `aaaGateway.keepalivedStatePath` (default: `"/var/run/keepalived/state"`). keepalived writes `"MASTER"`, `"BACKUP"`, or `"FAULT"` to this file on state transitions. The endpoint reads the last line of this file to determine ownership.
-
 ```go
-// VIPHealthHandler returns 200 if this AAA Gateway replica is the VIP owner, 503 otherwise.
-// Reads VIP state from the configurable state file path.
-func (g *Gateway) VIPHealthHandler(w http.ResponseWriter, r *http.Request) {
-    statePath := g.cfg.KeepalivedStatePath // e.g. "/var/run/keepalived/state"
-    data, err := os.ReadFile(statePath)
+// readKeepalivedState reads the last line of the keepalived state file.
+func readKeepalivedState(path string) (string, error) {
+    data, err := os.ReadFile(path)
     if err != nil {
-        slog.Warn("keepalived state file not readable", "path", statePath, "error", err)
-        w.WriteHeader(http.StatusServiceUnavailable)
-        return
+        return "", err
     }
-    state := strings.TrimSpace(string(data))
-    if state == "MASTER" {
-        w.WriteHeader(http.StatusOK)
-        w.Write([]byte(`{"vip_owner":true}`))
-    } else {
-        w.WriteHeader(http.StatusServiceUnavailable)
-        w.Write([]byte(`{"vip_owner":false,"state":"` + state + `"}`))
+    lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+    if len(lines) == 0 {
+        return "", nil
     }
+    return lines[len(lines)-1], nil
 }
+
+// VIPHealthHandler returns 200 if this AAA Gateway replica is the VIP owner, 503 otherwise.
+func (g *Gateway) VIPHealthHandler(w http.ResponseWriter, r *http.Request)
 ```
 
 **keepalived health check script** (`chk_aaa_gw`):
@@ -857,20 +828,19 @@ func (g *Gateway) VIPHealthHandler(w http.ResponseWriter, r *http.Request) {
 curl -sf http://localhost:9090/health/vip || exit 1
 ```
 
-This script is referenced in the keepalived ConfigMap (`chk_aaa_gw`) in Task 5.3.
-
-Write `internal/aaa/gateway/redis_test.go` testing `writeSessionCorr` and `publishResponse` with a redis mock.
-
 **Verify:**
 ```bash
 go build ./internal/aaa/gateway/...
 go test ./internal/aaa/gateway/... -v
 
-# Ensure gateway package does NOT import internal/radius/ or internal/diameter/
-grep -E "radius|diameter" internal/aaa/gateway/*.go  # should return nothing
+# Verify correct import boundaries:
+# - internal/radius imports ARE allowed in internal/aaa/gateway/
+# - internal/diameter imports are NOT allowed (must use go-diameter/v4 directly)
+grep -l "internal/radius" internal/aaa/gateway/*.go  # should list radius_forward.go
+grep -l "internal/diameter" internal/aaa/gateway/*.go  # should return nothing
 ```
 
-**Done:** `internal/aaa/gateway/` package is complete. Raw socket handlers do not import `internal/radius/` or `internal/diameter/` (they use the raw `net` package only).
+**Done:** `internal/aaa/gateway/` package is complete. RADIUS transport uses `internal/radius/`, Diameter transport uses `go-diameter/v4` directly.
 
 ---
 
@@ -898,7 +868,6 @@ import (
 )
 
 // httpAAAClient satisfies eap.AAAClient by forwarding EAP messages to the AAA Gateway via HTTP.
-// It also subscribes to the nssaa:aaa-response Redis channel for response routing.
 type httpAAAClient struct {
     aaaGatewayURL string
     httpClient    *http.Client
@@ -912,97 +881,13 @@ type httpAAAClient struct {
 }
 
 // newHTTPAAAClient creates a new HTTP AAA client.
-// The httpClient parameter must be configured by the caller (cmd/biz/main.go) based on
-// biz.useMTLS config — either a plain http.Client or one with TLS configured.
-func newHTTPAAAClient(aaaGatewayURL, redisAddr, podID, version string, httpClient *http.Client) *httpAAAClient {
-    c := &httpAAAClient{
-        aaaGatewayURL: aaaGatewayURL,
-        httpClient:    httpClient, // caller-configured (may have TLS for mTLS)
-        version:       version,
-        redis: redis.NewClient(&redis.Options{
-            Addr: redisAddr,
-        }),
-        podID:   podID,
-        pending: make(map[string]chan []byte),
-    }
-
-    // Start Redis subscription in background
-    go c.subscribeResponses(context.Background())
-    return c
-}
+func newHTTPAAAClient(aaaGatewayURL, redisAddr, podID, version string, httpClient *http.Client) *httpAAAClient
 
 // SendEAP satisfies eap.AAAClient.
-// Spec: PHASE §1.1 pattern
-func (c *httpAAAClient) SendEAP(ctx context.Context, authCtxID string, eapPayload []byte) ([]byte, error) {
-    // 1. Build forward request (uses the biz router)
-    req := &proto.AaaForwardRequest{
-        Version:   c.version,
-        SessionID: fmt.Sprintf("nssAAF;%d;%s", time.Now().UnixNano(), authCtxID),
-        AuthCtxID: authCtxID,
-        // Sst, Sd, TransportType filled by the caller (biz router)
-        Payload:   eapPayload,
-    }
-
-    body, err := json.Marshal(req)
-    if err != nil {
-        return nil, fmt.Errorf("failed to marshal forward request: %w", err)
-    }
-
-    // 2. POST to AAA Gateway
-    httpReq, err := http.NewRequestWithContext(ctx, "POST", c.aaaGatewayURL+"/aaa/forward", bytes.NewReader(body))
-    if err != nil {
-        return nil, fmt.Errorf("failed to create request: %w", err)
-    }
-    httpReq.Header.Set("Content-Type", "application/json")
-    httpReq.Header.Set(proto.HeaderName, c.version)
-
-    resp, err := c.httpClient.Do(httpReq)
-    if err != nil {
-        return nil, fmt.Errorf("aaa gateway unavailable: %w", err)
-    }
-    defer resp.Body.Close()
-
-    if resp.StatusCode != http.StatusOK {
-        return nil, fmt.Errorf("aaa gateway returned %d", resp.StatusCode)
-    }
-
-    var fwdResp proto.AaaForwardResponse
-    if err := json.NewDecoder(resp.Body).Decode(&fwdResp); err != nil {
-        return nil, fmt.Errorf("failed to decode response: %w", err)
-    }
-
-    return fwdResp.Payload, nil
-}
+func (c *httpAAAClient) SendEAP(ctx context.Context, authCtxID string, eapPayload []byte) ([]byte, error)
 
 // subscribeResponses listens to nssaa:aaa-response and dispatches to pending channels.
-func (c *httpAAAClient) subscribeResponses(ctx context.Context) {
-    ch := c.redis.PSubscribe(ctx, proto.AaaResponseChannel)
-    defer ch.Close()
-
-    for {
-        select {
-        case <-ctx.Done():
-            return
-        case msg := <-ch.Channel():
-            var event proto.AaaResponseEvent
-            if err := json.Unmarshal([]byte(msg.Payload), &event); err != nil {
-                continue
-            }
-
-            c.pendingMu.RLock()
-            ch, ok := c.pending[event.AuthCtxID]
-            c.pendingMu.RUnlock()
-
-            if !ok {
-                continue // Not for this Biz Pod
-            }
-
-            select {
-            case ch <- event.Payload:
-            default:
-            }
-    }
-}
+func (c *httpAAAClient) subscribeResponses(ctx context.Context)
 
 var _ eap.AAAClient = (*httpAAAClient)(nil)
 ```
@@ -1031,21 +916,21 @@ go test ./cmd/biz/... -v
 
 Create the Biz Pod entry point. It wires HTTP handlers (N58/N60) → Biz router → `httpAAAClient` → AAA Gateway.
 
-**Prerequisite — Add `WithAAARouter` to `internal/api/nssaa/handler.go`:** Before implementing `cmd/biz/main.go`, extend `internal/api/nssaa/handler.go` with an `Option` that injects the `AAARouter`. Add this to the existing options list:
+**Prerequisite — Add `WithAAA` to `internal/api/nssaa/handler.go`:** Before implementing `cmd/biz/main.go`, extend `internal/api/nssaa/handler.go` with an `Option` that injects the `AAARouter`. Add this to the existing options list:
 
 ```go
-// WithAAARouter sets the AAA router for the NSSAA handler.
+// WithAAA sets the AAA router for the NSSAA handler.
 // The router handles routing EAP messages to the AAA Gateway.
 // After Task 2.2, biz.Router.BuildForwardRequest replaces direct radius/diameter calls.
 // Spec: PHASE §3.1
-func WithAAARouter(router AAARouter) Option {
+func WithAAA(aaa AAARouter) Option {
     return func(h *Handler) {
-        h.aaaRouter = router
+        h.aaaRouter = aaa
     }
 }
 ```
 
-Add `aaaRouter AAARouter` as a private field on the `Handler` struct (if not already present). Ensure `AAARouter` interface in handler.go matches `eap.AAAClient.SendEAP(ctx, authCtxID string, eapPayload []byte) ([]byte, error)` — `httpAAAClient` satisfies both.
+Add `aaaRouter AAARouter` as a private field on the `Handler` struct. Ensure `AAARouter` interface in handler.go matches `eap.AAAClient.SendEAP(ctx, authCtxID string, eapPayload []byte) ([]byte, error)` — `httpAAAClient` satisfies both.
 
 ```go
 package main
@@ -1129,7 +1014,7 @@ func main() {
     // ─── N58: Nnssaaf_NSSAA ────────────────────────────────────────────────
     nssaaHandler := nssaa.NewHandler(nssaaStore,
         nssaa.WithAPIRoot(apiRoot),
-        nssaa.WithAAARouter(aaaClient), // aaaClient satisfies eap.AAAClient = AAARouter
+        nssaa.WithAAA(aaaClient), // aaaClient satisfies eap.AAAClient = AAARouter
     )
     nssaaRouter := nssaa.NewRouter(nssaaHandler, apiRoot)
 
@@ -1167,8 +1052,8 @@ func main() {
         IdleTimeout:  cfg.Server.IdleTimeout,
     }
 
-    // ─── Register with NRF (Biz Pod registers HTTP Gateway FQDN) ──────────
-    // TODO: Implement NRF client in Phase 3 — wire in Phase 3 once DB store is ready
+    // ─── Register with NRF (Biz Pod registers HTTP Gateway FQDN) ──────────────
+    // TODO: Implement NRF client in Phase 3
 
     errCh := make(chan error, 1)
     go func() {
@@ -1207,58 +1092,16 @@ func handleServerInitiated(w http.ResponseWriter, r *http.Request) {
 }
 
 // podHeartbeat registers the Biz Pod in the Redis SET and refreshes every 30 seconds.
-// On context cancellation, it removes the pod from the SET.
-func podHeartbeat(ctx context.Context, redisAddr, podID string) {
-    rdb := redis.NewClient(&redis.Options{Addr: redisAddr})
-    defer rdb.Close()
-
-    // Register immediately on startup
-    if err := rdb.SAdd(ctx, proto.PodsKey, podID).Err(); err != nil {
-        slog.Warn("failed to register pod in Redis", "error", err, "pod_id", podID)
-    }
-
-    ticker := time.NewTicker(30 * time.Second)
-    defer ticker.Stop()
-
-    for {
-        select {
-        case <-ctx.Done():
-            rdb.SRem(ctx, proto.PodsKey, podID)
-            return
-        case <-ticker.C:
-            rdb.SAdd(ctx, proto.PodsKey, podID)
-        }
-    }
-}
+func podHeartbeat(ctx context.Context, redisAddr, podID string)
 
 // hasScheme returns true if s already contains a URL scheme prefix.
-func hasScheme(s string) bool {
-    return len(s) >= 4 && (s[:4] == "http" || s[:4] == " Http")
-}
+func hasScheme(s string) bool
 
 // mustLoadCertPool loads and parses a CA certificate file into an x509.CertPool.
-// Panics on error — called during startup validation only.
-func mustLoadCertPool(caPath string) *x509.CertPool {
-    data, err := os.ReadFile(caPath)
-    if err != nil {
-        panic("failed to read TLS CA cert: " + err.Error())
-    }
-    pool := x509.NewCertPool()
-    if !pool.AppendCertsFromPEM(data) {
-        panic("failed to parse TLS CA cert from: " + caPath)
-    }
-    return pool
-}
+func mustLoadCertPool(caPath string) *x509.CertPool
 
 // mustLoadCert loads a client certificate and key for mTLS.
-// Panics on error — called during startup validation only.
-func mustLoadCert(certPath, keyPath string) tls.Certificate {
-    cert, err := tls.LoadX509KeyPair(certPath, keyPath)
-    if err != nil {
-        panic("failed to load TLS cert/key pair: " + err.Error())
-    }
-    return cert
-}
+func mustLoadCert(certPath, keyPath string) tls.Certificate
 ```
 
 Write `cmd/biz/main_test.go` testing that the server starts and the `/health` endpoint returns 200.
@@ -1323,12 +1166,17 @@ func main() {
         RedisAddr:         cfg.Redis.Addr,
         ListenRADIUS:      cfg.AAAgw.ListenRADIUS,
         ListenDIAMETER:    cfg.AAAgw.ListenDIAMETER,
-        AAAGatewayURL:     "http://" + cfg.Server.Addr, // Self-referential; used for health checks
+        AAAGatewayURL:     "http://" + cfg.Server.Addr,
         Logger:            logger,
         Version:           cfg.Version,
         DiameterProtocol:  cfg.AAAgw.DiameterProtocol,
         RedisMode:         cfg.AAAgw.RedisMode,
         KeepalivedStatePath: cfg.AAAgw.KeepalivedStatePath,
+        DiameterServerAddress: cfg.AAAgw.DiameterServerAddress,
+        DiameterRealm:     cfg.AAAgw.DiameterRealm,
+        DiameterHost:      cfg.AAAgw.DiameterHost,
+        RadiusServerAddress: cfg.AAAgw.RadiusServerAddress,
+        RadiusSharedSecret: cfg.AAAgw.RadiusSharedSecret,
     })
 
     // Expose HTTP endpoints for Biz Pod communication
@@ -1385,12 +1233,15 @@ go build ./cmd/aaa-gateway/... && go test ./cmd/aaa-gateway/... -v
 
 The HTTP Gateway is a thin TLS-terminating pass-through proxy with no application logic.
 
+**Important:** HTTP Gateway TLS config is at `cfg.HTTPgw.TLS.Cert` (NOT `cfg.TLS.Cert`).
+
 ```go
 package main
 
 import (
     "bytes"
     "context"
+    "crypto/tls"
     "flag"
     "io"
     "log/slog"
@@ -1416,7 +1267,6 @@ type httpBizClient struct {
 // ForwardRequest satisfies proto.BizServiceClient.
 func (c *httpBizClient) ForwardRequest(ctx context.Context, path, method string, body []byte) ([]byte, int, error) {
     url := c.bizServiceURL + path
-
     req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body))
     if err != nil {
         return nil, 0, err
@@ -1457,11 +1307,11 @@ func main() {
 
     slog.Info("starting NSSAAF HTTP Gateway",
         "version", cfg.Version,
-        "tls_cert", cfg.TLS.Cert,
+        "tls_cert", cfg.HTTPgw.TLS.Cert,  // CORRECT: cfg.HTTPgw.TLS, NOT cfg.TLS
     )
 
     bizClient := &httpBizClient{
-        bizServiceURL: cfg.Biz.BizServiceURL, // http://svc-nssaa-biz:8080
+        bizServiceURL: cfg.HTTPgw.BizServiceURL, // http://svc-nssaa-biz:8080
         httpClient: &http.Client{
             Timeout: 10 * time.Second,
         },
@@ -1514,13 +1364,13 @@ func main() {
     srv := &http.Server{
         Addr:      cfg.Server.Addr,
         Handler:   handler,
-        TLSConfig: tlsConfig(cfg.TLS),
+        TLSConfig: tlsConfig(cfg.HTTPgw.TLS),  // CORRECT: cfg.HTTPgw.TLS
     }
 
     errCh := make(chan error, 1)
     go func() {
-        slog.Info("http-gateway TLS listening", "addr", srv.Addr)
-        if err := srv.ListenAndServeTLS(cfg.TLS.Cert, cfg.TLS.Key); err != nil && err != http.ErrServerClosed {
+        slog.Info("http-gateway HTTPS listening", "addr", srv.Addr)
+        if err := srv.ListenAndServeTLS(cfg.HTTPgw.TLS.Cert, cfg.HTTPgw.TLS.Key); err != nil && err != http.ErrServerClosed {
             errCh <- err
         }
     }()
@@ -1536,9 +1386,14 @@ func main() {
         srv.Shutdown(ctx)
     }
 }
-```
 
-Write middleware helpers (`recoveryMiddleware`, `requestIDMiddleware`, `loggingMiddleware`, `tlsConfig`) — reference patterns from `internal/api/common/`.
+// Middleware helpers
+func recoveryMiddleware(next http.Handler) http.Handler
+func requestIDMiddleware(next http.Handler) http.Handler
+func loggingMiddleware(next http.Handler) http.Handler
+func tlsConfig(tlsCfg *config.TLSConfig) *tls.Config
+func signalReceived() <-chan struct{}
+```
 
 Write `cmd/http-gateway/main_test.go` testing that the server starts and `/health` returns 200.
 
@@ -1560,7 +1415,7 @@ go build ./cmd/http-gateway/... && go test ./cmd/http-gateway/... -v
 ```bash
 # Verify no .go files remain in cmd/nssAAF/ before deletion
 ls cmd/nssAAF/*.go 2>/dev/null && echo "WARNING: extra files in cmd/nssAAF/" || true
-# Delete the entire directory (rmdir is unsafe — test files may remain)
+# Delete the entire directory
 rm -rf cmd/nssAAF/
 ```
 
@@ -1597,25 +1452,22 @@ package config
 
 // Component identifies which binary is running.
 // Spec: PHASE §4.1
-type Component string
+type ComponentType string
 
 const (
-    ComponentHTTPGateway Component = "http-gateway"
-    ComponentBiz         Component = "biz"
-    ComponentAAAGateway  Component = "aaa-gateway"
+    ComponentHTTPGateway ComponentType = "http-gateway"
+    ComponentBiz         ComponentType = "biz"
+    ComponentAAAGateway  ComponentType = "aaa-gateway"
 )
 
 // BizConfig: how Biz Pod communicates with other components.
 type BizConfig struct {
-    AAAGatewayURL string `yaml:"aaaGatewayUrl"` // http://svc-nssaa-aaa:9090 (or https:// if mTLS enabled)
-    BizServiceURL string `yaml:"bizServiceUrl"`  // http://svc-nssaa-biz:8080 (for HTTP Gateway config)
-    // TLS mutual authentication for Biz Pod → AAA Gateway communication.
-    // If UseMTLS is true, the client presents a certificate signed by the CA specified in TLSCA.
-    // If false, plain HTTP is used (acceptable for intra-cluster communication with K8s NetworkPolicy).
-    UseMTLS bool   `yaml:"useMTLS"` // default: false (plain HTTP within cluster)
-    TLSCA   string `yaml:"tlsCA"`   // path to CA cert for verifying AAA Gateway cert (required if UseMTLS)
-    TLSCert string `yaml:"tlsCert"` // path to client cert for mTLS (required if UseMTLS)
-    TLSKey  string `yaml:"tlsKey"`  // path to client key for mTLS (required if UseMTLS)
+    AAAGatewayURL string     `yaml:"aaaGatewayUrl"` // http://svc-nssaa-aaa:9090
+    UseMTLS      bool       `yaml:"useMTLS"`        // default: false
+    TLSCA        string     `yaml:"tlsCa"`          // path to CA cert
+    TLSCert      string     `yaml:"tlsCert"`        // path to client cert
+    TLSKey       string     `yaml:"tlsKey"`         // path to client key
+    TLS          *TLSConfig `yaml:"tls,omitempty"`
 }
 
 // AAAgwConfig: AAA Gateway specific settings.
@@ -1623,31 +1475,23 @@ type AAAgwConfig struct {
     ListenRADIUS    string `yaml:"listenRadius"`    // ":1812"
     ListenDIAMETER  string `yaml:"listenDiameter"`  // ":3868"
     BizServiceURL   string `yaml:"bizServiceUrl"`   // http://svc-nssaa-biz:8080
-    KeepalivedCheck string `yaml:"keepalivedCheck"` // path to health check script
-
-    // Diameter transport protocol: "tcp" or "sctp". Both are implemented; operator
-    // selects based on their AAA-S deployment. SCTP provides message framing
-    // independence from byte-stream ordering (RFC 6733 App H); TCP is universally supported.
-    // Default: "tcp"
     DiameterProtocol string `yaml:"diameterProtocol"` // "tcp" | "sctp"
-
-    // Redis operating mode for pub/sub coordination between AAA Gateway and Biz Pods.
-    // - "standalone": single Redis node; pub/sub works correctly (default)
-    // - "sentinel": Redis Sentinel for HA; pub/sub works on the primary node
-    // NOTE: Redis Cluster is NOT supported for pub/sub (sharded pub/sub is not supported by Redis).
-    // If operator needs Redis Cluster for data storage, use a separate single-node/Sentinel
-    // Redis for pub/sub (dedicated channel).
-    // Default: "standalone"
-    RedisMode string `yaml:"redisMode"` // "standalone" | "sentinel"
-
-    // Path to keepalived state file. keepalived writes "MASTER", "BACKUP", or "FAULT"
-    // to this file on state transitions. The AAA Gateway's /health/vip endpoint reads
-    // this file to determine VIP ownership for keepalived's health check script.
-    // Default: "/var/run/keepalived/state" (standard keepalived location)
-    KeepalivedStatePath string `yaml:"keepalivedStatePath"` // default: "/var/run/keepalived/state"
+    DiameterServerAddress string `yaml:"diameterServerAddress"` // AAA-S address
+    DiameterRealm   string `yaml:"diameterRealm"`    // AAA-S realm
+    DiameterHost    string `yaml:"diameterHost"`     // Origin-Host for CER
+    RadiusServerAddress string `yaml:"radiusServerAddress"` // AAA-S RADIUS address
+    RadiusSharedSecret string `yaml:"radiusSharedSecret"` // Shared secret
+    RedisMode       string `yaml:"redisMode"`       // "standalone" | "sentinel"
+    KeepalivedStatePath string `yaml:"keepalivedStatePath"` // "/var/run/keepalived/state"
 }
 
-// TLSConfig holds TLS settings for HTTP Gateway.
+// HTTPgwConfig holds HTTP Gateway configuration.
+type HTTPgwConfig struct {
+    BizServiceURL string     `yaml:"bizServiceUrl"` // http://svc-nssaa-biz:8080
+    TLS           *TLSConfig `yaml:"tls,omitempty"`
+}
+
+// TLSConfig holds TLS certificate configuration.
 type TLSConfig struct {
     Cert string `yaml:"cert"`
     Key  string `yaml:"key"`
@@ -1655,79 +1499,14 @@ type TLSConfig struct {
 }
 ```
 
-Add `TLSConfig` and component-specific fields to the `Config` struct (modify `internal/config/config.go`):
-
-```go
-// In internal/config/config.go, add to Config struct:
-type Config struct {
-    Component Component   `yaml:"component"` // required: which binary to start
-    TLS      TLSConfig   `yaml:"tls"`       // HTTP Gateway TLS settings
-    // ... existing fields ...
-    Biz   BizConfig    `yaml:"biz"`   // Biz Pod and HTTP Gateway communication
-    AAAgw AAAgwConfig  `yaml:"aaaGateway"` // AAA Gateway settings
-    // ...
-}
-```
-
-Update the `Load` function to validate required fields per component:
-
-```go
-// After yaml.Unmarshal and applyDefaults in Load():
-switch cfg.Component {
-case ComponentBiz:
-    if cfg.Biz.AAAGatewayURL == "" {
-        return nil, fmt.Errorf("biz.aaaGatewayUrl is required")
-    }
-    if cfg.Biz.UseMTLS {
-        if cfg.Biz.TLSCA == "" || cfg.Biz.TLSCert == "" || cfg.Biz.TLSKey == "" {
-            return nil, fmt.Errorf("biz.tlsCA, biz.tlsCert, and biz.tlsKey are required when biz.useMTLS is true")
-        }
-    }
-case ComponentAAAGateway:
-    if cfg.AAAgw.BizServiceURL == "" {
-        return nil, fmt.Errorf("aaaGateway.bizServiceUrl is required")
-    }
-    if cfg.AAAgw.ListenRADIUS == "" {
-        return nil, fmt.Errorf("aaaGateway.listenRadius is required")
-    }
-    if cfg.AAAgw.DiameterProtocol == "" {
-        cfg.AAAgw.DiameterProtocol = "tcp" // default to TCP
-    }
-    if cfg.AAAgw.DiameterProtocol != "tcp" && cfg.AAAgw.DiameterProtocol != "sctp" {
-        return nil, fmt.Errorf("aaaGateway.diameterProtocol must be 'tcp' or 'sctp'")
-    }
-    if cfg.AAAgw.RedisMode == "" {
-        cfg.AAAgw.RedisMode = "standalone" // default
-    }
-    if cfg.AAAgw.RedisMode != "standalone" && cfg.AAAgw.RedisMode != "sentinel" {
-        return nil, fmt.Errorf("aaaGateway.redisMode must be 'standalone' or 'sentinel'")
-    }
-    if cfg.AAAgw.KeepalivedStatePath == "" {
-        cfg.AAAgw.KeepalivedStatePath = "/var/run/keepalived/state" // default
-    }
-case ComponentHTTPGateway:
-    if cfg.Biz.BizServiceURL == "" {
-        return nil, fmt.Errorf("biz.bizServiceUrl is required")
-    }
-    if cfg.TLS.Cert == "" || cfg.TLS.Key == "" {
-        return nil, fmt.Errorf("tls.cert and tls.key are required for http-gateway")
-    }
-default:
-    return nil, fmt.Errorf("config.component must be one of: http-gateway, biz, aaa-gateway")
-}
-```
+Update the `Load` function to validate required fields per component. See the original plan for the full validation code.
 
 Write `internal/config/component_test.go` testing:
 - Loading a `biz` config with missing `biz.aaaGatewayUrl` returns error
 - Loading a `biz` config with `useMTLS: true` but missing TLS fields returns error
-- Loading a `biz` config with `useMTLS: false` succeeds without TLS certs
-- Loading an `aaa-gateway` config with missing `aaaGateway.bizServiceUrl` returns error
-- Loading an `aaa-gateway` config with invalid `diameterProtocol` returns error
-- Loading an `aaa-gateway` config with `diameterProtocol: tcp` succeeds
-- Loading an `aaa-gateway` config with `diameterProtocol: sctp` succeeds
-- Loading an `aaa-gateway` config with invalid `redisMode` returns error
+- Loading an `aaa-gateway` config with missing required fields returns error
 - Loading an `http-gateway` config with missing TLS cert returns error
-- Loading with valid `biz` config succeeds
+- Loading with valid configs succeeds
 
 **Verify:**
 ```bash
@@ -1744,7 +1523,7 @@ go build ./internal/config/... && go test ./internal/config/... -v
 
 ### Task 5.1: Create `compose/dev.yaml`
 
-**Files:** `compose/dev.yaml`
+**Files:** `compose/dev.yaml`, `compose/Dockerfile.mock-aaa-s`, `compose/Dockerfile.biz`, `compose/Dockerfile.aaa-gateway`, `compose/Dockerfile.http-gateway`
 
 **Action:**
 
@@ -1753,7 +1532,6 @@ Create Docker Compose file for local 3-component development:
 ```yaml
 # compose/dev.yaml
 # Local development setup for 3-component NSSAAF architecture.
-# Mirrors production topology: HTTP Gateway → Biz Pod → AAA Gateway → Redis → AAA-S mock.
 version: "3.8"
 
 services:
@@ -1769,14 +1547,16 @@ services:
   mock-aaa-s:
     build:
       context: .
-      dockerfile: Dockerfile.mock-aaa-s
+      dockerfile: compose/Dockerfile.mock-aaa-s
     image: nssAAF-mock-aaa-s:latest
     ports: ["1812:1812/udp", "3868:3868"]
     networks:
       - backend
 
   aaa-gateway:
-    image: nssAAF-aaa-gw:latest
+    build:
+      context: .
+      dockerfile: compose/Dockerfile.aaa-gateway
     depends_on:
       redis:
         condition: service_healthy
@@ -1791,7 +1571,7 @@ services:
     volumes:
       - ./configs/aaa-gateway.yaml:/etc/nssAAF/aaa-gateway.yaml:ro
     ports: ["9090:9090"]
-    network_mode: host  # Dev only: keepalived needs host networking for VIP
+    network_mode: host
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9090/health"]
       interval: 10s
@@ -1799,7 +1579,9 @@ services:
       retries: 3
 
   biz:
-    image: nssAAF-biz:latest
+    build:
+      context: .
+      dockerfile: compose/Dockerfile.biz
     depends_on:
       redis:
         condition: service_healthy
@@ -1808,7 +1590,6 @@ services:
     environment:
       REDIS_ADDR: redis:6379
       AAA_GW_URL: http://localhost:9090
-      DB_HOST: postgres
       CONFIG: /etc/nssAAF/biz.yaml
     volumes:
       - ./configs/biz.yaml:/etc/nssAAF/biz.yaml:ro
@@ -1817,18 +1598,17 @@ services:
       - backend
 
   http-gateway:
-    image: nssAAF-http-gw:latest
+    build:
+      context: .
+      dockerfile: compose/Dockerfile.http-gateway
     depends_on:
       biz:
         condition: service_started
     environment:
       BIZ_SERVICE_URL: http://localhost:8080
-      TLS_CERT: /etc/nssAAF/tls/server.crt
-      TLS_KEY: /etc/nssAAF/tls/server.key
       CONFIG: /etc/nssAAF/http-gateway.yaml
     volumes:
       - ./configs/http-gateway.yaml:/etc/nssAAF/http-gateway.yaml:ro
-      - ./configs/tls:/etc/nssAAF/tls:ro
     ports: ["8443:443"]
     networks:
       - backend
@@ -1838,7 +1618,7 @@ networks:
     driver: bridge
 ```
 
-Note: The `mock-aaa-s` service requires a Dockerfile. Create a minimal FreeRADIUS or custom Go mock. For Phase 3, a simple UDP/TCP echo server that returns mock EAP responses is sufficient.
+Create minimal Dockerfiles for each service. The `mock-aaa-s` can be a simple UDP/TCP echo server returning mock EAP responses.
 
 **Verify:**
 ```bash
@@ -1851,11 +1631,37 @@ docker compose -f compose/dev.yaml config  # Validates YAML syntax
 
 ### Task 5.2: Create `deployments/helm/` charts
 
-**Files:** `deployments/helm/nssaa-http-gateway/`, `deployments/helm/nssaa-biz/`, `deployments/helm/nssaa-aaa-gateway/` (each with `Chart.yaml`, `values.yaml`, `templates/deployment.yaml`, `templates/service.yaml`, `templates/configmap.yaml`)
+**Files to create:**
+
+```
+deployments/helm/nssaa-http-gateway/
+  Chart.yaml
+  values.yaml
+  templates/
+    deployment.yaml
+    service.yaml
+    configmap.yaml
+
+deployments/helm/nssaa-biz/
+  Chart.yaml
+  values.yaml
+  templates/
+    deployment.yaml
+    service.yaml
+    configmap.yaml
+
+deployments/helm/nssaa-aaa-gateway/
+  Chart.yaml
+  values.yaml
+  templates/
+    deployment.yaml
+    service.yaml
+    configmap.yaml
+    configmap-keepalived.yaml
+    network-attachment.yaml
+```
 
 **Action:**
-
-Create three Helm charts following the Kubernetes manifests specified in PHASE §5.
 
 #### 5.2.1 `deployments/helm/nssaa-http-gateway/`
 
@@ -1919,10 +1725,6 @@ spec:
           env:
             - name: CONFIG
               value: /etc/nssAAF/http-gateway.yaml
-            - name: BIND_IP
-              valueFrom:
-                fieldRef:
-                  fieldPath: status.podIP
           volumeMounts:
             - name: config
               mountPath: /etc/nssAAF
@@ -1962,8 +1764,6 @@ spec:
       targetPort: 8443
 ```
 
-Create the same pattern for `nssaa-biz/` and `nssaa-aaa-gateway/`.
-
 #### 5.2.2 `deployments/helm/nssaa-biz/`
 
 Key differences from HTTP Gateway:
@@ -1991,30 +1791,8 @@ Key requirements:
 - `NET_ADMIN` capability for keepalived VIP management
 - `svc-nssaa-aaa` headless service pointing to `app: nssaa-aaa`
 
-**Verify:**
-```bash
-helm lint deployments/helm/nssaa-http-gateway/
-helm lint deployments/helm/nssaa-biz/
-helm lint deployments/helm/nssaa-aaa-gateway/
-kubectl apply --dry-run=server -f deployments/helm/nssaa-http-gateway/
-kubectl apply --dry-run=server -f deployments/helm/nssaa-biz/
-kubectl apply --dry-run=server -f deployments/helm/nssaa-aaa-gateway/
-```
-
-**Done:** All three Helm charts validate. `strategy: Recreate` is set for AAA Gateway.
-
----
-
-### Task 5.3: Create Kustomize overlays and keepalived ConfigMap
-
-**Files:** `deployments/kustomize/base/http-gateway/`, `deployments/kustomize/base/biz/`, `deployments/kustomize/base/aaa-gateway/`, `deployments/kustomize/overlays/development/`, `deployments/kustomize/overlays/production/`, `deployments/kustomize/overlays/carrier/`
-
-**Action:**
-
-Create Kustomize base directories referencing the Helm charts via `kustomize build`. Also create the keepalived ConfigMap:
-
 ```yaml
-# deployments/helm/nssaa-aaa-gateway/templates/configmap-keepalived.yaml
+# templates/configmap-keepalived.yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -2042,10 +1820,8 @@ data:
     curl -f http://localhost:9090/health/vip || exit 1
 ```
 
-Create NetworkAttachmentDefinition for Multus CNI:
-
 ```yaml
-# deployments/helm/nssaa-aaa-gateway/templates/network-attachment.yaml
+# templates/network-attachment.yaml
 apiVersion: k8s.cni.cncf.io/v1
 kind: NetworkAttachmentDefinition
 metadata:
@@ -2063,6 +1839,48 @@ spec:
       }
     }
 ```
+
+**Verify:**
+```bash
+helm lint deployments/helm/nssaa-http-gateway/
+helm lint deployments/helm/nssaa-biz/
+helm lint deployments/helm/nssaa-aaa-gateway/
+kubectl apply --dry-run=server -f deployments/helm/nssaa-http-gateway/
+kubectl apply --dry-run=server -f deployments/helm/nssaa-biz/
+kubectl apply --dry-run=server -f deployments/helm/nssaa-aaa-gateway/
+```
+
+**Done:** All three Helm charts validate. `strategy: Recreate` is set for AAA Gateway.
+
+---
+
+### Task 5.3: Create Kustomize overlays
+
+**Files to create:**
+
+```
+deployments/kustomize/base/http-gateway/
+  kustomization.yaml
+
+deployments/kustomize/base/biz/
+  kustomization.yaml
+
+deployments/kustomize/base/aaa-gateway/
+  kustomization.yaml
+
+deployments/kustomize/overlays/development/
+  kustomization.yaml
+
+deployments/kustomize/overlays/production/
+  kustomization.yaml
+
+deployments/kustomize/overlays/carrier/
+  kustomization.yaml
+```
+
+**Action:**
+
+Create Kustomize base directories referencing the Helm charts via `kustomize build`.
 
 Create three overlay directories:
 - `development/`: Uses Docker image tags `dev-latest`, no TLS (HTTP), no Multus
@@ -2094,145 +1912,93 @@ The core logic was drafted in Task 2.3. This task completes the implementation:
 
 #### 6.1.1 RADIUS server-initiated handler
 
-Extend `radius_handler.go` with the `handleServerInitiated` method:
+Extend `radius_handler.go` with the `handleServerInitiated` method. Note: The `forwardToBiz` in `gateway.go` handles the Redis lookup — the handler only needs to extract session ID and call `forwardToBiz`:
 
 ```go
 // handleServerInitiated processes RAR, CoA, or Disconnect-Request from AAA-S.
 // Spec: PHASE §6.3
-func (h *RadiusHandler) handleServerInitiated(raw []byte, transportType string) {
-    sessionID := extractSessionID(raw) // From RADIUS State attribute or request authenticator
-
-    // Look up session from Redis
-    entry, err := h.getSessionCorr(sessionID)
-    if err != nil {
-        // Session not found — return RAR-Nak/ASA to AAA-S
-        h.logger.Warn("session_not_found_for_server_initiated",
-            "session_id", sessionID,
-            "transport", transportType)
-        h.sendRARnak(raw)
+func (h *RadiusHandler) handleServerInitiated(raw []byte, transport string) {
+    sessionID := extractSessionID(raw)
+    if sessionID == "" {
+        h.logger.Warn("server_initiated_no_session_id", "transport", transport)
         return
     }
 
-    // Determine message type
-    msgType := extractMessageType(raw)
-    var mtype proto.MessageType
-    switch msgType {
-    case radiusCoARequest:
-        mtype = proto.MessageTypeCoA
-    case radiusDisconnectRequest:
-        mtype = proto.MessageTypeRAR // Treat DM as RAR for NSSAA purposes
-    default:
-        mtype = proto.MessageTypeRAR
+    msgType := "RAR"
+    if raw[0] == radiusCoARequest {
+        msgType = "COA"
     }
 
-    // Forward to Biz Pod via HTTP POST /aaa/server-initiated
-    req := &proto.AaaServerInitiatedRequest{
-        Version:       h.version,
-        SessionID:     sessionID,
-        AuthCtxID:     entry.AuthCtxID,
-        TransportType: proto.TransportRADIUS,
-        MessageType:   mtype,
-        Payload:       raw,
-    }
+    h.logger.Info("server-initiated RADIUS received",
+        "transport", transport,
+        "session_id", sessionID,
+        "message_type", msgType)
 
-    resp, err := h.forwardToBizServerInitiated(req)
-    if err != nil {
-        h.logger.Error("forward to biz for server-initiated failed",
-            "error", err, "session_id", sessionID)
-        h.sendRARnak(raw)
-        return
-    }
-
-    // Forward Biz Pod's response back to AAA-S (raw bytes)
-    h.sendToAAA(raw, resp.Payload)
-}
-
-// sendRARnak sends a RAR-Nak (CoA-Nak) response to AAA-S.
-// TODO: Implement fully with RFC 5176 §3.2: RAR-Nak = Access-Reject (code=2) with
-// Error-Cause AVP (Type=161, Vendor-ID=0) = 20051 (Session-Not-Found).
-// For now, logs a warning and drops the packet.
-func (h *RadiusHandler) sendRARnak(originalPacket []byte) {
-    h.logger.Warn("rar_nak_not_implemented",
-        "note", "RFC 5176 §3.2: send Error-Cause 20051 back to AAA-S",
-        "session_id", "unknown")
+    // forwardToBiz in gateway.go handles Redis lookup and Biz Pod notification
+    h.forwardToBiz(context.Background(), sessionID, "RADIUS", msgType, raw)
 }
 ```
 
 #### 6.1.2 Diameter server-initiated handler
 
-Extend `diameter_handler.go` similarly for ASR/ASA (Command Code 274):
+Extend `diameter_handler.go` for ASR/ASA/RAR/RAA/STR/STA. The handlers are already registered in `NewDiameterHandler`:
 
 ```go
-func (h *DiameterHandler) handleServerInitiated(raw []byte) {
-    // Extract Session-Id from Diameter header (bytes 4-36 per RFC 6733)
-    sessionID := extractDiameterSessionID(raw)
+// handleASR handles Abort-Session-Request from AAA-S (server-initiated).
+func (h *DiameterHandler) handleASR() diam.HandlerFunc {
+    return func(conn diam.Conn, m *diam.Message) {
+        sessionID := extractSessionIDFromMsg(m)
+        h.logger.Info("Diameter ASR received", "session_id", sessionID)
 
-    entry, err := h.getSessionCorr(sessionID)
-    if err != nil {
-        h.logger.Warn("session_not_found_for_asr",
-            "session_id", sessionID)
-        h.sendASA(raw, diameterResultCodeUnknownSessionID)
-        return
+        // Send ASA back to AAA-S
+        h.sendASA(conn, m)
+
+        // Serialize and forward to Biz Pod
+        raw, _ := m.Serialize()
+        h.forwardToBiz(context.Background(), sessionID, "DIAMETER", "ASR", raw)
     }
-
-    req := &proto.AaaServerInitiatedRequest{
-        Version:       h.version,
-        SessionID:     sessionID,
-        AuthCtxID:     entry.AuthCtxID,
-        TransportType: proto.TransportDIAMETER,
-        MessageType:   proto.MessageTypeASR,
-        Payload:       raw,
-    }
-
-    resp, err := h.forwardToBizServerInitiated(req)
-    if err != nil {
-        h.logger.Error("forward to biz for ASR failed", "error", err)
-        h.sendASA(raw, diameterResultCodeDiamUnavailable)
-        return
-    }
-
-    h.sendToAAA(raw, resp.Payload)
 }
+
+// handleRAR handles Re-Auth-Request from AAA-S (server-initiated reauth).
+func (h *DiameterHandler) handleRAR() diam.HandlerFunc
+
+// handleSTR handles Session-Termination-Request from AAA-S.
+func (h *DiameterHandler) handleSTR() diam.HandlerFunc
 ```
 
-#### 6.1.3 `forwardToBizServerInitiated` in gateway.go
+#### 6.1.3 `forwardToBiz` in gateway.go
 
 ```go
-// forwardToBizServerInitiated POSTs a server-initiated message to the Biz Pod.
-func (g *Gateway) forwardToBizServerInitiated(req *proto.AaaServerInitiatedRequest) (*proto.AaaServerInitiatedResponse, error) {
-    body, err := json.Marshal(req)
-    if err != nil {
-        return nil, err
+// forwardToBiz sends a server-initiated message to the Biz Pod via HTTP POST.
+// It first looks up the session correlation from Redis.
+func (g *Gateway) forwardToBiz(ctx context.Context, sessionID string, transportType string, messageType string, raw []byte) {
+    // 1. Look up session correlation from Redis
+    entry, err := g.getSessionCorr(ctx, sessionID)
+    if err != nil || entry == nil {
+        g.logger.Warn("server_initiated_session_not_found",
+            "session_id", sessionID,
+            "transport", transportType,
+            "message_type", messageType)
+        return
     }
 
-    httpReq, err := http.NewRequestWithContext(context.Background(),
-        "POST", g.bizServiceURL+"/aaa/server-initiated", bytes.NewReader(body))
-    if err != nil {
-        return nil, err
+    // 2. Build and send the request to Biz Pod
+    req := &proto.AaaServerInitiatedRequest{
+        Version:       g.version,
+        SessionID:     sessionID,
+        AuthCtxID:     entry.AuthCtxID,
+        TransportType: proto.TransportType(transportType),
+        MessageType:   proto.MessageType(messageType),
+        Payload:       raw,
     }
-    httpReq.Header.Set("Content-Type", "application/json")
-    httpReq.Header.Set(proto.HeaderName, g.version)
-
-    resp, err := g.bizHTTPClient.Do(httpReq)
-    if err != nil {
-        return nil, fmt.Errorf("biz service unavailable: %w", err)
-    }
-    defer resp.Body.Close()
-
-    var aaaResp proto.AaaServerInitiatedResponse
-    if err := json.NewDecoder(resp.Body).Decode(&aaaResp); err != nil {
-        return nil, err
-    }
-
-    return &aaaResp, nil
+    // ... HTTP POST to Biz Pod ...
 }
 ```
 
 Write `internal/aaa/gateway/radius_handler_test.go` testing:
 - `HandlePacket` with Access-Request → calls `publishResponse`
 - `HandlePacket` with CoA-Request → calls `handleServerInitiated`
-- `handleServerInitiated` with unknown session → calls `sendRARnak`
-- `handleServerInitiated` with known session → POSTs to Biz Pod
+- `handleServerInitiated` → calls `forwardToBiz`
 
 **Verify:**
 ```bash
@@ -2264,23 +2030,14 @@ func handleServerInitiated(w http.ResponseWriter, r *http.Request) {
     switch req.MessageType {
     case proto.MessageTypeRAR:
         // TS 23.502 §4.2.9.3: Nnssaaf_NSSAA_Re-AuthenticationNotification → AMF
-        // 1. Look up session from DB using req.AuthCtxID
-        // 2. Build Nnssaaf_NSSAA_Re-AuthenticationNotification POST to AMF callback URI
-        // 3. Return RAR-Response (success) or RAR-Nak (failure)
         respPayload = handleReAuth(r.Context(), &req)
 
     case proto.MessageTypeASR:
         // TS 23.502 §4.2.9.4: Nnssaaf_NSSAA_RevocationNotification → AMF
-        // 1. Look up session from DB using req.AuthCtxID
-        // 2. Build Nnssaaf_NSSAA_RevocationNotification POST to AMF callback URI
-        // 3. Return ASA (success) or ASA with error code (failure)
         respPayload = handleRevocation(r.Context(), &req)
 
     case proto.MessageTypeCoA:
         // RFC 5176: Update session state (e.g. QoS change)
-        // 1. Look up session from DB
-        // 2. Apply CoA attributes (e.g. bandwidth limits)
-        // 3. Return CoA-Nak or success
         respPayload = handleCoA(r.Context(), &req)
 
     default:
@@ -2300,36 +2057,15 @@ func handleServerInitiated(w http.ResponseWriter, r *http.Request) {
 
 // handleReAuth implements TS 23.502 §4.2.9.3.
 // TODO: Implement with real AMF callback when Nnssaaf_AIW handlers are wired in Phase 3.
-// Returns a minimal RAR-Nak (CoA-Nak) packet per RFC 5176 §3.2 with Error-Cause 20051
-// (Session-Not-Found). This is a valid RADIUS packet structure, not garbage.
-func handleReAuth(ctx context.Context, req *proto.AaaServerInitiatedRequest) []byte {
-    slog.Info("handle_re_auth", "auth_ctx_id", req.AuthCtxID, "session_id", req.SessionID)
-    // RFC 5176 §3.2: RAR-Nak = Access-Reject with Error-Cause attribute (Type 161).
-    // Minimal valid RAR-Nak: code=2, id=copied, length=6+6=12, response authenticator,
-    // Error-Cause=20051 (Session-Not-Found). For now, return empty reject payload.
-    // Full AMF callback → Nnssaaf_NSSAA_Re-AuthenticationNotification POST deferred to Phase 3.
-    return []byte{2, 0, 0, 12} // code=2 (Access-Reject), minimal length
-}
+func handleReAuth(ctx context.Context, req *proto.AaaServerInitiatedRequest) []byte
 
 // handleRevocation implements TS 23.502 §4.2.9.4.
 // TODO: Implement with real AMF callback when Nnssaaf_AIW handlers are wired in Phase 3.
-// Returns an Abort-Session-Answer (ASA) with DIAMETER_UNKNOWN_SESSION_ID (5002).
-// This is a valid Diameter error answer structure.
-func handleRevocation(ctx context.Context, req *proto.AaaServerInitiatedRequest) []byte {
-    slog.Info("handle_revoc", "auth_ctx_id", req.AuthCtxID, "session_id", req.SessionID)
-    // Diameter ASA header with Result-Code AVP = DIAMETER_UNKNOWN_SESSION_ID (5002).
-    // Full AMF callback → Nnssaaf_NSSAA_RevocationNotification POST deferred to Phase 3.
-    return []byte{} // Empty payload — placeholder; return empty to avoid malformed packet
-}
+func handleRevocation(ctx context.Context, req *proto.AaaServerInitiatedRequest) []byte
 
 // handleCoA implements RFC 5176 CoA.
 // TODO: Implement when session state management is wired in Phase 3.
-// Returns a CoA-Nak with Error-Cause 20051 (Session-Not-Found).
-func handleCoA(ctx context.Context, req *proto.AaaServerInitiatedRequest) []byte {
-    slog.Info("handle_coa", "auth_ctx_id", req.AuthCtxID, "session_id", req.SessionID)
-    // CoA-Nak: same structure as RAR-Nak above.
-    return []byte{2, 0, 0, 12} // code=2 (Access-Reject), minimal length
-}
+func handleCoA(ctx context.Context, req *proto.AaaServerInitiatedRequest) []byte
 ```
 
 **Verify:**
@@ -2345,31 +2081,38 @@ go build ./cmd/biz/... && go test ./cmd/biz/... -v
 
 ---
 
-### Task 7.1: Update all import paths across the codebase
+### Task 7.1: Update all import paths and deprecate `internal/aaa/router.go`
 
 **Action:**
 
-Find and update all imports that reference `github.com/operator/nssAAF/internal/aaa`:
+1. Find and update all imports that reference `github.com/operator/nssAAF/internal/aaa`:
 
 ```bash
 # Find all files importing internal/aaa
 grep -rl "github.com/operator/nssAAF/internal/aaa" --include="*.go" . | grep -v ".git"
-
-# Update each file:
-# internal/aaa/aaa_test.go → internal/biz/aaa_test.go
-# Any other file importing internal/aaa → internal/biz
 ```
 
-Move `internal/aaa/aaa_test.go` → `internal/biz/aaa_test.go` (or merge into `internal/biz/router_test.go`).
+2. Move `internal/aaa/aaa_test.go` → `internal/biz/aaa_test.go` (or merge into `internal/biz/router_test.go`).
 
-Update `go.mod` if needed (add new `replace` directives for internal modules if module boundary changes).
+3. **Deprecate `internal/aaa/router.go`:** Add a deprecation comment at the top of the file:
+
+```go
+// Package aaa provides AAA proxy (AAA-P) functionality.
+// DEPRECATED: This package is no longer used by any binary.
+// Routing decisions are now in internal/biz/router.go.
+// AAA transport is now in internal/aaa/gateway/.
+// This file is kept for reference only.
+package aaa
+```
+
+4. Update `go.mod` if needed.
 
 **Verify:**
 ```bash
 go build ./... && echo "OK: all packages compile"
 ```
 
-**Done:** No more references to `github.com/operator/nssAAF/internal/aaa` in import statements. All packages compile.
+**Done:** No more active references to `github.com/operator/nssAAF/internal/aaa` in import statements (the file still exists but is deprecated). All packages compile.
 
 ---
 
@@ -2377,7 +2120,7 @@ go build ./... && echo "OK: all packages compile"
 
 **Action:**
 
-Execute the complete validation checklist from PHASE §7 (Validation Checklist):
+Execute the complete validation checklist:
 
 ```bash
 # 1. All three binaries compile
@@ -2392,10 +2135,15 @@ go test ./... -count=1 -timeout 60s && echo "PASS: tests pass"
 # 3. No linter errors
 golangci-lint run ./... 2>&1 | head -50 || echo "LINT: review output above"
 
-# 4. Import graph verification (Pitfall 4)
-go mod graph | grep -E "radius|diameter" | grep -v "cmd/aaa-gateway" && \
-echo "FAIL: radius/diameter reachable from non-AAA-Gateway" || \
-echo "PASS: radius/diameter only in cmd/aaa-gateway"
+# 4. Import graph verification (corrected for actual boundaries)
+# RADIUS is allowed in internal/aaa/gateway/ (radius_forward.go)
+go mod graph | grep "internal/radius" | grep -v "internal/aaa/gateway" && \
+echo "WARN: internal/radius reachable outside gateway" || \
+echo "PASS: internal/radius contained to gateway"
+# Diameter must NOT use internal/diameter package
+go mod graph | grep "internal/diameter" && \
+echo "FAIL: internal/diameter should not be used (use go-diameter/v4 directly)" || \
+echo "PASS: internal/diameter not in use"
 
 # 5. internal/proto/ has zero internal dependencies
 echo "Checking internal/proto/ dependencies:"
@@ -2408,6 +2156,10 @@ helm lint deployments/helm/nssaa-http-gateway/ && \
 helm lint deployments/helm/nssaa-biz/ && \
 helm lint deployments/helm/nssaa-aaa-gateway/ && \
 echo "PASS: Helm charts lint"
+
+# 7. Kustomize overlays build
+kustomize build deployments/kustomize/overlays/production/ > /dev/null && \
+echo "PASS: Kustomize overlays build"
 ```
 
 **Done:** All verification checks pass.
@@ -2449,7 +2201,7 @@ echo "PASS: Helm charts lint"
 | Wave | Section | Tasks | Key Check |
 |------|---------|-------|-----------|
 | 1 | §1 Interface Contracts | 1.1–1.4 | `go test ./internal/proto/...` passes |
-| 2 | §2 Split Responsibility | 2.1–2.4 | `go build ./internal/biz/...` with zero radius/diameter imports; `go build ./internal/aaa/gateway/...` |
+| 2 | §2 Split Responsibility | 2.1–2.4 | `go build ./internal/biz/...` with zero radius/diameter imports; `go build ./internal/aaa/gateway/...` (radius_allowed) |
 | 3 | §3 Three Binaries | 3.1–3.4 | All three `go build ./cmd/...` succeed; `cmd/nssAAF/` deleted |
 | 4 | §4 Config Refactor | 4.1 | `go test ./internal/config/...` validates component fields |
 | 5 | §5 K8s Manifests | 5.1–5.3 | `helm lint` + `kustomize build` all succeed |
@@ -2480,7 +2232,10 @@ echo "ALL CHECKS PASSED"
 
 1. **Binary compilation**: `go build ./cmd/biz/... && go build ./cmd/aaa-gateway/... && go build ./cmd/http-gateway/...` — all three binaries compile without errors
 2. **Proto isolation**: `internal/proto/` has zero imports of `internal/radius/`, `internal/diameter/`, `internal/eap/`, `internal/aaa/`
-3. **Import graph**: `go mod graph | grep -E "radius|diameter" | grep -v "cmd/aaa-gateway"` returns zero lines
+3. **Import graph**:
+   - `internal/radius` reachable only from `cmd/aaa-gateway/` and `internal/aaa/gateway/`
+   - `internal/diameter` not in use (use `go-diameter/v4` directly instead)
+   - `internal/biz/` has zero imports of `internal/radius/` or `internal/diameter/`
 4. **Config validation**: `go test ./internal/config/...` passes component-specific field validation
 5. **Test coverage**: All new packages have `*_test.go` files; `go test ./...` passes
 6. **Helm charts**: All three charts pass `helm lint`; all Kustomize overlays build successfully
@@ -2497,19 +2252,14 @@ echo "ALL CHECKS PASSED"
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|------------|
-| **Pitfall 4 (import graph)**: radius/diameter accidentally imported by Biz Pod | Medium | High | Run `go mod graph` check in Task 7.2 after every refactor |
-| **Pitfall 2 (Redis race)**: Session write not completing before AAA-S response | Low | Medium | Use Redis pipeline (write session entry + request in same pipeline); if pipeline fails, do not forward |
-| **Pitfall 3 (TTL expiry)**: EAP session exceeding 10-min Redis TTL | Low | Medium | Set TTL to 15 minutes; Biz Pod refreshes TTL on each EAP round-trip |
-| **Pitfall 5 (keepalived in dev)**: `network_mode: host` conflicts with bridge networking | High | Low | Document in `compose/dev.yaml` that host networking is dev-only; use loopback/physical IP for local AAA-S testing |
-| **Pitfall 6 (NRF FQDN)**: HTTP Gateway FQDN not resolvable from Biz Pod | Medium | Medium | Use Kubernetes internal DNS `svc-nssaa-http-gw.namespace.svc.cluster.local` during registration |
-| **Pitfall 7 (version skew)**: Rolling upgrade causes proto schema mismatch | Low | High | Use immutable tags + `ImagePullPolicy: Always`; log warning on version mismatch, do not fail |
-| **Redis pub/sub fan-out**: All Biz Pods receive every message, discarding most | Medium | Low | Correct by design — discard is O(1) map lookup; scales with Biz Pod count |
+| **Import boundary**: radius accidentally imported by Biz Pod | Medium | High | Run `go mod graph` check in Task 7.2 |
+| **Redis race**: Session write not completing before AAA-S response | Low | Medium | Use Redis pipeline (write session entry + request in same pipeline) |
+| **TTL expiry**: EAP session exceeding 10-min Redis TTL | Low | Medium | Set TTL to 15 minutes; Biz Pod refreshes TTL on each EAP round-trip |
+| **keepalived in dev**: `network_mode: host` conflicts with bridge networking | High | Low | Document in `compose/dev.yaml` that host networking is dev-only |
+| **NRF FQDN**: HTTP Gateway FQDN not resolvable from Biz Pod | Medium | Medium | Use Kubernetes internal DNS during registration |
+| **Version skew**: Rolling upgrade causes proto schema mismatch | Low | High | Use immutable tags + `ImagePullPolicy: Always` |
+| **Redis Cluster**: Cluster shards pub/sub across nodes (not supported) | Medium | Medium | Use dedicated Sentinel or standalone Redis for pub/sub |
 | **SCTP availability**: SCTP may not be available on all host kernels | Low | Medium | Check SCTP availability at startup; fall back to TCP with a warning log |
-| **Redis Cluster**: Cluster shards pub/sub across nodes (not supported) | Medium | Medium | Use dedicated Sentinel or standalone Redis for pub/sub; document this in Helm chart values |
-
-## Blocking Issues (Resolved)
-
-All four blocking issues have been resolved by user decision: all four options are now supported via configuration. The plan has been updated accordingly.
 
 ## Deferred Items (Phase 3 — Data Storage)
 
@@ -2518,7 +2268,7 @@ The following are deferred to the next phase (Phase 3: Data Storage):
 - **PostgreSQL backing**: `nssaa.NewInMemoryStore()` → `nssaa.NewDBStore()`
 - **AMF callback for Re-Auth/Revocation**: Placeholder implementations in `handleReAuth` and `handleRevocation`
 - **Redis session TTL refresh**: Biz Pod should extend `nssaa:session:{sessionId}` TTL on each EAP round-trip
-- **Circuit breaker for Biz Pod → AAA Gateway**: Use a third-party circuit breaker library (e.g., `github.com/sony/gobreaker`) — `internal/resilience/` is a stub; create a new package in Phase 3 if needed
+- **Circuit breaker for Biz Pod → AAA Gateway**: Use a third-party circuit breaker library
 - **AuthCtxStore interface**: Wire `eap.Engine` with proper `AuthCtxStore` instead of in-memory session manager
 
 </risk_register>
