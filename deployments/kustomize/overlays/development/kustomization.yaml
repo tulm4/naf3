@@ -1,0 +1,30 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base/http-gateway
+  - ../../base/biz
+  - ../../base/aaa-gateway
+
+namePrefix: dev-
+commonLabels:
+  environment: development
+
+patches:
+  # Disable TLS in development
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: unset
+        namespace: unset
+      spec:
+        template:
+          spec:
+            containers:
+              - name: http-gw
+                env:
+                  - name: TLS_ENABLED
+                    value: "false"
+    target:
+      labelSelector: "app.kubernetes.io/name in (http-gateway)"
