@@ -13,6 +13,7 @@ import (
 func TestNewDLQ(t *testing.T) {
 	mr, err := miniredis.Run()
 	require.NoError(t, err)
+	defer mr.Close()
 
 	pool, err := NewPool(context.Background(), Config{
 		Addrs:        []string{mr.Addr()},
@@ -21,11 +22,7 @@ func TestNewDLQ(t *testing.T) {
 		DialTimeout:  100 * time.Millisecond,
 	})
 	require.NoError(t, err)
-
-	t.Cleanup(func() {
-		pool.Close()
-		mr.Close()
-	})
+	defer pool.Close()
 
 	dlq := NewDLQ(pool)
 	assert.NotNil(t, dlq)
@@ -34,6 +31,7 @@ func TestNewDLQ(t *testing.T) {
 func TestDLQ_Enqueue(t *testing.T) {
 	mr, err := miniredis.Run()
 	require.NoError(t, err)
+	defer mr.Close()
 
 	pool, err := NewPool(context.Background(), Config{
 		Addrs:        []string{mr.Addr()},
@@ -42,11 +40,7 @@ func TestDLQ_Enqueue(t *testing.T) {
 		DialTimeout:  100 * time.Millisecond,
 	})
 	require.NoError(t, err)
-
-	t.Cleanup(func() {
-		pool.Close()
-		mr.Close()
-	})
+	defer pool.Close()
 
 	dlq := NewDLQ(pool)
 
@@ -67,6 +61,7 @@ func TestDLQ_Enqueue(t *testing.T) {
 func TestDLQ_Len(t *testing.T) {
 	mr, err := miniredis.Run()
 	require.NoError(t, err)
+	defer mr.Close()
 
 	pool, err := NewPool(context.Background(), Config{
 		Addrs:        []string{mr.Addr()},
@@ -75,11 +70,7 @@ func TestDLQ_Len(t *testing.T) {
 		DialTimeout:  100 * time.Millisecond,
 	})
 	require.NoError(t, err)
-
-	t.Cleanup(func() {
-		pool.Close()
-		mr.Close()
-	})
+	defer pool.Close()
 
 	dlq := NewDLQ(pool)
 

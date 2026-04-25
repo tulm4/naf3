@@ -48,7 +48,8 @@ type AuthSubscription struct {
 // GetAuthContext calls Nudm_UECM_Get to retrieve auth subscription for a SUPI.
 // REQ-04: Called before AAA routing to determine EAP method and AAA server.
 // Spec: TS 29.526 §7.3.2, TS 23.502 §4.2.9.2 step 2.
-func (c *Client) GetAuthContext(ctx context.Context, supi string) (*AuthSubscription, error) {
+// Returns interface{} to satisfy nssaa.WithUDMClient interface{GetAuthContext(...)(interface{}, error)}.
+func (c *Client) GetAuthContext(ctx context.Context, supi string) (interface{}, error) {
 	baseURL := c.baseURL
 	if baseURL == "" && c.nrfClient != nil {
 		plmn := extractPLMNFromSupi(supi)
