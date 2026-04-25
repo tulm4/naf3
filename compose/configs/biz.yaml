@@ -1,4 +1,7 @@
-# Biz Pod configuration for NSSAAF
+# NSSAAF Biz Pod configuration for development testing
+# Phase 4: NF Integration & Observability — config fixture
+# Usage: go run ./cmd/biz/main.go --config=compose/configs/biz.yaml
+
 component: biz
 version: "0.1.0"
 
@@ -8,18 +11,22 @@ server:
   writeTimeout: 30s
   idleTimeout: 120s
 
+database:
+  host: "localhost"
+  port: 5432
+  name: "nssaa"
+  user: "nssaa"
+  password: "nssaa"
+  maxConns: 20
+  minConns: 5
+  connMaxLifetime: 30m
+  sslMode: "disable"
+
 redis:
-  addr: "redis:6379"
+  addr: "localhost:6379"
   password: ""
   db: 0
   poolSize: 50
-
-biz:
-  aaaGatewayUrl: "http://aaa-gateway:9090"
-  useMTLS: false
-  tlsCert: ""
-  tlsKey: ""
-  tlsCa: ""
 
 eap:
   maxRounds: 20
@@ -32,6 +39,11 @@ aaa:
   failureThreshold: 5
   recoveryTimeout: 30s
 
+rateLimit:
+  perGpsiPerMin: 10
+  perAmfPerSec: 100
+  globalPerSec: 1000
+
 logging:
   level: "info"
   format: "json"
@@ -39,3 +51,23 @@ logging:
 metrics:
   enabled: true
   path: "/metrics"
+
+# NRF integration — REQ-01, REQ-02, REQ-03
+nrf:
+  baseURL: "http://localhost:8081"
+  discoverTimeout: 5s
+
+# UDM integration — REQ-04, REQ-05
+udm:
+  baseURL: "http://localhost:8082"
+  timeout: 10s
+
+# AUSF integration — REQ-08
+ausf:
+  baseURL: "http://localhost:8083"
+  timeout: 10s
+
+# Biz Pod component config
+biz:
+  aaaGatewayUrl: "http://localhost:9090"
+  useMTLS: false
