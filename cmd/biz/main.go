@@ -6,14 +6,15 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"flag"
 	"fmt"
-	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -350,8 +351,9 @@ func podHeartbeat(ctx context.Context, redisAddr, podID string) {
 }
 
 // hasScheme returns true if s already contains a URL scheme prefix.
+// Handles both http:// and https:// schemes.
 func hasScheme(s string) bool {
-	return len(s) >= 4 && (s[:4] == "http" || s[:4] == "Http")
+	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://")
 }
 
 // mustLoadCertPool loads and parses a CA certificate file into an x509.CertPool.
