@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel"
+
 	"github.com/operator/nssAAF/internal/proto"
 	"github.com/redis/go-redis/v9"
 )
@@ -89,6 +91,7 @@ func New(cfg Config) *Gateway {
 
 	g.radiusHandler = &RadiusHandler{
 		logger:          cfg.Logger,
+		tracer:          otel.Tracer("aaa-gateway/radius"),
 		publishResponse: g.publishResponseBytes,
 		forwardToBiz:    g.forwardToBiz,
 	}

@@ -7,6 +7,9 @@ import (
 	"log/slog"
 	"net"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -21,6 +24,7 @@ const (
 // RadiusHandler handles RADIUS protocol traffic.
 type RadiusHandler struct {
 	logger          *slog.Logger
+	tracer          trace.Tracer
 	publishResponse func(sessionID string, raw []byte)
 	forwardToBiz    func(ctx context.Context, sessionID string, transportType string, messageType string, raw []byte)
 }
@@ -51,13 +55,13 @@ func (h *RadiusHandler) Listen(ctx context.Context, addr string) {
 				h.logger.Error("RADIUS read error", "error", err)
 				continue
 			}
-			h.handlePacket(conn, clientAddr, buf[:n])
+			h.handlePacket(ctx, conn, clientAddr, buf[:n])
 		}
 	}
 }
 
 // handlePacket processes an incoming RADIUS packet from AAA-S.
-func (h *RadiusHandler) handlePacket(conn *net.UDPConn, addr *net.UDPAddr, raw []byte) {
+func (h *RadiusHandler) handlePacket(ctx context.Context, conn *net.UDPConn, addr *net.UDPAddr, raw []byte) {
 	if len(raw) < 4 {
 		h.logger.Warn("radius_packet_too_short", "len", len(raw))
 		return
@@ -74,7 +78,7 @@ func (h *RadiusHandler) handlePacket(conn *net.UDPConn, addr *net.UDPAddr, raw [
 
 	// Server-initiated: CoA or DM from AAA-S
 	if msgType == radiusCoARequest || msgType == radiusDisconnectRequest {
-		h.handleServerInitiated(raw, "RADIUS")
+		h.handleServerInitiated(ctx, raw, "RADIUS")
 		return
 	}
 }
@@ -88,7 +92,7 @@ func (h *RadiusHandler) Forward(ctx context.Context, payload []byte, sessionID s
 
 // handleServerInitiated handles server-initiated RADIUS packets (CoA, DM).
 // It extracts the session ID, looks up the Biz Pod, and forwards the request.
-func (h *RadiusHandler) handleServerInitiated(raw []byte, transport string) {
+func (h *RadiusHandler) handleServerInitiated(ctx context.Context, raw []byte, transport string) {
 	sessionID := extractSessionID(raw)
 	if sessionID == "" {
 		h.logger.Warn("server_initiated_no_session_id", "transport", transport)
@@ -105,7 +109,21 @@ func (h *RadiusHandler) handleServerInitiated(raw []byte, transport string) {
 		"session_id", sessionID,
 		"message_type", msgType)
 
-	h.forwardToBiz(context.Background(), sessionID, "RADIUS", msgType, raw)
+	// Create a new span representing this server-initiated RADIUS initiation.
+	// RADIUS over UDP has no native tracing context, so we create a fresh span
+	// here as the root of the server-initiated flow (equivalent to what
+	// conn.Context() provides for Diameter). This ensures the downstream HTTP
+	// call to Biz Pod, AMF notifications, and DB operations are all children
+	// of this span for distributed tracing continuity.
+	ctx, span := h.tracer.Start(ctx, msgType,
+		trace.WithAttributes(
+			attribute.String("session_id", sessionID),
+			attribute.String("transport", transport),
+			attribute.String("message_type", msgType),
+		))
+	defer span.End()
+
+	h.forwardToBiz(ctx, sessionID, "RADIUS", msgType, raw)
 }
 
 // extractSessionID extracts the session ID from RADIUS packet.
