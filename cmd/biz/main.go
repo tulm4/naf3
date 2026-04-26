@@ -287,6 +287,14 @@ func handleServerInitiated(w http.ResponseWriter, r *http.Request) {
 	case proto.MessageTypeCoA:
 		respPayload = handleCoA(r.Context(), &req)
 	default:
+		// Enum exhaustiveness: future protocol additions (e.g., Session-Timeout-Request,
+		// Resource-Reallocation-Request per TS 29.561) will be caught here and logged
+		// before returning 400, preventing silent fallthrough to other handlers.
+		slog.Warn("handle_server_initiated: unknown message type",
+			"message_type", req.MessageType,
+			"session_id", req.SessionID,
+			"auth_ctx_id", req.AuthCtxID,
+		)
 		http.Error(w, "unknown message type", http.StatusBadRequest)
 		return
 	}
