@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 )
 
@@ -30,6 +31,7 @@ type AMFDLQItem struct {
 // DLQ provides a dead-letter queue for failed AMF notifications.
 type DLQ struct {
 	pool *Pool
+	wg   sync.WaitGroup
 }
 
 // NewDLQ creates a new AMF notification DLQ.
@@ -75,8 +77,11 @@ func (d *DLQ) Len(ctx context.Context) (int64, error) {
 // REQ-10: DLQ stores items for later inspection/reprocessing.
 // Actual retry delivery is handled by the AMF notifier on its own schedule.
 // The DLQ items can be inspected via Redis directly or via a separate DLQ worker.
+// Call Done() to wait for the goroutine to exit.
 func (d *DLQ) Process(ctx context.Context) {
+	d.wg.Add(1)
 	go func() {
+		defer d.wg.Done()
 		for {
 			select {
 			case <-ctx.Done():
@@ -106,3 +111,4 @@ func (d *DLQ) Process(ctx context.Context) {
 		}
 	}()
 }
+
