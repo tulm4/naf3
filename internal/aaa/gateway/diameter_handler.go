@@ -217,7 +217,10 @@ func (h *DiameterHandler) handleASR() diam.HandlerFunc {
 			h.logger.Error("failed to serialize ASR", "error", err)
 			return
 		}
-		h.forwardToBiz(context.Background(), sessionID, "DIAMETER", "ASR", raw)
+	// Extract context from the connection for distributed tracing continuity.
+		// This ensures ASR/RAR server-initiated messages are traced as children
+		// of the AAA-S initiation span (TS 23.502 §4.2.9.3).
+		h.forwardToBiz(conn.Context(), sessionID, "DIAMETER", "ASR", raw)
 	}
 }
 
@@ -245,7 +248,10 @@ func (h *DiameterHandler) handleRAR() diam.HandlerFunc {
 		h.sendRAA(conn, m)
 
 		raw, _ := m.Serialize()
-		h.forwardToBiz(context.Background(), sessionID, "DIAMETER", "RAR", raw)
+	// Extract context from the connection for distributed tracing continuity.
+		// This ensures RAR server-initiated re-auth is traced as a child of the
+		// AAA-S initiation span (TS 23.502 §4.2.9.3).
+		h.forwardToBiz(conn.Context(), sessionID, "DIAMETER", "RAR", raw)
 	}
 }
 
