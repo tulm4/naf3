@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -381,7 +382,10 @@ func (g *Gateway) forwardToBiz(ctx context.Context, sessionID string, transportT
 			"error", err, "session_id", sessionID)
 		return
 	}
-	defer resp.Body.Close()
+	// Drain and close the body to allow connection reuse.
+	// io.Copy is idempotent and safe even if the body is already empty.
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		g.logger.Warn("biz returned non-OK for server-initiated",
