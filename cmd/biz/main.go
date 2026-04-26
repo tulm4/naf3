@@ -24,13 +24,13 @@ import (
 	"github.com/operator/nssAAF/internal/ausf"
 	"github.com/operator/nssAAF/internal/cache/redis"
 	"github.com/operator/nssAAF/internal/config"
+	"github.com/operator/nssAAF/internal/metrics"
 	"github.com/operator/nssAAF/internal/nrf"
 	"github.com/operator/nssAAF/internal/proto"
 	"github.com/operator/nssAAF/internal/resilience"
 	"github.com/operator/nssAAF/internal/storage/postgres"
 	"github.com/operator/nssAAF/internal/tracing"
 	"github.com/operator/nssAAF/internal/udm"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	goredis "github.com/redis/go-redis/v9"
 )
 
@@ -209,7 +209,7 @@ func main() {
 	// ─── OAM endpoints ─────────────────────────────────────────────────────
 	mux.HandleFunc("/healthz/live", handleLiveness)
 	mux.HandleFunc("/healthz/ready", handleReadiness)
-	mux.Handle("/metrics", promhttp.Handler())
+	mux.Handle("/metrics", metrics.Handler())
 
 	// ─── Middleware stack ─────────────────────────────────────────────────
 	var handler http.Handler = mux
