@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // mockPublishResponse captures calls to publishResponse.
@@ -84,6 +85,11 @@ func nullLogger() *slog.Logger {
 	return slog.New(slog.DiscardHandler)
 }
 
+// nullTracer returns a no-op tracer for tests that don't need real tracing.
+func nullTracer() trace.Tracer {
+	return trace.NewNoopTracerProvider().Tracer("test")
+}
+
 // TestHandlePacket_TooShort verifies that packets with fewer than 4 bytes are dropped.
 func TestHandlePacket_TooShort(t *testing.T) {
 	pub := &mockPublishResponse{}
@@ -95,11 +101,11 @@ func TestHandlePacket_TooShort(t *testing.T) {
 	}
 
 	// Empty packet
-	h.handlePacket(nil, nil, []byte{})
+	h.handlePacket(context.Background(), nil, nil, []byte{})
 	// Single byte
-	h.handlePacket(nil, nil, []byte{1})
+	h.handlePacket(context.Background(), nil, nil, []byte{1})
 	// 3 bytes
-	h.handlePacket(nil, nil, []byte{1, 2, 3})
+	h.handlePacket(context.Background(), nil, nil, []byte{1, 2, 3})
 
 	assert.Empty(t, pub.calls)
 	assert.Empty(t, fwd.calls)
@@ -119,7 +125,7 @@ func TestHandlePacket_AccessAccept(t *testing.T) {
 	attrs := buildStateAttr(state)
 	pkt := buildRadiusPacket(2, 1, attrs)
 
-	h.handlePacket(nil, nil, pkt)
+	h.handlePacket(context.Background(), nil, nil, pkt)
 
 	assert.Len(t, pub.calls, 1)
 	assert.Equal(t, state, pub.calls[0].sessionID)
@@ -141,7 +147,7 @@ func TestHandlePacket_AccessReject(t *testing.T) {
 	attrs := buildStateAttr(state)
 	pkt := buildRadiusPacket(3, 2, attrs)
 
-	h.handlePacket(nil, nil, pkt)
+	h.handlePacket(context.Background(), nil, nil, pkt)
 
 	assert.Len(t, pub.calls, 1)
 	assert.Equal(t, state, pub.calls[0].sessionID)
@@ -163,7 +169,7 @@ func TestHandlePacket_AccessChallenge(t *testing.T) {
 	attrs := append(buildStateAttr(state), buildEAPAttr(eapPayload)...)
 	pkt := buildRadiusPacket(11, 3, attrs)
 
-	h.handlePacket(nil, nil, pkt)
+	h.handlePacket(context.Background(), nil, nil, pkt)
 
 	assert.Len(t, pub.calls, 1)
 	assert.Equal(t, state, pub.calls[0].sessionID)
@@ -176,6 +182,7 @@ func TestHandlePacket_CoARequest(t *testing.T) {
 	fwd := &mockForwardToBiz{}
 	h := &RadiusHandler{
 		logger:          nullLogger(),
+		tracer:         nullTracer(),
 		publishResponse: pub.invoke,
 		forwardToBiz:    fwd.invoke,
 	}
@@ -184,7 +191,7 @@ func TestHandlePacket_CoARequest(t *testing.T) {
 	attrs := buildStateAttr(state)
 	pkt := buildRadiusPacket(43, 4, attrs)
 
-	h.handlePacket(nil, nil, pkt)
+	h.handlePacket(context.Background(), nil, nil, pkt)
 
 	assert.Empty(t, pub.calls)
 	assert.Len(t, fwd.calls, 1)
@@ -200,6 +207,7 @@ func TestHandlePacket_DisconnectRequest(t *testing.T) {
 	fwd := &mockForwardToBiz{}
 	h := &RadiusHandler{
 		logger:          nullLogger(),
+		tracer:         nullTracer(),
 		publishResponse: pub.invoke,
 		forwardToBiz:    fwd.invoke,
 	}
@@ -208,7 +216,7 @@ func TestHandlePacket_DisconnectRequest(t *testing.T) {
 	attrs := buildStateAttr(state)
 	pkt := buildRadiusPacket(40, 5, attrs)
 
-	h.handlePacket(nil, nil, pkt)
+	h.handlePacket(context.Background(), nil, nil, pkt)
 
 	assert.Empty(t, pub.calls)
 	assert.Len(t, fwd.calls, 1)
@@ -231,7 +239,7 @@ func TestHandlePacket_UnknownCodeIsDropped(t *testing.T) {
 	// code=5 (Accounting-Request) — not handled
 	pkt := buildRadiusPacket(5, 1, nil)
 
-	h.handlePacket(nil, nil, pkt)
+	h.handlePacket(context.Background(), nil, nil, pkt)
 
 	assert.Empty(t, pub.calls)
 	assert.Empty(t, fwd.calls)
@@ -251,7 +259,7 @@ func TestHandleServerInitiated_NoSessionID_DropsPacket(t *testing.T) {
 	// CoA packet with no State attribute (totalLen >= 20 so not caught by < 4 check)
 	pkt := buildRadiusPacket(43, 6, nil)
 
-	h.handlePacket(nil, nil, pkt)
+	h.handlePacket(context.Background(), nil, nil, pkt)
 
 	assert.Empty(t, pub.calls)
 	assert.Empty(t, fwd.calls)
@@ -263,6 +271,7 @@ func TestHandleServerInitiated_Direct(t *testing.T) {
 	fwd := &mockForwardToBiz{}
 	h := &RadiusHandler{
 		logger:          nullLogger(),
+		tracer:         nullTracer(),
 		publishResponse: func(string, []byte) {},
 		forwardToBiz:    fwd.invoke,
 	}
@@ -271,7 +280,7 @@ func TestHandleServerInitiated_Direct(t *testing.T) {
 	coaPkt := buildRadiusPacket(43, 7, buildStateAttr(sessionID))
 	dmPkt := buildRadiusPacket(40, 8, buildStateAttr(sessionID))
 
-	h.handleServerInitiated(coaPkt, "RADIUS")
+	h.handleServerInitiated(context.Background(), coaPkt, "RADIUS")
 
 	assert.Len(t, fwd.calls, 1)
 	assert.Equal(t, sessionID, fwd.calls[0].sessionID)
@@ -279,7 +288,7 @@ func TestHandleServerInitiated_Direct(t *testing.T) {
 	assert.Equal(t, "RADIUS", fwd.calls[0].transportType)
 
 	fwd.calls = nil
-	h.handleServerInitiated(dmPkt, "RADIUS")
+	h.handleServerInitiated(context.Background(), dmPkt, "RADIUS")
 
 	assert.Len(t, fwd.calls, 1)
 	assert.Equal(t, sessionID, fwd.calls[0].sessionID)
