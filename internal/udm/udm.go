@@ -108,7 +108,10 @@ func (c *Client) UpdateAuthContext(ctx context.Context, supi, authCtxId, status 
 
 	url := fmt.Sprintf("%s/nudm-uem/v1/subscribers/%s/auth-contexts/%s", baseURL, supi, authCtxId)
 	payload := map[string]string{"authResult": status}
-	body, _ := json.Marshal(payload)
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("udm: marshal update payload: %w", err)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(body))
 	if err != nil {
