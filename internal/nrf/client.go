@@ -68,10 +68,10 @@ func (c *NRFDiscoveryCache) Set(key string, data interface{}) {
 // Spec: TS 29.510 §6 — fields from docs/design/05_nf_profile.md §2.2.
 type NFProfile struct {
 	NFInstanceID   string `json:"nfInstanceId"`
-	NFType        string `json:"nfType"` // "NSSAAF"
-	NFStatus      string `json:"nfStatus"`
-	HeartBeatTimer int   `json:"heartBeatTimer"`
-	Load          int    `json:"load"`
+	NFType         string `json:"nfType"` // "NSSAAF"
+	NFStatus       string `json:"nfStatus"`
+	HeartBeatTimer int    `json:"heartBeatTimer"`
+	Load           int    `json:"load"`
 }
 
 // NewClient creates a new NRF client.
@@ -79,7 +79,7 @@ func NewClient(cfg config.NRFConfig) *Client {
 	return &Client{
 		baseURL: cfg.BaseURL,
 		httpClient: &http.Client{
-			Timeout: cfg.DiscoverTimeout,
+			Timeout:   cfg.DiscoverTimeout,
 			Transport: otelhttp.NewTransport(http.DefaultTransport),
 		},
 		nfInstanceID: fmt.Sprintf("nssAAF-instance-%d", time.Now().UnixNano()),
@@ -131,10 +131,10 @@ func (c *Client) RegisterAsync(ctx context.Context) {
 func (c *Client) Register(ctx context.Context) error {
 	profile := NFProfile{
 		NFInstanceID:   c.nfInstanceID,
-		NFType:        "NSSAAF",
-		NFStatus:      "REGISTERED",
+		NFType:         "NSSAAF",
+		NFStatus:       "REGISTERED",
 		HeartBeatTimer: 300,
-		Load:          0,
+		Load:           0,
 	}
 	body, err := json.Marshal(profile)
 	if err != nil {
@@ -163,9 +163,9 @@ func (c *Client) Register(ctx context.Context) error {
 func (c *Client) Heartbeat(ctx context.Context) error {
 	payload := map[string]interface{}{
 		"nfInstanceId":   c.nfInstanceID,
-		"nfStatus":      "REGISTERED",
+		"nfStatus":       "REGISTERED",
 		"heartBeatTimer": 300,
-		"load":          0,
+		"load":           0,
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {

@@ -18,8 +18,8 @@ var DefaultRetryConfig = RetryConfig{
 // RetryConfig holds retry parameters.
 type RetryConfig struct {
 	MaxAttempts int
-	BaseDelay  time.Duration
-	MaxDelay   time.Duration
+	BaseDelay   time.Duration
+	MaxDelay    time.Duration
 }
 
 // ErrMaxRetriesExceeded is returned when all retry attempts fail.

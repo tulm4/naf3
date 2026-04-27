@@ -26,7 +26,7 @@ func NewClient(cfg config.AUSFConfig) *Client {
 	return &Client{
 		baseURL: cfg.BaseURL,
 		httpClient: &http.Client{
-			Timeout: cfg.Timeout,
+			Timeout:   cfg.Timeout,
 			Transport: otelhttp.NewTransport(http.DefaultTransport),
 		},
 	}

@@ -19,7 +19,7 @@ import (
 type NotificationType string
 
 const (
-	NotificationTypeReAuth    NotificationType = "reauth"
+	NotificationTypeReAuth     NotificationType = "reauth"
 	NotificationTypeRevocation NotificationType = "revocation"
 )
 
@@ -40,14 +40,14 @@ type DLQItem struct {
 // redisAMFDLQItem is the DLQItem variant stored in Redis.
 // Field types match redis.AMFDLQItem for serialization compatibility.
 type redisAMFDLQItem struct {
-	ID        string           `json:"id"`
-	Type      string           `json:"type"`
-	URI       string           `json:"uri"`
-	Payload   json.RawMessage  `json:"payload"`
-	AuthCtxID string           `json:"authCtxId"`
-	Attempt   int              `json:"attempt"`
-	CreatedAt time.Time        `json:"createdAt"`
-	LastError string           `json:"lastError"`
+	ID        string          `json:"id"`
+	Type      string          `json:"type"`
+	URI       string          `json:"uri"`
+	Payload   json.RawMessage `json:"payload"`
+	AuthCtxID string          `json:"authCtxId"`
+	Attempt   int             `json:"attempt"`
+	CreatedAt time.Time       `json:"createdAt"`
+	LastError string          `json:"lastError"`
 }
 
 // Client sends notifications to the AMF.
@@ -55,9 +55,11 @@ type redisAMFDLQItem struct {
 // REQ-07: Revocation notification POST to revocNotifUri.
 // REQ-10: DLQ on retry exhaustion.
 type Client struct {
-	httpClient    *http.Client
-	cbRegistry    *resilience.Registry
-	dlq           interface{ Enqueue(ctx context.Context, item interface{}) error }
+	httpClient *http.Client
+	cbRegistry *resilience.Registry
+	dlq        interface {
+		Enqueue(ctx context.Context, item interface{}) error
+	}
 	notifyTimeout time.Duration
 	maxRetries    int
 }
@@ -71,7 +73,7 @@ func NewClient(timeout time.Duration, cbRegistry *resilience.Registry, dlq inter
 	}
 	return &Client{
 		httpClient: &http.Client{
-			Timeout: timeout,
+			Timeout:   timeout,
 			Transport: otelhttp.NewTransport(http.DefaultTransport),
 		},
 		cbRegistry:    cbRegistry,

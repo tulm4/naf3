@@ -32,12 +32,12 @@ func newRadiusForwarder(serverAddr string, serverPort int, sharedSecret string, 
 
 	cfg := radius.Config{
 		ServerAddress:  serverAddr,
-		ServerPort:    serverPort,
+		ServerPort:     serverPort,
 		SharedSecret:   sharedSecret,
-		Timeout:       10,
-		MaxRetries:    3,
+		Timeout:        10,
+		MaxRetries:     3,
 		ResponseWindow: 10,
-		Transport:     "UDP",
+		Transport:      "UDP",
 	}
 
 	client, err := radius.NewRadiusClient(cfg, logger)

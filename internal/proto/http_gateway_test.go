@@ -9,13 +9,13 @@ import (
 
 // mockBizServiceClient is a test double implementing BizServiceClient.
 type mockBizServiceClient struct {
-	forwardCalled       bool
-	forwardPath        string
-	forwardMethod      string
-	forwardBody        []byte
-	forwardRespBody    []byte
-	forwardRespStatus  int
-	forwardRespErr     error
+	forwardCalled     bool
+	forwardPath       string
+	forwardMethod     string
+	forwardBody       []byte
+	forwardRespBody   []byte
+	forwardRespStatus int
+	forwardRespErr    error
 }
 
 func (m *mockBizServiceClient) ForwardRequest(ctx context.Context, path, method string, body []byte) ([]byte, int, error) {

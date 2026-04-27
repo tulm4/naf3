@@ -17,6 +17,24 @@ services:
       retries: 5
 
   # ---------------------------------------------------------------------------
+  # PostgreSQL — session and audit data store
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: nssaa
+      POSTGRES_PASSWORD: nssaa
+      POSTGRES_DB: nssaa
+    ports: ["5432:5432"]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nssaa -d nssaa"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
   # mock-aaa-s — Simulates AAA Server (RADIUS + Diameter)
   # ---------------------------------------------------------------------------
   mock-aaa-s:
@@ -62,6 +80,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
       aaa-gateway:
         condition: service_healthy
     volumes:
@@ -90,3 +110,6 @@ services:
 networks:
   backend:
     driver: bridge
+
+volumes:
+  postgres_data:

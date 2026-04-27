@@ -36,14 +36,14 @@ func (s State) String() string {
 // REQ-11: CLOSED → OPEN (5 consecutive failures) → HALF_OPEN (30s recovery) → CLOSED (3 successes)
 // D-03: Registry keyed by "host:port"
 type CircuitBreaker struct {
-	mu                sync.Mutex
-	state             State
-	failures          int
-	successes         int
-	lastFailure       time.Time
-	openedAt          time.Time
-	failureThreshold  int
-	recoveryTimeout   time.Duration
+	mu               sync.Mutex
+	state            State
+	failures         int
+	successes        int
+	lastFailure      time.Time
+	openedAt         time.Time
+	failureThreshold int
+	recoveryTimeout  time.Duration
 	successThreshold int
 }
 
@@ -135,10 +135,10 @@ func (cb *CircuitBreaker) State() State {
 // Registry manages named circuit breakers keyed by "host:port".
 // D-03: CircuitBreakerRegistry keyed by "host:port".
 type Registry struct {
-	mu                       sync.RWMutex
-	breakers                 map[string]*CircuitBreaker
-	defaultFailureThreshold   int
-	defaultRecoveryTimeout   time.Duration
+	mu                      sync.RWMutex
+	breakers                map[string]*CircuitBreaker
+	defaultFailureThreshold int
+	defaultRecoveryTimeout  time.Duration
 	defaultSuccessThreshold int
 }
 
@@ -154,9 +154,9 @@ func NewRegistry(failureThreshold int, recoveryTimeout, successThreshold time.Du
 		successThreshold = 3
 	}
 	return &Registry{
-		breakers:                 make(map[string]*CircuitBreaker),
-		defaultFailureThreshold:   failureThreshold,
-		defaultRecoveryTimeout:   recoveryTimeout,
+		breakers:                make(map[string]*CircuitBreaker),
+		defaultFailureThreshold: failureThreshold,
+		defaultRecoveryTimeout:  recoveryTimeout,
 		defaultSuccessThreshold: int(successThreshold),
 	}
 }

@@ -38,7 +38,7 @@ LINTER = golangci-lint
 LINTER_FLAGS = run ./...
 
 # Docker
-DOCKER_IMAGE_PREFIX = ghcr.io/operator/nssAAF
+DOCKER_IMAGE_PREFIX = ghcr.io/operator/nssaaf
 DOCKER_TAG ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 DOCKER_BUILD = docker build --platform linux/amd64
 DOCKER_BUILDX = docker buildx build --platform linux/amd64,linux/arm64

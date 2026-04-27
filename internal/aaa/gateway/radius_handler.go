@@ -13,12 +13,12 @@ import (
 )
 
 const (
-	radiusAccessRequest      = 1
+	radiusAccessRequest     = 1
 	radiusAccessAccept      = 2
 	radiusAccessReject      = 3
 	radiusAccessChallenge   = 11
 	radiusCoARequest        = 43 // RFC 5176
-	radiusDisconnectRequest  = 40 // RFC 5176
+	radiusDisconnectRequest = 40 // RFC 5176
 )
 
 // RadiusHandler handles RADIUS protocol traffic.
@@ -158,4 +158,3 @@ func sendRARnak(logger *slog.Logger, originalPacket []byte) {
 		"note", "RFC 5176 §3.2: send Error-Cause 20051 back to AAA-S",
 		"session_id", "unknown")
 }
-

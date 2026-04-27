@@ -47,6 +47,14 @@ func newHistogram(opts prometheus.HistogramOpts) prometheus.Histogram {
 	return h
 }
 
+func newGaugeVec(opts prometheus.GaugeOpts, labels []string) *prometheus.GaugeVec {
+	g := prometheus.NewGaugeVec(opts, labels)
+	if err := Registry.Register(g); err != nil {
+		panic("prometheus: failed to register gauge vec: " + err.Error())
+	}
+	return g
+}
+
 var (
 	// Request metrics — REQ-14
 	RequestsTotal = newCounterVec(prometheus.CounterOpts{
@@ -114,7 +122,7 @@ var (
 	}, []string{"operation", "result"})
 
 	// Circuit breaker metrics — REQ-14
-	CircuitBreakerState = newCounterVec(prometheus.CounterOpts{
+	CircuitBreakerState = newGaugeVec(prometheus.GaugeOpts{
 		Name: "nssAAF_circuit_breaker_state",
 		Help: "Circuit breaker state (0=closed, 1=open, 2=half-open)",
 	}, []string{"server"})

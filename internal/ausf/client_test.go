@@ -41,7 +41,7 @@ func TestForwardMSK_Success(t *testing.T) {
 	var callCount atomic.Int32
 	var receivedBody struct {
 		AuthCtxID string `json:"authCtxId"`
-		MSK      []byte  `json:"msk"`
+		MSK       []byte `json:"msk"`
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

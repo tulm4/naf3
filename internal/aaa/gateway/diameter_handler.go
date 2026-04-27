@@ -34,11 +34,11 @@ import (
 type DiameterHandler struct {
 	logger          *slog.Logger
 	publishResponse func(sessionID string, raw []byte)
-	forwardToBiz   func(ctx context.Context, sessionID string, transportType string, messageType string, raw []byte)
-	version        string
-	bizURL         string
-	httpClient     *http.Client
-	diamForwarder  *diamForwarder // client-initiated forwarder
+	forwardToBiz    func(ctx context.Context, sessionID string, transportType string, messageType string, raw []byte)
+	version         string
+	bizURL          string
+	httpClient      *http.Client
+	diamForwarder   *diamForwarder // client-initiated forwarder
 
 	// sm is the state machine for server-side CER/CEA handling.
 	// Created in NewDiameterHandler with the AAA Gateway's identity.
@@ -67,12 +67,12 @@ func NewDiameterHandler(
 	h := &DiameterHandler{
 		logger:          logger,
 		publishResponse: publishResponse,
-		forwardToBiz:   forwardToBiz,
-		version:        version,
-		bizURL:         bizURL,
-		httpClient:     httpClient,
-		diamForwarder:  diamForwarder,
-		sm:             machine,
+		forwardToBiz:    forwardToBiz,
+		version:         version,
+		bizURL:          bizURL,
+		httpClient:      httpClient,
+		diamForwarder:   diamForwarder,
+		sm:              machine,
 	}
 
 	// Register ASR handler. It only fires AFTER the peer passes CER/CEA
@@ -217,7 +217,7 @@ func (h *DiameterHandler) handleASR() diam.HandlerFunc {
 			h.logger.Error("failed to serialize ASR", "error", err)
 			return
 		}
-	// Extract context from the connection for distributed tracing continuity.
+		// Extract context from the connection for distributed tracing continuity.
 		// This ensures ASR/RAR server-initiated messages are traced as children
 		// of the AAA-S initiation span (TS 23.502 §4.2.9.3).
 		h.forwardToBiz(conn.Context(), sessionID, "DIAMETER", "ASR", raw)
@@ -248,7 +248,7 @@ func (h *DiameterHandler) handleRAR() diam.HandlerFunc {
 		h.sendRAA(conn, m)
 
 		raw, _ := m.Serialize()
-	// Extract context from the connection for distributed tracing continuity.
+		// Extract context from the connection for distributed tracing continuity.
 		// This ensures RAR server-initiated re-auth is traced as a child of the
 		// AAA-S initiation span (TS 23.502 §4.2.9.3).
 		h.forwardToBiz(conn.Context(), sessionID, "DIAMETER", "RAR", raw)

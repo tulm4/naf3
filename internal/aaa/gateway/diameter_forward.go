@@ -32,19 +32,19 @@ const (
 // handshake, DWR/DWA watchdog, and DER encoding.
 // Spec: RFC 6733 §5.3 (CER/CEA), RFC 6733 §5.5 (DWR/DWA), RFC 4072 (DER/DEA)
 type diamForwarder struct {
-	addr           string
-	network        string // "tcp" or "sctp"
-	originHost     string
-	originRealm    string
-	destHost       string
-	destRealm      string
-	settings       *sm.Settings
-	machine        *sm.StateMachine
-	smClient       *sm.Client
-	conn           diam.Conn
-	mu             sync.RWMutex
-	logger         *slog.Logger
-	connected      bool
+	addr        string
+	network     string // "tcp" or "sctp"
+	originHost  string
+	originRealm string
+	destHost    string
+	destRealm   string
+	settings    *sm.Settings
+	machine     *sm.StateMachine
+	smClient    *sm.Client
+	conn        diam.Conn
+	mu          sync.RWMutex
+	logger      *slog.Logger
+	connected   bool
 
 	// Pending requests: hop-by-hop ID → result channel.
 	pending   map[uint32]chan *diam.Message
@@ -85,7 +85,7 @@ func newDiamForwarder(addr, network, originHost, originRealm, destHost, destReal
 		Handler:            df.machine,
 		MaxRetransmits:     3,
 		RetransmitInterval: 5 * time.Second,
-		EnableWatchdog:     true,             // DWR/DWA per RFC 6733 §5.5
+		EnableWatchdog:     true, // DWR/DWA per RFC 6733 §5.5
 		WatchdogInterval:   30 * time.Second,
 		AuthApplicationID: []*diam.AVP{
 			diam.NewAVP(avp.AuthApplicationID, avp.Mbit, 0, datatype.Unsigned32(AppIDAAP)),

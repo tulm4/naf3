@@ -14,14 +14,14 @@ type ComponentType string
 
 const (
 	ComponentBiz         ComponentType = "biz"
-	ComponentAAAGateway ComponentType = "aaa-gateway"
+	ComponentAAAGateway  ComponentType = "aaa-gateway"
 	ComponentHTTPGateway ComponentType = "http-gateway"
 )
 
 // Config holds all runtime configuration for nssAAF.
 type Config struct {
 	Component ComponentType `yaml:"component"`
-	Version   string       `yaml:"version"`
+	Version   string        `yaml:"version"`
 
 	Server    ServerConfig    `yaml:"server"`
 	Database  DatabaseConfig  `yaml:"database"`
@@ -31,14 +31,14 @@ type Config struct {
 	RateLimit RateLimitConfig `yaml:"rateLimit"`
 	Logging   LoggingConfig   `yaml:"logging"`
 	Metrics   MetricsConfig   `yaml:"metrics"`
-	NRF       NRFConfig      `yaml:"nrf"`
-	UDM       UDMConfig      `yaml:"udm"`
-	AUSF      AUSFConfig     `yaml:"ausf"`
+	NRF       NRFConfig       `yaml:"nrf"`
+	UDM       UDMConfig       `yaml:"udm"`
+	AUSF      AUSFConfig      `yaml:"ausf"`
 
 	// Per-component config (only one is non-nil based on Component field)
-	Biz     *BizConfig     `yaml:"biz,omitempty"`
-	AAAgw   *AAAgwConfig   `yaml:"aaaGateway,omitempty"`
-	HTTPgw  *HTTPgwConfig  `yaml:"httpGateway,omitempty"`
+	Biz    *BizConfig    `yaml:"biz,omitempty"`
+	AAAgw  *AAAgwConfig  `yaml:"aaaGateway,omitempty"`
+	HTTPgw *HTTPgwConfig `yaml:"httpGateway,omitempty"`
 }
 
 // TLSConfig holds TLS certificate configuration.
@@ -51,32 +51,32 @@ type TLSConfig struct {
 // BizConfig holds Biz Pod configuration.
 type BizConfig struct {
 	AAAGatewayURL string     `yaml:"aaaGatewayUrl"` // http://svc-nssaa-aaa:9090
-	UseMTLS      bool       `yaml:"useMTLS"`
-	TLSCert      string     `yaml:"tlsCert"`
-	TLSKey       string     `yaml:"tlsKey"`
-	TLSCA        string     `yaml:"tlsCa"`
-	TLS          *TLSConfig `yaml:"tls,omitempty"`
+	UseMTLS       bool       `yaml:"useMTLS"`
+	TLSCert       string     `yaml:"tlsCert"`
+	TLSKey        string     `yaml:"tlsKey"`
+	TLSCA         string     `yaml:"tlsCa"`
+	TLS           *TLSConfig `yaml:"tls,omitempty"`
 }
 
 // AAAgwConfig holds AAA Gateway configuration.
 type AAAgwConfig struct {
-	BizServiceURL      string `yaml:"bizServiceUrl"`       // http://svc-nssaa-biz:8080
-	ListenRADIUS      string `yaml:"listenRadius"`        // ":1812"
-	ListenDIAMETER    string `yaml:"listenDiameter"`      // ":3868"
-	DiameterProtocol   string `yaml:"diameterProtocol"`    // "tcp" or "sctp"
+	BizServiceURL    string `yaml:"bizServiceUrl"`    // http://svc-nssaa-biz:8080
+	ListenRADIUS     string `yaml:"listenRadius"`     // ":1812"
+	ListenDIAMETER   string `yaml:"listenDiameter"`   // ":3868"
+	DiameterProtocol string `yaml:"diameterProtocol"` // "tcp" or "sctp"
 
 	// Diameter client-initiated config (PLAN §2.3.5):
 	// Required for DER/DEA forwarding to AAA-S.
 	DiameterServerAddress string `yaml:"diameterServerAddress"` // e.g. "nss-aaa-server:3868"
-	DiameterRealm        string `yaml:"diameterRealm"`         // e.g. "operator.com"
-	DiameterHost         string `yaml:"diameterHost"`          // Origin-Host for CER
+	DiameterRealm         string `yaml:"diameterRealm"`         // e.g. "operator.com"
+	DiameterHost          string `yaml:"diameterHost"`          // Origin-Host for CER
 
 	// RADIUS client-initiated config:
 	// Required for Access-Request forwarding to AAA-S.
 	RadiusServerAddress string `yaml:"radiusServerAddress"` // e.g. "nss-aaa-server:1812"
-	RadiusSharedSecret string `yaml:"radiusSharedSecret"`  // Shared secret with AAA-S
+	RadiusSharedSecret  string `yaml:"radiusSharedSecret"`  // Shared secret with AAA-S
 
-	RedisMode         string `yaml:"redisMode"`          // "standalone" or "sentinel"
+	RedisMode           string `yaml:"redisMode"`           // "standalone" or "sentinel"
 	KeepalivedStatePath string `yaml:"keepalivedStatePath"` // "/var/run/keepalived/state"
 }
 

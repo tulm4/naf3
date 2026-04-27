@@ -32,7 +32,7 @@ func NewClient(cfg config.UDMConfig, nrfClient *nrf.Client) *Client {
 		baseURL:   cfg.BaseURL,
 		nrfClient: nrfClient,
 		httpClient: &http.Client{
-			Timeout: cfg.Timeout,
+			Timeout:   cfg.Timeout,
 			Transport: otelhttp.NewTransport(http.DefaultTransport),
 		},
 	}

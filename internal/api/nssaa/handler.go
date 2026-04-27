@@ -15,9 +15,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/operator/nssAAF/internal/api/common"
+	"github.com/operator/nssAAF/internal/udm"
 	nssaanats "github.com/operator/nssAAF/oapi-gen/gen/nssaa"
 	"github.com/operator/nssAAF/oapi-gen/gen/specs"
-	"github.com/operator/nssAAF/internal/udm"
 )
 
 // AAARouter forwards EAP payloads to AAA-S (RADIUS or Diameter).
@@ -90,10 +90,10 @@ func (s *InMemoryStore) Close() error {
 // It receives HTTP requests validated by the oapi-codegen router and
 // delegates to the business logic layer.
 type Handler struct {
-	store      AuthCtxStore
-	aaa        AAARouter
-	apiRoot    string
-	nrfClient  interface {
+	store     AuthCtxStore
+	aaa       AAARouter
+	apiRoot   string
+	nrfClient interface {
 		IsRegistered() bool
 	}
 	udmClient *udm.Client

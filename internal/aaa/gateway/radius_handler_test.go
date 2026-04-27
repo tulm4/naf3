@@ -182,7 +182,7 @@ func TestHandlePacket_CoARequest(t *testing.T) {
 	fwd := &mockForwardToBiz{}
 	h := &RadiusHandler{
 		logger:          nullLogger(),
-		tracer:         nullTracer(),
+		tracer:          nullTracer(),
 		publishResponse: pub.invoke,
 		forwardToBiz:    fwd.invoke,
 	}
@@ -207,7 +207,7 @@ func TestHandlePacket_DisconnectRequest(t *testing.T) {
 	fwd := &mockForwardToBiz{}
 	h := &RadiusHandler{
 		logger:          nullLogger(),
-		tracer:         nullTracer(),
+		tracer:          nullTracer(),
 		publishResponse: pub.invoke,
 		forwardToBiz:    fwd.invoke,
 	}
@@ -271,7 +271,7 @@ func TestHandleServerInitiated_Direct(t *testing.T) {
 	fwd := &mockForwardToBiz{}
 	h := &RadiusHandler{
 		logger:          nullLogger(),
-		tracer:         nullTracer(),
+		tracer:          nullTracer(),
 		publishResponse: func(string, []byte) {},
 		forwardToBiz:    fwd.invoke,
 	}

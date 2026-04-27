@@ -22,27 +22,27 @@ import (
 
 // Config holds AAA Gateway configuration.
 type Config struct {
-	BizServiceURL       string // http://svc-nssaa-biz:8080
-	RedisAddr          string // Redis address for pub/sub and session correlation
-	ListenRADIUS      string // ":1812" — UDP listen address for RADIUS
-	ListenDIAMETER    string // ":3868" — listen address for Diameter (TCP or SCTP)
-	AAAGatewayURL     string // self-referential for health checks
-	Logger            *slog.Logger
-	Version           string // Injected at build time
-	DiameterProtocol  string // "tcp" or "sctp"
+	BizServiceURL    string // http://svc-nssaa-biz:8080
+	RedisAddr        string // Redis address for pub/sub and session correlation
+	ListenRADIUS     string // ":1812" — UDP listen address for RADIUS
+	ListenDIAMETER   string // ":3868" — listen address for Diameter (TCP or SCTP)
+	AAAGatewayURL    string // self-referential for health checks
+	Logger           *slog.Logger
+	Version          string // Injected at build time
+	DiameterProtocol string // "tcp" or "sctp"
 
 	// Diameter client-initiated config (PLAN §2.3.5):
 	// Required for DER/DEA forwarding to AAA-S.
 	DiameterServerAddress string // e.g. "nss-aaa-server:3868"
-	DiameterRealm        string // e.g. "operator.com"
-	DiameterHost         string // Origin-Host for CER (AAA Gateway identity)
+	DiameterRealm         string // e.g. "operator.com"
+	DiameterHost          string // Origin-Host for CER (AAA Gateway identity)
 
 	// RADIUS client-initiated config:
 	// Required for Access-Request forwarding to AAA-S.
 	RadiusServerAddress string // e.g. "nss-aaa-server:1812"
-	RadiusSharedSecret string // Shared secret for Message-Authenticator
+	RadiusSharedSecret  string // Shared secret for Message-Authenticator
 
-	RedisMode          string // "standalone" or "sentinel"
+	RedisMode           string // "standalone" or "sentinel"
 	KeepalivedStatePath string // path to keepalived state file
 }
 
@@ -55,8 +55,8 @@ type Gateway struct {
 	version       string
 	logger        *slog.Logger
 
-	radiusHandler    *RadiusHandler
-	diameterHandler  *DiameterHandler
+	radiusHandler   *RadiusHandler
+	diameterHandler *DiameterHandler
 	radiusForwarder *radiusForwarder // RADIUS client (client-initiated path)
 	diamForwarder   *diamForwarder   // Diameter client (client-initiated path)
 
@@ -74,7 +74,7 @@ type Gateway struct {
 type pendingEntry struct {
 	authCtxID string
 	sessionID string
-	ch       chan []byte
+	ch        chan []byte
 }
 
 // New creates a new AAA Gateway.
@@ -115,7 +115,7 @@ func New(cfg Config) *Gateway {
 		cfg.DiameterHost,
 		cfg.DiameterRealm,
 		cfg.DiameterServerAddress, // destHost: use server address as host identifier
-		cfg.DiameterRealm,        // destRealm
+		cfg.DiameterRealm,         // destRealm
 		cfg.Logger,
 	)
 
@@ -209,7 +209,7 @@ func (g *Gateway) ForwardEAP(ctx context.Context, req *proto.AaaForwardRequest) 
 		PodID:     "", // Populated by Biz Pod via heartbeat; AAA GW writes read-only
 		Sst:       req.Sst,
 		Sd:        req.Sd,
-		CreatedAt:  time.Now().Unix(),
+		CreatedAt: time.Now().Unix(),
 	}
 	if err := g.writeSessionCorr(ctx, req.SessionID, &entry); err != nil {
 		return nil, fmt.Errorf("aaa-gateway: failed to write session corr: %w", err)

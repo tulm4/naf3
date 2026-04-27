@@ -20,17 +20,17 @@ import (
 
 // RADIUS constants (RFC 2865, 2866).
 const (
-	radiusAccessRequest    uint8 = 1
-	radiusAccessAccept    uint8 = 2
-	radiusAccessReject    uint8 = 3
-	radiusAccessChallenge uint8 = 11
-	radiusCoARequest      uint8 = 43
+	radiusAccessRequest     uint8 = 1
+	radiusAccessAccept      uint8 = 2
+	radiusAccessReject      uint8 = 3
+	radiusAccessChallenge   uint8 = 11
+	radiusCoARequest        uint8 = 43
 	radiusDisconnectRequest uint8 = 40
 
-	attrUserName       uint8 = 1
-	attrEAPMessage     uint8 = 79
-	attrState          uint8 = 24
-	attrMessageAuth    uint8 = 80
+	attrUserName    uint8 = 1
+	attrEAPMessage  uint8 = 79
+	attrState       uint8 = 24
+	attrMessageAuth uint8 = 80
 )
 
 // RADIUS shared secret used for message authenticator (mock only).
@@ -306,13 +306,13 @@ func buildDiameterCEA(capexReq []byte) []byte {
 	// application ID(4) + hop-by-hop(4) + end-to-end(4)
 	// For mock, return minimal valid CEA.
 	cea := make([]byte, 20)
-	cea[0] = 1                                        // version = 1
+	cea[0] = 1 // version = 1
 	cea[5] = 0
 	cea[6] = 0
-	cea[7] = 20 // length = 20 (no AVPs)
-	binary.BigEndian.PutUint32(cea[12:16], 257)        // command code = CER
-	cea[16] = 0x40                                   // response flag set
-	binary.BigEndian.PutUint32(cea[20:24], 0)         // result code = DIAMETER_SUCCESS
+	cea[7] = 20                                 // length = 20 (no AVPs)
+	binary.BigEndian.PutUint32(cea[12:16], 257) // command code = CER
+	cea[16] = 0x40                              // response flag set
+	binary.BigEndian.PutUint32(cea[20:24], 0)   // result code = DIAMETER_SUCCESS
 	return cea
 }
 
@@ -345,8 +345,8 @@ func buildDiameterDEA(der []byte) []byte {
 	dea[6] = byte(length >> 8)
 	dea[7] = byte(length)
 	binary.BigEndian.PutUint32(dea[12:16], 268) // command code = DER
-	dea[16] = 0x40                                // response flag
-	binary.BigEndian.PutUint32(dea[20:24], 0)     // result code = 0
+	dea[16] = 0x40                              // response flag
+	binary.BigEndian.PutUint32(dea[20:24], 0)   // result code = 0
 
 	// Copy hop-by-hop from DER
 	if len(der) >= 24 {

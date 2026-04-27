@@ -38,14 +38,14 @@ const (
 // AAA Gateway forwards raw RADIUS/Diameter transport bytes without modification.
 // Spec: docs/design/01_service_model.md §5.4.3
 type AaaForwardRequest struct {
-	Version       string       `json:"v"`           // Schema version, e.g. "1.0"
-	SessionID     string       `json:"sessionId"`   // Unique per EAP round-trip
-	AuthCtxID     string       `json:"authCtxId"`   // NSSAAF auth context ID
+	Version       string        `json:"v"`             // Schema version, e.g. "1.0"
+	SessionID     string        `json:"sessionId"`     // Unique per EAP round-trip
+	AuthCtxID     string        `json:"authCtxId"`     // NSSAAF auth context ID
 	TransportType TransportType `json:"transportType"` // RADIUS or DIAMETER
-	Sst           uint8        `json:"sst"`         // S-NSSAI SST (0-255)
-	Sd            string       `json:"sd"`          // S-NSSAI SD (6 hex, "FFFFFF" if none)
-	Direction     Direction    `json:"direction"`   // CLIENT_INITIATED or SERVER_INITIATED
-	Payload       []byte       `json:"payload"`     // Raw EAP bytes (already-encoded RADIUS/Diameter)
+	Sst           uint8         `json:"sst"`           // S-NSSAI SST (0-255)
+	Sd            string        `json:"sd"`            // S-NSSAI SD (6 hex, "FFFFFF" if none)
+	Direction     Direction     `json:"direction"`     // CLIENT_INITIATED or SERVER_INITIATED
+	Payload       []byte        `json:"payload"`       // Raw EAP bytes (already-encoded RADIUS/Diameter)
 }
 
 // AaaForwardResponse is the response from AAA Gateway back to Biz Pod.
@@ -60,12 +60,12 @@ type AaaForwardResponse struct {
 // a Re-Auth, Revocation, or CoA request.
 // Spec: PHASE §6.4
 type AaaServerInitiatedRequest struct {
-	Version       string       `json:"v"`
-	SessionID     string       `json:"sessionId"`   // RADIUS State / Diameter Session-Id
-	AuthCtxID     string       `json:"authCtxId"`  // From Redis lookup
+	Version       string        `json:"v"`
+	SessionID     string        `json:"sessionId"` // RADIUS State / Diameter Session-Id
+	AuthCtxID     string        `json:"authCtxId"` // From Redis lookup
 	TransportType TransportType `json:"transportType"`
-	MessageType   MessageType  `json:"messageType"` // RAR, ASR, CoA
-	Payload       []byte       `json:"payload"`     // Raw RAR/ASR/CoA bytes
+	MessageType   MessageType   `json:"messageType"` // RAR, ASR, CoA
+	Payload       []byte        `json:"payload"`     // Raw RAR/ASR/CoA bytes
 }
 
 // BizAAAClient is the interface the Biz Pod uses to talk to the AAA Gateway.

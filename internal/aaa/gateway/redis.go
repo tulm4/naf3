@@ -10,9 +10,9 @@ import (
 
 // SentinelConfig holds Redis Sentinel configuration.
 type SentinelConfig struct {
-	Addrs        []string
-	MasterName   string
-	Password     string
+	Addrs      []string
+	MasterName string
+	Password   string
 }
 
 // newRedisClient creates a Redis client based on the configured mode.

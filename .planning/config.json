@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "granularity": "standard",
   "mode": "yolo",
+  "agents_installed": true,
   "parallelization": true,
   "commit_docs": true,
   "model_profile": "balanced",
@@ -16,5 +17,10 @@
   },
   "planning": {
     "commit_docs": true
+  },
+  "agent_skills": {
+    "gsd-executor": ["skills/golang-patterns", "skills/golang-testing"],
+    "gsd-code-reviewer": ["skills/golang-patterns", "skills/golang-testing"],
+    "gsd-code-fixer": ["skills/golang-patterns", "skills/golang-testing"]
   }
 }

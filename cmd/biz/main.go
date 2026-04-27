@@ -18,10 +18,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/operator/nssAAF/internal/amf"
 	"github.com/operator/nssAAF/internal/api/aiw"
 	"github.com/operator/nssAAF/internal/api/common"
 	"github.com/operator/nssAAF/internal/api/nssaa"
-	"github.com/operator/nssAAF/internal/amf"
 	"github.com/operator/nssAAF/internal/ausf"
 	"github.com/operator/nssAAF/internal/cache/redis"
 	"github.com/operator/nssAAF/internal/config"
@@ -84,7 +84,7 @@ func main() {
 	// ─── PostgreSQL pool + session stores ────────────────────────────────
 	// REQ-09: PostgreSQL session store replaces in-memory store
 	pgPool, err := postgres.NewPool(ctx, postgres.Config{
-		DSN:               fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
+		DSN: fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
 			cfg.Database.User, cfg.Database.Password, cfg.Database.Host,
 			cfg.Database.Port, cfg.Database.Name, cfg.Database.SSLMode),
 		MaxConns:          int32(cfg.Database.MaxConns),

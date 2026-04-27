@@ -81,7 +81,7 @@ func TestSendReAuthNotification_RetryExhausted_DLQEnqueued(t *testing.T) {
 	defer cancel()
 
 	err := client.SendReAuthNotification(ctx, server.URL, "auth-456", []byte(`{}`))
-	assert.NoError(t, err) // DLQ accepted, so no error returned
+	assert.NoError(t, err)                      // DLQ accepted, so no error returned
 	assert.Equal(t, int32(3), callCount.Load()) // 3 retry attempts
 	assert.Equal(t, int32(1), dlq.EnqueueCount.Load())
 }
@@ -151,8 +151,8 @@ func TestSendNotification_ClientError_StillRetried(t *testing.T) {
 	defer cancel()
 
 	err := client.SendReAuthNotification(ctx, server.URL, "auth-bad", []byte(`{}`))
-	assert.NoError(t, err) // DLQ accepted, no error returned
-	assert.Equal(t, int32(3), callCount.Load()) // 3 retry attempts
+	assert.NoError(t, err)                             // DLQ accepted, no error returned
+	assert.Equal(t, int32(3), callCount.Load())        // 3 retry attempts
 	assert.Equal(t, int32(1), dlq.EnqueueCount.Load()) // DLQ enqueued after retries
 }
 
@@ -179,7 +179,7 @@ func TestExtractHostPort(t *testing.T) {
 // mockDLQ is a test double for the DLQ interface.
 type mockDLQ struct {
 	EnqueueCount atomic.Int32
-	LastItem    atomic.Value // stores *DLQItem
+	LastItem     atomic.Value // stores *DLQItem
 }
 
 func (m *mockDLQ) Enqueue(ctx context.Context, item interface{}) error {
