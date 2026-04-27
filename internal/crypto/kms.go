@@ -301,3 +301,31 @@ func (m *VaultKeyManager) setAuthHeader(req *http.Request) error {
 
 
 // SoftHSMKeyManager is defined in kms_softhsm.go (with softhsm tag) or kms_softhsm_stub.go (without).
+type SoftHSMKeyManager struct {
+	libraryPath string
+	tokenLabel  string
+	pin         string
+}
+
+func NewSoftHSMKeyManager(cfg *SoftHSMConfig) (*SoftHSMKeyManager, error) {
+	if cfg.LibraryPath == "" {
+		return nil, errors.New("SoftHSMKeyManager: LibraryPath required")
+	}
+	return &SoftHSMKeyManager{
+		libraryPath: cfg.LibraryPath,
+		tokenLabel:  cfg.TokenLabel,
+		pin:        cfg.PIN,
+	}, nil
+}
+
+func (m *SoftHSMKeyManager) Wrap(ctx context.Context, dek []byte) ([]byte, int, error) {
+	return nil, 0, errors.New("SoftHSMKeyManager.Wrap: not implemented in Wave 1 (see Wave 5)")
+}
+
+func (m *SoftHSMKeyManager) Unwrap(ctx context.Context, wrappedDEK []byte) ([]byte, error) {
+	return nil, errors.New("SoftHSMKeyManager.Unwrap: not implemented in Wave 1 (see Wave 5)")
+}
+
+func (m *SoftHSMKeyManager) GetKeyVersion(ctx context.Context) (int, error) {
+	return 1, nil
+}
