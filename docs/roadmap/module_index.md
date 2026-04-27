@@ -29,8 +29,8 @@
 | `internal/metrics/` | `docs/roadmap/PHASE_4_NFIntegration_Observability.md` | 4 | READY |
 | `internal/logging/` | `docs/roadmap/PHASE_4_NFIntegration_Observability.md` | 4 | READY |
 | `internal/tracing/` | `docs/roadmap/PHASE_4_NFIntegration_Observability.md` | 4 | READY |
-| `internal/auth/` | `docs/design/15_sbi_security.md`, `docs/design/16_aaa_security.md`, `docs/roadmap/PHASE_5_Security_Crypto.md` | 5 | TBD |
-| `internal/crypto/` | `docs/design/17_crypto.md`, `docs/roadmap/PHASE_5_Security_Crypto.md` | 5 | TBD |
+| `internal/auth/` | `docs/design/15_sbi_security.md`, `docs/design/16_aaa_security.md`, `docs/roadmap/PHASE_5_Security_Crypto.md` | 5 | READY |
+| `internal/crypto/` | `docs/design/17_crypto.md`, `docs/roadmap/PHASE_5_Security_Crypto.md` | 5 | READY |
 | `internal/nrm/` | `docs/design/18_nrm_fcaps.md`, `docs/roadmap/PHASE_6_Testing_NRM.md` | 6 | TBD |
 | *(cross-cutting)* | `docs/design/19_observability.md` | 4 | READY |
 | *(cross-cutting)* | `docs/design/20_config_management.md` | ALL | TBD |
