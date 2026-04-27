@@ -80,9 +80,10 @@ func Init(cfg *Config) error {
 		if cfg.SoftHSM == nil {
 			return errors.New("crypto: SoftHSMConfig required for softhsm key manager")
 		}
-		mgr, err := NewSoftHSMKeyManager(cfg.SoftHSM)
-		if err != nil {
-			return errors.New("crypto: failed to init SoftHSM: " + err.Error())
+		mgr := &SoftHSMKeyManager{
+			libraryPath: cfg.SoftHSM.LibraryPath,
+			tokenLabel:  cfg.SoftHSM.TokenLabel,
+			pin:        cfg.SoftHSM.PIN,
 		}
 		globalKM = mgr
 	default:
