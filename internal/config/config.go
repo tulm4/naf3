@@ -209,45 +209,6 @@ type AUSFConfig struct {
 	Timeout time.Duration `yaml:"timeout"`
 }
 
-// CryptoConfig holds cryptographic key management settings for the Biz Pod.
-type CryptoConfig struct {
-	// KeyManager is the key management backend: "soft", "softhsm", "vault"
-	KeyManager string `yaml:"keyManager"`
-	// MasterKeyHex is the 64-char hex-encoded 32-byte master key for soft mode.
-	// Required when keyManager is "soft".
-	MasterKeyHex string `yaml:"masterKeyHex"`
-	// VaultConfig holds HashiCorp Vault transit engine settings.
-	VaultConfig *VaultConfig `yaml:"vault,omitempty"`
-	// SoftHSMConfig holds SoftHSM2 settings.
-	SoftHSMConfig *SoftHSMConfig `yaml:"softHSM,omitempty"`
-	// KEKOverlapDays is the overlap window for KEK rotation (default: 30).
-	KEKOverlapDays int `yaml:"kekOverlapDays"`
-}
-
-// VaultConfig holds HashiCorp Vault transit engine configuration.
-type VaultConfig struct {
-	// Address is the Vault server address, e.g. "http://vault.vault.svc.cluster.local:8200"
-	Address string `yaml:"address"`
-	// KeyName is the transit key name, e.g. "nssaa-kek"
-	KeyName string `yaml:"keyName"`
-	// AuthMethod is the auth method: "kubernetes", "token"
-	AuthMethod string `yaml:"authMethod"`
-	// K8sRole is the Kubernetes SA role (required when authMethod is "kubernetes").
-	K8sRole string `yaml:"k8sRole"`
-	// Token is the Vault token (required when authMethod is "token").
-	Token string `yaml:"token"`
-}
-
-// SoftHSMConfig holds SoftHSM2 configuration.
-type SoftHSMConfig struct {
-	// LibraryPath is the path to libsofthsm2.so.
-	LibraryPath string `yaml:"libraryPath"`
-	// TokenLabel is the SoftHSM token label containing the KEK.
-	TokenLabel string `yaml:"tokenLabel"`
-	// PIN is the SOFTHSM PIN (user:pin format).
-	PIN string `yaml:"pin"`
-}
-
 // Load reads and parses a YAML configuration file.
 // Environment variable placeholders like ${VAR_NAME} are expanded.
 func Load(path string) (*Config, error) {
@@ -317,6 +278,11 @@ func (c *Config) Validate() error {
 			if c.HTTPgw.TLS.Key == "" {
 				return fmt.Errorf("config.httpGateway.tls.key is required when TLS is configured")
 			}
+			// Note: If the HTTP Gateway needs to verify client certificates from AMF/AUSF
+			// (mTLS), add a tls.ClientAuth check here and require TLS.CA.
+			// Currently, AMF/AUSF use JWT tokens (not client certs) for HTTP Gateway mTLS,
+			// so CA verification is optional. If ClientAuth == tls.RequireAndVerifyClientCert,
+			// then c.HTTPgw.TLS.CA must be non-empty.
 		}
 	}
 

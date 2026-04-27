@@ -167,6 +167,11 @@ func main() {
 		tlsCfg.RootCAs = mustLoadCertPool(cfg.Biz.TLSCA)
 		tlsCfg.Certificates = []tls.Certificate{mustLoadCert(cfg.Biz.TLSCert, cfg.Biz.TLSKey)}
 		tlsCfg.ServerName = "aaa-gateway" // SNI for AAA Gateway cert verification
+		slog.Info("mTLS configured for AAA Gateway",
+			"ca", cfg.Biz.TLSCA,
+			"cert", cfg.Biz.TLSCert,
+			"sni", "aaa-gateway",
+		)
 	}
 	aaaClient := newHTTPAAAClient(
 		cfg.Biz.AAAGatewayURL,
@@ -216,6 +221,7 @@ func main() {
 	var handler http.Handler = mux
 	handler = common.RecoveryMiddleware(handler)
 	handler = common.RequestIDMiddleware(handler)
+	handler = common.MetricsMiddleware(handler)
 	handler = common.LoggingMiddleware(handler)
 	handler = common.CORSMiddleware(handler)
 
