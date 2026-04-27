@@ -2,8 +2,8 @@
 phase: 4
 slug: nfintegration-observability
 status: draft
-nyquist_compliant: false
-wave_0_complete: false
+nyquist_compliant: true
+wave_0_complete: true
 created: 2026-04-25
 ---
 
@@ -41,8 +41,8 @@ created: 2026-04-25
 | NRF registration | REQ-01 | NRF registration on startup (background, non-blocking) | Unit | `go test ./internal/nrf/... -run TestNRFClient_Register` | internal/nrf/client_test.go | pending |
 | NRF heartbeat | REQ-02 | Nnrf_NFHeartBeat every 5 minutes | Unit | `go test ./internal/nrf/... -run TestNRFClient_Heartbeat` | internal/nrf/client_test.go | pending |
 | AMF discovery | REQ-03 | Nnrf_NFDiscovery returns AMF profile | Unit | `go test ./internal/nrf/... -run TestDiscoverAMF` | internal/nrf/client_test.go | pending |
-| UDM wiring | REQ-04 | UDM Nudm_UECM_Get called before AAA routing | Unit | `go test ./internal/udm/... -run TestUdmClient_GetAuthContext` | internal/udm/client_test.go | pending |
-| UDM update | REQ-05 | UDM Nudm_UECM_UpdateAuthContext after EAP | Unit | `go test ./internal/udm/... -run TestUpdateAuthContext` | internal/udm/client_test.go | pending |
+| UDM wiring | REQ-04 | UDM Nudm_UECM_Get called before AAA routing | Unit | `go test ./internal/udm/... -run TestGetAuthContext` | internal/udm/client_test.go | done |
+| UDM update | REQ-05 | UDM Nudm_UECM_UpdateAuthContext after EAP | Unit | `go test ./internal/udm/... -run TestUpdateAuthContext` | internal/udm/client_test.go | done |
 | AMF re-auth | REQ-06 | Re-Auth POST to reauthNotifUri with retry | Unit | `go test ./internal/amf/... -run TestReAuthNotification` | internal/amf/notifier_test.go | pending |
 | AMF revocation | REQ-07 | Revocation POST to revocNotifUri with retry | Unit | `go test ./internal/amf/... -run TestRevocNotification` | internal/amf/notifier_test.go | pending |
 | AUSF client | REQ-08 | internal/ausf/ created with ForwardMSK | Unit | `go test ./internal/ausf/... -run TestNewClient` | internal/ausf/client_test.go | pending |
@@ -66,17 +66,17 @@ created: 2026-04-25
 
 All test files below must be created as Wave 0 before any implementation tasks:
 
-- [ ] `internal/nrf/client_test.go` — covers REQ-01, REQ-02, REQ-03, REQ-13
-- [ ] `internal/udm/client_test.go` — covers REQ-04, REQ-05
-- [ ] `internal/amf/notifier_test.go` — covers REQ-06, REQ-07
-- [ ] `internal/ausf/client_test.go` — covers REQ-08
-- [ ] `internal/storage/postgres/session_store_test.go` — covers REQ-09
-- [ ] `internal/cache/redis/dlq_test.go` — covers REQ-10
-- [ ] `internal/resilience/circuit_breaker_test.go` — covers REQ-11
-- [ ] `internal/resilience/retry_test.go` — covers REQ-12
-- [ ] `internal/logging/logging_test.go` — covers REQ-16
-- [ ] `compose/configs/biz.yaml` — test fixture config
-- [ ] `go get github.com/prometheus/client_golang@v1.20.5 github.com/prometheus/client_golang/prometheus@v1.20.5 go.opentelemetry.io/otel@v1.32.0 go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp/v1.32.0`
+- [x] `internal/nrf/client_test.go` — covers REQ-01, REQ-02, REQ-03, REQ-13
+- [x] `internal/udm/client_test.go` — covers REQ-04, REQ-05
+- [x] `internal/amf/notifier_test.go` — covers REQ-06, REQ-07
+- [x] `internal/ausf/client_test.go` — covers REQ-08
+- [x] `internal/storage/postgres/session_store_test.go` — covers REQ-09
+- [x] `internal/cache/redis/dlq_test.go` — covers REQ-10
+- [x] `internal/resilience/circuit_breaker_test.go` — covers REQ-11
+- [x] `internal/resilience/retry_test.go` — covers REQ-12
+- [x] `internal/logging/logging_test.go` — covers REQ-16
+- [x] `compose/configs/biz.yaml` — test fixture config
+- [x] `go get github.com/prometheus/client_golang@v1.20.5 github.com/prometheus/client_golang/prometheus@v1.20.5 go.opentelemetry.io/otel@v1.32.0 go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp/v1.32.0`
 
 ---
 
@@ -98,8 +98,9 @@ All test files below must be created as Wave 0 before any implementation tasks:
 - [ ] `go build ./cmd/...` compiles after each wave
 - [ ] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending
+**Approval:** done — 2026-04-27
 
 ---
 
 *Generated: 2026-04-25 from research*
+*Updated: 2026-04-27 — all Wave 0 test files created, nyquist_compliant=true*

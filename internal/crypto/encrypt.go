@@ -1,6 +1,3 @@
-// Package crypto provides cryptographic utilities: TLS, EAP key derivation,
-// and data-at-rest encryption.
-// Spec: TS 33.501 §16.3-16.5
 package crypto
 
 import (
@@ -11,21 +8,14 @@ import (
 	"io"
 )
 
-// ErrCiphertextTooShort is returned when ciphertext is shorter than nonce+tag.
 var ErrCiphertextTooShort = errors.New("ciphertext too short")
 
-// EncryptedData holds the result of AES-GCM encryption.
-// Nonce is 12 bytes; Tag is 16 bytes.
 type EncryptedData struct {
-	Ciphertext []byte // encrypted data (without nonce/tag prepended)
-	Nonce      []byte // 12-byte random nonce
-	Tag        []byte // 16-byte GCM authentication tag
+	Ciphertext []byte
+	Nonce      []byte
+	Tag        []byte
 }
 
-// Encrypt encrypts plaintext using AES-256-GCM with a random 12-byte nonce.
-// The nonce is prepended to the ciphertext for storage convenience.
-// AAD is additional authenticated data (nil allowed); it is not used in Phase 5
-// but is included for future extensibility.
 func Encrypt(plaintext, key, aad []byte) (EncryptedData, error) {
 	if len(key) != 32 {
 		return EncryptedData{}, errors.New("Encrypt: key must be 32 bytes for AES-256")
@@ -42,18 +32,17 @@ func Encrypt(plaintext, key, aad []byte) (EncryptedData, error) {
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		return EncryptedData{}, errors.New("Encrypt: failed to generate nonce: " + err.Error())
 	}
-	ct := gcm.Seal(nil, nonce, plaintext, aad)
-	// gcm.Seal appends ciphertext+tag; split them
-	n := len(ct) - gcm.Overhead()
+	sealed := gcm.Seal(nil, nonce, plaintext, aad)
+	nonceLen := len(nonce)
+	tagLen := gcm.Overhead()
+	ctLen := len(sealed) - nonceLen - tagLen
 	return EncryptedData{
-		Ciphertext: ct[:n],
+		Ciphertext: sealed[nonceLen : nonceLen+ctLen],
 		Nonce:      nonce,
-		Tag:        ct[n:],
+		Tag:        sealed[nonceLen+ctLen:],
 	}, nil
 }
 
-// Decrypt decrypts AES-256-GCM ciphertext produced by Encrypt.
-// aad must match the aad used during encryption (nil if none).
 func Decrypt(ed EncryptedData, key, aad []byte) ([]byte, error) {
 	if len(key) != 32 {
 		return nil, errors.New("Decrypt: key must be 32 bytes for AES-256")
@@ -72,13 +61,14 @@ func Decrypt(ed EncryptedData, key, aad []byte) ([]byte, error) {
 	if err != nil {
 		return nil, errors.New("Decrypt: failed to create GCM: " + err.Error())
 	}
-	// Reconstruct sealed data: nonce || ciphertext || tag
-	sealed := append(ed.Nonce, ed.Ciphertext...)
-	sealed = append(sealed, ed.Tag...)
+	n, c, t := len(ed.Nonce), len(ed.Ciphertext), len(ed.Tag)
+	sealed := make([]byte, n+c+t)
+	copy(sealed[:n], ed.Nonce)
+	copy(sealed[n:n+c], ed.Ciphertext)
+	copy(sealed[n+c:], ed.Tag)
 	return gcm.Open(nil, ed.Nonce, sealed, aad)
 }
 
-// DecryptWithTag decrypts using raw bytes (nonce, ciphertext, tag) instead of EncryptedData.
 func DecryptWithTag(ciphertext, nonce, tag, key, aad []byte) ([]byte, error) {
 	return Decrypt(EncryptedData{Ciphertext: ciphertext, Nonce: nonce, Tag: tag}, key, aad)
 }

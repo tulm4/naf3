@@ -299,6 +299,42 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	if c.Crypto.KeyManager == "vault" {
+		if c.Crypto.VaultConfig == nil {
+			return fmt.Errorf("config.crypto.vault is required when keyManager is vault")
+		}
+		if c.Crypto.VaultConfig.Address == "" {
+			return fmt.Errorf("config.crypto.vault.address is required")
+		}
+		if c.Crypto.VaultConfig.KeyName == "" {
+			return fmt.Errorf("config.crypto.vault.keyName is required")
+		}
+		if c.Crypto.VaultConfig.AuthMethod == "" {
+			return fmt.Errorf("config.crypto.vault.authMethod is required (kubernetes or token)")
+		}
+		if c.Crypto.VaultConfig.AuthMethod == "kubernetes" && c.Crypto.VaultConfig.K8sRole == "" {
+			return fmt.Errorf("config.crypto.vault.k8sRole is required when authMethod is kubernetes")
+		}
+		if c.Crypto.VaultConfig.AuthMethod == "token" && c.Crypto.VaultConfig.Token == "" {
+			return fmt.Errorf("config.crypto.vault.token is required when authMethod is token")
+		}
+	}
+
+	if c.Crypto.KeyManager == "softhsm" {
+		if c.Crypto.SoftHSMConfig == nil {
+			return fmt.Errorf("config.crypto.softHSM is required when keyManager is softhsm")
+		}
+		if c.Crypto.SoftHSMConfig.TokenLabel == "" {
+			return fmt.Errorf("config.crypto.softHSM.tokenLabel is required")
+		}
+		if c.Crypto.SoftHSMConfig.PIN == "" {
+			return fmt.Errorf("config.crypto.softHSM.pin is required")
+		}
+		if c.Crypto.SoftHSMConfig.LibraryPath == "" {
+			c.Crypto.SoftHSMConfig.LibraryPath = "/usr/lib/softhsm/libsofthsm2.so"
+		}
+	}
+
 	return nil
 }
 

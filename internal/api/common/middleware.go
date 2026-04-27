@@ -7,9 +7,11 @@ import (
 	"log/slog"
 	"net/http"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/operator/nssAAF/internal/metrics"
 )
 
 // RequestIDMiddleware injects a unique X-Request-ID into every request.
@@ -101,6 +103,70 @@ func CORSMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// MetricsMiddleware records request count and latency using Prometheus metrics.
+// Spec: REQ-14 / TS 29.500 §5 (observability)
+func MetricsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+
+		wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+		next.ServeHTTP(wrapped, r)
+
+		duration := time.Since(start).Seconds()
+		status := wrapped.statusCode
+		endpoint := stripAPIversion(r.URL.Path)
+		service := inferService(r.URL.Path)
+		method := r.Method
+
+		metrics.RequestsTotal.WithLabelValues(service, endpoint, method, statusLabel(status)).Inc()
+		metrics.RequestDuration.WithLabelValues(service, endpoint, method).Observe(duration)
+	})
+}
+
+// statusLabel normalises a numeric HTTP status code to a string bucket (e.g. "2xx", "4xx").
+func statusLabel(code int) string {
+	switch {
+	case code >= 200 && code < 300:
+		return "2xx"
+	case code >= 300 && code < 400:
+		return "3xx"
+	case code >= 400 && code < 500:
+		return "4xx"
+	case code >= 500:
+		return "5xx"
+	default:
+		return "unknown"
+	}
+}
+
+// stripAPIversion removes the /v1 (or /vN) prefix from a path so that
+// label cardinality stays bounded regardless of which API version is used.
+func stripAPIversion(path string) string {
+	path = strings.TrimSuffix(path, "/")
+	if i := strings.LastIndex(path, "/"); i >= 0 {
+		candidate := path[:i]
+		if strings.HasSuffix(candidate, "/v1") || strings.HasSuffix(candidate, "/v2") {
+			return candidate
+		}
+	}
+	return path
+}
+
+// inferService returns a stable service label from the request path.
+// Returns "nssaa" for /nnssaaf-nssaa/*, "aiw" for /nnssaaf-aiw/*, "internal" for internal routes.
+func inferService(path string) string {
+	switch {
+	case strings.HasPrefix(path, "/nnssaaf-nssaa"):
+		return "nssaa"
+	case strings.HasPrefix(path, "/nnssaaf-aiw"):
+		return "aiw"
+	case strings.HasPrefix(path, "/aaa"):
+		return "internal"
+	default:
+		return "oam"
+	}
 }
 
 // WriteProblem writes a ProblemDetails response with the correct status code

@@ -411,3 +411,133 @@ func TestGetRequestIDWrongType(t *testing.T) {
 	ctx := context.WithValue(context.Background(), requestIDKey{}, 123)
 	assert.Equal(t, "", GetRequestID(ctx))
 }
+
+func TestMetricsMiddleware(t *testing.T) {
+	handler := MetricsMiddleware(RequestIDMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	})))
+
+	req := httptest.NewRequest(http.MethodPost, "/nnssaaf-nssaa/v1/slice-authentications", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusCreated, rec.Code)
+}
+
+func TestMetricsMiddleware_RecordsCounter(t *testing.T) {
+	handler := MetricsMiddleware(RequestIDMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})))
+
+	req := httptest.NewRequest(http.MethodGet, "/nnssaaf-nssaa/v1/slice-authentications", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestMetricsMiddleware_4xx(t *testing.T) {
+	handler := MetricsMiddleware(RequestIDMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	})))
+
+	req := httptest.NewRequest(http.MethodPost, "/nnssaaf-aiw/v1/authentications", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestMetricsMiddleware_5xx(t *testing.T) {
+	handler := MetricsMiddleware(RequestIDMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})))
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz/ready", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+func TestMetricsMiddleware_AIW(t *testing.T) {
+	handler := MetricsMiddleware(RequestIDMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	})))
+
+	req := httptest.NewRequest(http.MethodPost, "/nnssaaf-aiw/v1/authentications", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusCreated, rec.Code)
+}
+
+func TestStatusLabel(t *testing.T) {
+	tests := []struct {
+		code     int
+		expected string
+	}{
+		{200, "2xx"}, {201, "2xx"}, {299, "2xx"},
+		{301, "3xx"}, {304, "3xx"},
+		{400, "4xx"}, {404, "4xx"}, {499, "4xx"},
+		{500, "5xx"}, {502, "5xx"}, {503, "5xx"}, {599, "5xx"},
+		{600, "5xx"}, // >= 500 falls into 5xx bucket
+		{-1, "unknown"}, {99, "unknown"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.expected, func(t *testing.T) {
+			result := statusLabel(tt.code)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestStripAPIversion(t *testing.T) {
+	tests := []struct {
+		path     string
+		expected string
+	}{
+		// Version segment only: strips trailing /vN
+		{"/nnssaaf-nssaa/v1/", "/nnssaaf-nssaa/v1"},
+		{"/nnssaaf-aiw/v2/authentications", "/nnssaaf-aiw/v2"},
+		// Versioned resource paths: unchanged (version not at the end)
+		{"/nnssaaf-nssaa/v1/slice-authentications/abc", "/nnssaaf-nssaa/v1/slice-authentications/abc"},
+		// Non-versioned paths unchanged
+		{"/healthz/live", "/healthz/live"},
+		{"/aaa/forward", "/aaa/forward"},
+		{"/metrics", "/metrics"},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			result := stripAPIversion(tt.path)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestInferService(t *testing.T) {
+	tests := []struct {
+		path     string
+		expected string
+	}{
+		{"/nnssaaf-nssaa/v1/slice-authentications", "nssaa"},
+		{"/nnssaaf-aiw/v1/authentications", "aiw"},
+		{"/aaa/forward", "internal"},
+		{"/aaa/server-initiated", "internal"},
+		{"/healthz/live", "oam"},
+		{"/healthz/ready", "oam"},
+		{"/metrics", "oam"},
+		{"/unknown/path", "oam"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			result := inferService(tt.path)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+

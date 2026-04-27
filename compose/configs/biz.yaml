@@ -94,3 +94,8 @@ crypto:
   #   libraryPath: "/usr/lib/softhsm/libsofthsm2.so"
   #   tokenLabel: "nssaa-kek-token"
   #   pin: "123456"
+
+# Environment variable overrides
+# These are set by the deployment tooling (docker-compose, k8s, etc.)
+env:
+  MASTER_KEY_HEX: ""  # 64-char hex string; REQUIRED for soft mode (set via K8s secret or docker-compose env)

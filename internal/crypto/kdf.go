@@ -19,8 +19,11 @@ func DeriveKey(ikm, salt, info []byte, length int) ([]byte, error) {
 	} else {
 		saltToUse = salt
 	}
-	prk := hkdf.Extract(sha256.New, ikm, saltToUse)
-	return hkdf.Expand(sha256.New, prk, info, length)
+	prk, err := hkdf.Extract(sha256.New, ikm, saltToUse)
+	if err != nil {
+		return nil, errors.New("DeriveKey: extract failed: " + err.Error())
+	}
+	return hkdf.Expand(sha256.New, prk, string(info), length)
 }
 
 func SessionKEK(masterKey []byte, authCtxId string) ([]byte, error) {
@@ -29,6 +32,9 @@ func SessionKEK(masterKey []byte, authCtxId string) ([]byte, error) {
 }
 
 func TLSExporter(masterSecret []byte, label string, context []byte, length int) ([]byte, error) {
-	prk := hkdf.Extract(sha256.New, masterSecret, nil)
-	return hkdf.Expand(sha256.New, prk, []byte(label), length)
+	prk, err := hkdf.Extract(sha256.New, masterSecret, nil)
+	if err != nil {
+		return nil, errors.New("TLSExporter: extract failed: " + err.Error())
+	}
+	return hkdf.Expand(sha256.New, prk, label, length)
 }
