@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/operator/nssAAF/internal/auth"
 	"github.com/operator/nssAAF/internal/config"
 	"github.com/operator/nssAAF/internal/proto"
 )
@@ -54,6 +55,26 @@ func (c *httpBizClient) ForwardRequest(ctx context.Context, path, method string,
 
 var _ proto.BizServiceClient = (*httpBizClient)(nil)
 
+// forwardToBiz forwards an HTTP request to the Biz Pod via httpBizClient.
+func (c *httpBizClient) forwardToBiz(w http.ResponseWriter, r *http.Request) {
+	var body []byte
+	if r.Body != nil {
+		body, _ = io.ReadAll(r.Body)
+	}
+
+	respBody, status, err := c.ForwardRequest(r.Context(), r.URL.Path, r.Method, body)
+	if err != nil {
+		slog.Error("forward to biz failed", "error", err, "path", r.URL.Path)
+		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	w.WriteHeader(status)
+	if len(respBody) > 0 {
+		w.Write(respBody)
+	}
+}
+
 func main() {
 	flag.Parse()
 
@@ -85,25 +106,49 @@ func main() {
 		version: cfg.Version,
 	}
 
-	// Forward all requests to Biz Pods
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body []byte
-		if r.Body != nil {
-			body, _ = io.ReadAll(r.Body)
-		}
+	// REQ-22: Initialize JWT validator with NRF JWKS URL.
+	// Falls back to default if nrf: section absent from http-gateway.yaml.
+	nrfBaseURL := cfg.NRF.BaseURL
+	if nrfBaseURL == "" {
+		nrfBaseURL = "https://nrf.operator.com"
+	}
+	jwksURL := nrfBaseURL + "/.well-known/jwks.json"
+	if err := auth.Init(auth.TokenValidatorConfig{
+		JWKSURL:        jwksURL,
+		Issuer:         nrfBaseURL,
+		Audiences:      []string{"nnssaaf-nssaa", "nnssaaf-aiw"},
+		AllowedNfTypes: []string{"AMF", "AUSF"},
+		AllowedScopes:  []string{"nnssaaf-nssaa", "nnssaaf-aiw"},
+	}); err != nil {
+		slog.Error("auth.Init failed", "error", err)
+		os.Exit(1)
+	}
+	slog.Info("auth initialized", "jwks_url", jwksURL)
 
-		respBody, status, err := bizClient.ForwardRequest(r.Context(), r.URL.Path, r.Method, body)
-		if err != nil {
-			slog.Error("forward to biz failed", "error", err, "path", r.URL.Path)
-			http.Error(w, "service unavailable", http.StatusServiceUnavailable)
-			return
-		}
+	// Use a mux for path-based auth scoping.
+	mux := http.NewServeMux()
 
-		w.WriteHeader(status)
-		if len(respBody) > 0 {
-			w.Write(respBody)
-		}
+	// N58: Nnssaaf_NSSAA — requires nnssaaf-nssaa scope
+	mux.Handle("/nnssaaf-nssaa/", auth.AuthMiddleware("nnssaaf-nssaa")(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			bizClient.forwardToBiz(w, r)
+		}),
+	))
+
+	// N60: Nnssaaf_AIW — requires nnssaaf-aiw scope
+	mux.Handle("/nnssaaf-aiw/", auth.AuthMiddleware("nnssaaf-aiw")(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			bizClient.forwardToBiz(w, r)
+		}),
+	))
+
+	// Health endpoints — no auth required
+	mux.HandleFunc("/healthz/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"ok"}`))
 	})
+
+	handler := mux
 
 	// TODO(phase-6): Log TLS cipher suite on each connection for audit.
 	// AuditEntry.TLSCipher field per docs/design/15_sbi_security.md §8.
