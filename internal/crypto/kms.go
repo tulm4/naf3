@@ -113,17 +113,6 @@ type HTTPDoer interface {
 	Do(*http.Request) (*http.Response, error)
 }
 
-func NewVaultKeyManager(cfg *VaultConfig) *VaultKeyManager {
-	return &VaultKeyManager{
-		address:    cfg.Address,
-		keyName:    cfg.KeyName,
-		authMethod: cfg.AuthMethod,
-		k8sRole:    cfg.K8sRole,
-		token:      cfg.Token,
-		httpClient: &http.Client{Timeout: 10 * time.Second},
-	}
-}
-
 type vaultEncryptRequest struct {
 	Plaintext string `json:"plaintext"`
 }
@@ -148,6 +137,17 @@ type vaultKeyInfo struct {
 	Data struct {
 		Keys map[string]int `json:"keys"`
 	} `json:"data"`
+}
+
+func NewVaultKeyManager(cfg *VaultConfig) *VaultKeyManager {
+	return &VaultKeyManager{
+		address:    cfg.Address,
+		keyName:    cfg.KeyName,
+		authMethod: cfg.AuthMethod,
+		k8sRole:    cfg.K8sRole,
+		token:      cfg.Token,
+		httpClient: &http.Client{Timeout: 10 * time.Second},
+	}
 }
 
 func (m *VaultKeyManager) Wrap(ctx context.Context, dek []byte) ([]byte, int, error) {
@@ -256,6 +256,10 @@ func (m *VaultKeyManager) GetKeyVersion(ctx context.Context) (int, error) {
 	return maxVer, nil
 }
 
+func (m *VaultKeyManager) Rotate(ctx context.Context) error {
+	return m.RotateKey(ctx)
+}
+
 func (m *VaultKeyManager) RotateKey(ctx context.Context) error {
 	url := fmt.Sprintf("%s/v1/transit/rotate/%s", m.address, m.keyName)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
@@ -277,10 +281,6 @@ func (m *VaultKeyManager) RotateKey(ctx context.Context) error {
 	return nil
 }
 
-func (m *VaultKeyManager) Rotate(ctx context.Context) error {
-	return m.RotateKey(ctx)
-}
-
 func (m *VaultKeyManager) setAuthHeader(req *http.Request) error {
 	switch m.authMethod {
 	case "kubernetes":
@@ -299,8 +299,8 @@ func (m *VaultKeyManager) setAuthHeader(req *http.Request) error {
 	return nil
 }
 
-
 // SoftHSMKeyManager is defined in kms_softhsm.go (with softhsm tag) or kms_softhsm_stub.go (without).
+
 type SoftHSMKeyManager struct {
 	libraryPath string
 	tokenLabel  string
@@ -319,13 +319,21 @@ func NewSoftHSMKeyManager(cfg *SoftHSMConfig) (*SoftHSMKeyManager, error) {
 }
 
 func (m *SoftHSMKeyManager) Wrap(ctx context.Context, dek []byte) ([]byte, int, error) {
-	return nil, 0, errors.New("SoftHSMKeyManager.Wrap: not implemented in Wave 1 (see Wave 5)")
+	return nil, 0, errors.New("SoftHSMKeyManager.Wrap: not implemented (build with -tags=softhsm)")
 }
 
 func (m *SoftHSMKeyManager) Unwrap(ctx context.Context, wrappedDEK []byte) ([]byte, error) {
-	return nil, errors.New("SoftHSMKeyManager.Unwrap: not implemented in Wave 1 (see Wave 5)")
+	return nil, errors.New("SoftHSMKeyManager.Unwrap: not implemented (build with -tags=softhsm)")
 }
 
 func (m *SoftHSMKeyManager) GetKeyVersion(ctx context.Context) (int, error) {
 	return 1, nil
+}
+
+func (m *SoftHSMKeyManager) Rotate(ctx context.Context) error {
+	return nil
+}
+
+func (m *SoftHSMKeyManager) Close() error {
+	return nil
 }
