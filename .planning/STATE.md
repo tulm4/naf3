@@ -63,19 +63,27 @@ See: `.planning/phases/04-NFIntegration_Observability/04-CONTEXT.md`
 
 ---
 
-*Last updated: 2026-04-25*
+### 2026-04-27 — Phase 5 discussion
 
-## Session Notes
+Phase 5 context gathered. Key decisions:
+- HTTP Gateway validates all inbound N58/N60 Bearer tokens (not Biz Pod)
+- Go stdlib mTLS throughout, config-driven; Istio mode optional via ISTIO_MTLS=1 env var
+- KeyManager interface + soft/SoftHSM/Vault transit engine (kubeadm, not AWS)
+- kubeadm deployment — HashiCorp Vault runs as K8s deployment for production KEK management
+
+See: `.planning/phases/05-security-crypto/05-CONTEXT.md`
 
 ### 2026-04-25 — Phase 4 execution complete
 
 Phase 4 fully executed across 5 waves:
 - Wave 1: `internal/resilience/` (circuit breaker, retry), `internal/logging/gpsi.go`
-
-
 - Wave 2: `internal/nrf/` (NRF client), `internal/storage/postgres/session_store.go`, handler options
 - Wave 3: `internal/metrics/`, `internal/tracing/`, `cmd/biz/main.go` health endpoints
 - Wave 4: `internal/udm/`, `internal/amf/`, `internal/ausf/`, `internal/cache/redis/dlq.go`, full main.go wiring
 - Wave 5: `deployments/nssaa-biz/servicemonitor.yaml`, `prometheusrules.yaml`, `compose/configs/biz.yaml`
 
 All tasks validated and tests passing.
+
+---
+
+*Last updated: 2026-04-27*
