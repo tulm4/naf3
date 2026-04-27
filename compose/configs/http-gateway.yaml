@@ -1,4 +1,6 @@
-# HTTP Gateway configuration for NSSAAF
+# NSSAAF HTTP Gateway Configuration
+# TLS 1.3 is enabled by default. To use Istio mTLS instead, set ISTIO_MTLS=1 env var.
+# When ISTIO_MTLS=1, the HTTP Gateway runs without explicit TLS config (Istio sidecar handles it).
 component: http-gateway
 version: "0.1.0"
 
@@ -22,3 +24,6 @@ logging:
 metrics:
   enabled: true
   path: "/metrics"
+
+env:
+  ISTIO_MTLS: "0"

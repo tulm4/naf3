@@ -67,7 +67,30 @@ ausf:
   baseURL: "http://localhost:8083"
   timeout: 10s
 
-# Biz Pod component config
 biz:
   aaaGatewayUrl: "http://localhost:9090"
+  # mTLS between Biz Pod and AAA Gateway
   useMTLS: false
+  tlsCert: "/certs/biz-to-aaa.crt"
+  tlsKey: "/certs/biz-to-aaa.key"
+  tlsCa: "/certs/aaa-ca.crt"
+
+# Cryptographic key management (Phase 5)
+# Modes: soft (default), softhsm (PKCS#11), vault (HashiCorp Vault transit)
+crypto:
+  keyManager: "soft"  # Change to "vault" for production
+  masterKeyHex: "${MASTER_KEY_HEX}"  # Required for soft mode; 64 hex chars (32 bytes)
+  kekOverlapDays: 30
+
+  # For vault mode:
+  # vault:
+  #   address: "http://vault.vault.svc.cluster.local:8200"
+  #   keyName: "nssaa-kek"
+  #   authMethod: "kubernetes"
+  #   k8sRole: "nssaa-vault"
+  #
+  # For softhsm mode:
+  # softHSM:
+  #   libraryPath: "/usr/lib/softhsm/libsofthsm2.so"
+  #   tokenLabel: "nssaa-kek-token"
+  #   pin: "123456"
