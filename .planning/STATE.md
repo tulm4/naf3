@@ -39,7 +39,7 @@ See: `.planning/PROJECT.md` (updated 2026-04-25)
 | 3: Data & Storage | ✅ Done | PostgreSQL, Redis |
 | R: 3-Component Refactor | ✅ Done | HTTP GW, Biz Pod, AAA GW |
 | 4: NF Integration & Observability | ✅ Done | 5 plans, 26 tasks, 5 waves — REQ-01 to REQ-19 |
-| 5: Security & Crypto | ⏳ In Progress | TLS, mTLS, encryption |
+| 5: Security & Crypto | ✅ Done | TLS, mTLS, KEK/DEK, KeyManager, Vault, SoftHSM |
 | 6: Integration Testing & NRM | ⏳ Pending | E2E, conformance, NRM |
 | 7: Kubernetes Deployment | ⏳ Pending | Helm, Kustomize, ArgoCD |
 | 8: Performance & Load Testing | ⏳ Pending | Load, chaos |
@@ -104,6 +104,24 @@ All tasks validated and tests passing.
 
 ---
 
-*Last updated: 2026-04-27*
+### 2026-04-28 — Phase 5 execution complete
 
-**Planned Phase:** 5 (Security & Crypto) — 5 plans — 2026-04-27T17:51:55.416Z
+Phase 5 fully executed across 5 waves:
+
+- Wave 1 (05-01): AES-256-GCM crypto primitives, KeyManager interface, SoftKeyManager, EnvelopeEncrypt/Decrypt
+- Wave 2 (05-02): Per-session encryption, KEKRotator, storage wiring (crypto.KeyManager into storage layer)
+- Wave 3 (05-03): TLS 1.3 and mTLS — config, Biz Pod TLS, config validation
+- Wave 4 (05-04): HTTP Bearer-token auth middleware for HTTP Gateway
+- Wave 5 (05-05): VaultKeyManager (full Vault transit engine), SoftHSMKeyManager (PKCS#11), RADIUS shared secret encryption
+
+Key fixes applied:
+- Go 1.25 GCM API: gcm.Seal returns ct||tag (no nonce prefix); gcm.Open expects ct||tag
+- EnvelopeDecrypt: correct EncryptedDEK slice bounds (ct at 12:44, tag at 44:60)
+- Session encryption: per-session DEK wrapped with KEK
+- VaultKeyManager: Kubernetes SA auth + token auth, TLS 1.2 minimum
+
+All 35 packages build and all tests pass.
+
+---
+
+*Last updated: 2026-04-28*
