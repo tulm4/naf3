@@ -32,9 +32,13 @@ func Encrypt(plaintext, key, aad []byte) (EncryptedData, error) {
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		return EncryptedData{}, errors.New("Encrypt: failed to generate nonce: " + err.Error())
 	}
+	// gcm.Seal(nil, nonce, plaintext, aad) produces ciphertext || tag (nonce passed separately to Open)
 	sealed := gcm.Seal(nil, nonce, plaintext, aad)
-	overhead := gcm.Overhead()
-	ctLen := len(sealed) - overhead
+	tagLen := gcm.Overhead()
+	ctLen := len(sealed) - tagLen
+	if ctLen < 0 {
+		ctLen = 0
+	}
 	return EncryptedData{
 		Ciphertext: sealed[:ctLen],
 		Nonce:      nonce,
@@ -60,10 +64,11 @@ func Decrypt(ed EncryptedData, key, aad []byte) ([]byte, error) {
 	if err != nil {
 		return nil, errors.New("Decrypt: failed to create GCM: " + err.Error())
 	}
-	combined := make([]byte, len(ed.Ciphertext)+len(ed.Tag))
-	copy(combined, ed.Ciphertext)
-	copy(combined[len(ed.Ciphertext):], ed.Tag)
-	return gcm.Open(nil, ed.Nonce, combined, aad)
+	// Reconstruct ct||tag from separate Ciphertext and Tag fields
+	ctTag := make([]byte, len(ed.Ciphertext)+len(ed.Tag))
+	copy(ctTag, ed.Ciphertext)
+	copy(ctTag[len(ed.Ciphertext):], ed.Tag)
+	return gcm.Open(nil, ed.Nonce, ctTag, aad)
 }
 
 func DecryptWithTag(ciphertext, nonce, tag, key, aad []byte) ([]byte, error) {

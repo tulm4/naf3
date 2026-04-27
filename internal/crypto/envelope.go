@@ -32,9 +32,14 @@ func EnvelopeEncrypt(plaintext []byte, kek []byte, kekVersion int) (*Envelope, e
 	if err != nil {
 		return nil, err
 	}
+	// EncryptedDEK format: nonce(12) || Ciphertext || Tag(16)
+	encDEK := make([]byte, 0, 12+len(dekEnc.Ciphertext)+16)
+	encDEK = append(encDEK, dekEnc.Nonce...)
+	encDEK = append(encDEK, dekEnc.Ciphertext...)
+	encDEK = append(encDEK, dekEnc.Tag...)
 	return &Envelope{
 		Ciphertext:   dataEnc.Ciphertext,
-		EncryptedDEK: append(dekEnc.Nonce, append(dekEnc.Ciphertext, dekEnc.Tag...)...),
+		EncryptedDEK: encDEK,
 		Nonce:        dataEnc.Nonce,
 		DataTag:      dataEnc.Tag,
 		DEKTag:       dekEnc.Tag,
@@ -43,12 +48,14 @@ func EnvelopeEncrypt(plaintext []byte, kek []byte, kekVersion int) (*Envelope, e
 }
 
 func EnvelopeDecrypt(env *Envelope, kek []byte) ([]byte, error) {
-	if len(env.EncryptedDEK) != 60 {
-		return nil, fmt.Errorf("envelope: EncryptedDEK must be exactly 60 bytes, got %d", len(env.EncryptedDEK))
+	// EncryptedDEK format: nonce(12) || Ciphertext || Tag(16)
+	if len(env.EncryptedDEK) < 28 { // minimum: 12 (nonce) + 0 (ciphertext) + 16 (tag)
+		return nil, fmt.Errorf("envelope: EncryptedDEK too short: %d bytes", len(env.EncryptedDEK))
 	}
 	dekNonce := env.EncryptedDEK[:12]
-	dekCiphertext := env.EncryptedDEK[12:44]
-	dekTag := env.EncryptedDEK[44:60]
+	dekRemainder := env.EncryptedDEK[12:] // ciphertext || tag(16)
+	dekTag := dekRemainder[len(dekRemainder)-16:]
+	dekCiphertext := dekRemainder[:len(dekRemainder)-16]
 	dekEnc := EncryptedData{Ciphertext: dekCiphertext, Nonce: dekNonce, Tag: dekTag}
 	dek, err := Decrypt(dekEnc, kek, nil)
 	if err != nil {

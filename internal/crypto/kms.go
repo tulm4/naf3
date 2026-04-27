@@ -113,6 +113,17 @@ type HTTPDoer interface {
 	Do(*http.Request) (*http.Response, error)
 }
 
+func NewVaultKeyManager(cfg *VaultConfig) *VaultKeyManager {
+	return &VaultKeyManager{
+		address:    cfg.Address,
+		keyName:    cfg.KeyName,
+		authMethod: cfg.AuthMethod,
+		k8sRole:    cfg.K8sRole,
+		token:      cfg.Token,
+		httpClient: &http.Client{Timeout: 10 * time.Second},
+	}
+}
+
 type vaultEncryptRequest struct {
 	Plaintext string `json:"plaintext"`
 }
@@ -288,15 +299,5 @@ func (m *VaultKeyManager) setAuthHeader(req *http.Request) error {
 	return nil
 }
 
-func NewVaultKeyManager(cfg *VaultConfig) *VaultKeyManager {
-	return &VaultKeyManager{
-		address:    cfg.Address,
-		keyName:    cfg.KeyName,
-		authMethod: cfg.AuthMethod,
-		k8sRole:    cfg.K8sRole,
-		token:      cfg.Token,
-		httpClient: &http.Client{Timeout: 10 * time.Second},
-	}
-}
 
 // SoftHSMKeyManager is defined in kms_softhsm.go (with softhsm tag) or kms_softhsm_stub.go (without).
