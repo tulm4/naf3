@@ -47,8 +47,8 @@ func EnvelopeDecrypt(env *Envelope, kek []byte) ([]byte, error) {
 		return nil, fmt.Errorf("envelope: EncryptedDEK must be exactly 60 bytes, got %d", len(env.EncryptedDEK))
 	}
 	dekNonce := env.EncryptedDEK[:12]
-	dekTag := env.EncryptedDEK[12:28]
-	dekCiphertext := env.EncryptedDEK[28:60]
+	dekCiphertext := env.EncryptedDEK[12:44]
+	dekTag := env.EncryptedDEK[44:60]
 	dekEnc := EncryptedData{Ciphertext: dekCiphertext, Nonce: dekNonce, Tag: dekTag}
 	dek, err := Decrypt(dekEnc, kek, nil)
 	if err != nil {

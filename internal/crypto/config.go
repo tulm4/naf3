@@ -69,11 +69,11 @@ func Init(cfg *Config) error {
 			return errors.New("crypto: Vault.KeyName required")
 		}
 		globalKM = &VaultKeyManager{
-			address:   cfg.Vault.Address,
-			keyName:   cfg.Vault.KeyName,
+			address:    cfg.Vault.Address,
+			keyName:    cfg.Vault.KeyName,
 			authMethod: cfg.Vault.AuthMethod,
-			k8sRole:   cfg.Vault.K8sRole,
-			token:     cfg.Vault.Token,
+			k8sRole:    cfg.Vault.K8sRole,
+			token:      cfg.Vault.Token,
 			httpClient: &http.Client{Timeout: 10 * time.Second},
 		}
 	case "softhsm":

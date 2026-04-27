@@ -77,6 +77,9 @@ server:
   addr: ":8080"
 redis:
   addr: "localhost:6379"
+crypto:
+  keyManager: "soft"
+  masterKeyHex: "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 `
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, "biz.yaml")
@@ -182,6 +185,9 @@ httpGateway:
   bizServiceUrl: "http://biz:8080"
 server:
   addr: ":8080"
+crypto:
+  keyManager: "soft"
+  masterKeyHex: "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 `
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, "http-gateway.yaml")
@@ -206,6 +212,9 @@ server:
   addr: ":8080"
 redis:
   addr: "localhost:6379"
+crypto:
+  keyManager: "soft"
+  masterKeyHex: "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 `
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, "unknown.yaml")
@@ -239,6 +248,9 @@ eap:
   maxRounds: 20
   roundTimeout: 30s
   sessionTtl: 5m
+crypto:
+  keyManager: "soft"
+  masterKeyHex: "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 `
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, "biz-full.yaml")
@@ -294,6 +306,9 @@ server:
   addr: "${SERVER_ADDR}"
 redis:
   addr: "${REDIS_ADDR}"
+crypto:
+  keyManager: "soft"
+  masterKeyHex: "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 `
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, "env.yaml")
