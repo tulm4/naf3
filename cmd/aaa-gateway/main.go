@@ -89,7 +89,7 @@ func main() {
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, `{"status":"ok","service":"aaa-gateway"}`)
+	_, _ = fmt.Fprintf(w, `{"status":"ok","service":"aaa-gateway"}`)
 }
 
 func signalReceived() <-chan struct{} {

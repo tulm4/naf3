@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// 3GPP Vendor ID as defined by IANA.
+// VendorID3GPP is the 3GPP Vendor ID as defined by IANA.
 // Spec: TS 29.561 §16.3.2
 const VendorID3GPP uint32 = 10415
 

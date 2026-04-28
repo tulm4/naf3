@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -43,7 +44,7 @@ func (c *SessionCache) Get(ctx context.Context, authCtxID string) (*sessionCache
 	key := sessionKey(authCtxID)
 	val, err := c.client.Get(ctx, key).Bytes()
 	if err != nil {
-		if err == redis.Nil {
+		if errors.Is(err, redis.Nil) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("session cache get: %w", err)

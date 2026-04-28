@@ -540,4 +540,3 @@ func TestInferService(t *testing.T) {
 		})
 	}
 }
-

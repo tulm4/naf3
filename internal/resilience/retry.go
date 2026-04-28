@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// RetryConfig holds retry configuration.
+// DefaultRetryConfig is the default retry configuration.
 // REQ-12: MaxAttempts=3, BaseDelay=1s, MaxDelay=4s (1s, 2s, 4s).
 var DefaultRetryConfig = RetryConfig{
 	MaxAttempts: 3,
@@ -61,7 +61,7 @@ func Do(ctx context.Context, cfg RetryConfig, fn func() error) error {
 			}
 		}
 	}
-	return fmt.Errorf("%w: %v", ErrMaxRetriesExceeded, lastErr)
+	return fmt.Errorf("%w: %w", ErrMaxRetriesExceeded, lastErr)
 }
 
 // IsRetryable returns true if an error should trigger a retry.

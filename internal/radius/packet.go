@@ -23,7 +23,7 @@ const (
 // Spec: RFC 2865 §3
 type Packet struct {
 	Code       uint8
-	Id         uint8
+	ID         uint8
 	Length     uint16
 	Vector     [16]byte // Authenticator or Response Authenticator
 	Attributes []Attribute
@@ -65,7 +65,7 @@ func DecodePacket(data []byte) (*Packet, error) {
 
 	return &Packet{
 		Code:       code,
-		Id:         id,
+		ID:         id,
 		Length:     length,
 		Vector:     vector,
 		Attributes: attrs,
@@ -80,7 +80,7 @@ func (p *Packet) Encode() []byte {
 
 	data := make([]byte, length)
 	data[0] = p.Code
-	data[1] = p.Id
+	data[1] = p.ID
 	binary.BigEndian.PutUint16(data[2:4], uint16(length))
 	copy(data[4:20], p.Vector[:])
 	copy(data[20:], attrData)
@@ -94,7 +94,7 @@ func (p *Packet) Encode() []byte {
 func BuildAccessRequest(id uint8, authenticator [16]byte, attrs []Attribute) *Packet {
 	return &Packet{
 		Code:       CodeAccessRequest,
-		Id:         id,
+		ID:         id,
 		Length:     20,
 		Vector:     authenticator,
 		Attributes: attrs,
@@ -106,7 +106,7 @@ func BuildAccessRequest(id uint8, authenticator [16]byte, attrs []Attribute) *Pa
 func BuildAccessAccept(id uint8, responseAuth [16]byte, attrs []Attribute) *Packet {
 	return &Packet{
 		Code:       CodeAccessAccept,
-		Id:         id,
+		ID:         id,
 		Length:     20,
 		Vector:     responseAuth,
 		Attributes: attrs,
@@ -118,7 +118,7 @@ func BuildAccessAccept(id uint8, responseAuth [16]byte, attrs []Attribute) *Pack
 func BuildAccessReject(id uint8, responseAuth [16]byte, attrs []Attribute) *Packet {
 	return &Packet{
 		Code:       CodeAccessReject,
-		Id:         id,
+		ID:         id,
 		Length:     20,
 		Vector:     responseAuth,
 		Attributes: attrs,
@@ -130,7 +130,7 @@ func BuildAccessReject(id uint8, responseAuth [16]byte, attrs []Attribute) *Pack
 func BuildAccessChallenge(id uint8, responseAuth [16]byte, attrs []Attribute) *Packet {
 	return &Packet{
 		Code:       CodeAccessChallenge,
-		Id:         id,
+		ID:         id,
 		Length:     20,
 		Vector:     responseAuth,
 		Attributes: attrs,
@@ -140,5 +140,5 @@ func BuildAccessChallenge(id uint8, responseAuth [16]byte, attrs []Attribute) *P
 // String implements fmt.Stringer.
 func (p *Packet) String() string {
 	return fmt.Sprintf("RADIUS[Code=%d, Id=%d, Len=%d, Attrs=%d]",
-		p.Code, p.Id, p.Length, len(p.Attributes))
+		p.Code, p.ID, p.Length, len(p.Attributes))
 }

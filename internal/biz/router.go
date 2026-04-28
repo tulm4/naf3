@@ -16,7 +16,10 @@ import (
 type ProxyMode int
 
 const (
+	// ProxyModeDirect forwards requests directly to NSS-AAA servers.
 	ProxyModeDirect ProxyMode = iota
+	// ProxyModeProxy forwards requests through an intermediate AAA proxy.
+	// ProxyModeProxy forwards requests through an intermediate AAA proxy.
 	ProxyModeProxy
 )
 
@@ -36,7 +39,10 @@ func (m ProxyMode) String() string {
 type Protocol int
 
 const (
+	// ProtocolRADIUS indicates the AAA server uses RADIUS.
 	ProtocolRADIUS Protocol = iota
+	// ProtocolDIAMETER indicates the AAA server uses Diameter.
+	// ProtocolDIAMETER indicates the AAA server uses Diameter.
 	ProtocolDIAMETER
 )
 

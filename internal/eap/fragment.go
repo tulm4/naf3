@@ -32,7 +32,7 @@ const MaxFragmentsPerSession = 16
 // Spec: RFC 3748 §3.5
 type FragmentBuffer struct {
 	AuthCtxID   string
-	ExpectedId  uint8
+	ExpectedID  uint8
 	FragmentSeq uint16 // current fragment sequence number
 	TotalLength uint32 // declared total length (from L flag), 0 if unknown
 	Received    uint32 // total bytes received so far
@@ -45,7 +45,7 @@ type FragmentBuffer struct {
 func NewFragmentBuffer(authCtxID string, id uint8) *FragmentBuffer {
 	return &FragmentBuffer{
 		AuthCtxID:   authCtxID,
-		ExpectedId:  id,
+		ExpectedID:  id,
 		FragmentSeq: 0,
 		Fragments:   make(map[uint16][]byte),
 		Complete:    false,
@@ -149,7 +149,7 @@ func (fb *FragmentBuffer) Size() int {
 	return len(fb.Fragments)
 }
 
-// Manager maintains fragment buffers for multiple concurrent sessions.
+// FragmentManager maintains fragment buffers for multiple concurrent sessions.
 // Thread-safe.
 type FragmentManager struct {
 	mu      sync.RWMutex

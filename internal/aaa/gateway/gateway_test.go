@@ -13,7 +13,7 @@ func TestNewRedisClient_Standalone(t *testing.T) {
 	if client == nil {
 		t.Fatal("expected non-nil client")
 	}
-	client.Close()
+	_ = client.Close()
 }
 
 func TestNewRedisClient_Sentinel(t *testing.T) {
@@ -21,7 +21,7 @@ func TestNewRedisClient_Sentinel(t *testing.T) {
 	if client == nil {
 		t.Fatal("expected non-nil client")
 	}
-	client.Close()
+	_ = client.Close()
 }
 
 func TestNewRedisClient_UnknownMode(t *testing.T) {
@@ -29,7 +29,7 @@ func TestNewRedisClient_UnknownMode(t *testing.T) {
 	if client == nil {
 		t.Fatal("expected non-nil client")
 	}
-	client.Close()
+	_ = client.Close()
 }
 
 func TestReadKeepalivedState(t *testing.T) {

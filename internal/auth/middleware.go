@@ -24,16 +24,16 @@ func Middleware(requiredScope string) func(http.Handler) http.Handler {
 			// Extract Bearer token
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
-				writeError(w, http.StatusUnauthorized, "missing authorization header")
+				writeError(w, "missing authorization header")
 				return
 			}
 			if !strings.HasPrefix(authHeader, "Bearer ") {
-				writeError(w, http.StatusUnauthorized, "invalid authorization scheme")
+				writeError(w, "invalid authorization scheme")
 				return
 			}
 			token := strings.TrimPrefix(authHeader, "Bearer ")
 			if token == "" {
-				writeError(w, http.StatusUnauthorized, "empty token")
+				writeError(w, "empty token")
 				return
 			}
 
@@ -45,7 +45,7 @@ func Middleware(requiredScope string) func(http.Handler) http.Handler {
 					"path", r.URL.Path,
 					"remote_addr", r.RemoteAddr,
 				)
-				writeError(w, http.StatusUnauthorized, "invalid token")
+				writeError(w, "invalid token")
 				return
 			}
 
@@ -57,14 +57,13 @@ func Middleware(requiredScope string) func(http.Handler) http.Handler {
 }
 
 // writeError writes a JSON error response.
-// RFC 7807 ProblemDetails requires "status" as an integer.
-func writeError(w http.ResponseWriter, status int, message string) {
+func writeError(w http.ResponseWriter, message string) {
 	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(status)
+	w.WriteHeader(http.StatusUnauthorized)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"type":   "https://tools.ietf.org/html/rfc9110#section-15.5.2",
 		"title":  "Unauthorized",
-		"status": status,
+		"status": http.StatusUnauthorized,
 		"detail": message,
 	})
 }

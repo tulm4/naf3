@@ -154,26 +154,14 @@ func (c *Client) Close() error {
 	return nil
 }
 
-// SendDER sends a Diameter-EAP-Request and waits for a DEA response.
+// buildDERMessage constructs a Diameter-EAP-Request message with all required AVPs.
 // Spec: RFC 4072, RFC 6733 §8.8, TS 29.561 §17
-func (c *Client) SendDER(ctx context.Context, sessionID, userName string, eapPayload []byte, sst uint8, sd string) ([]byte, error) {
-	conn, err := c.getConn()
-	if err != nil {
-		return nil, err
-	}
-
-	// Create channel for response.
-	respCh := make(chan *diam.Message, 1)
-	hopByHop := c.nextHopByHopID()
-	c.addPending(hopByHop, respCh)
-	defer c.removePending(hopByHop)
-
-	// Build DER message.
+func (c *Client) buildDERMessage(conn diam.Conn, hopByHop uint32, sessionID, userName string, eapPayload []byte, sst uint8, sd string) (*diam.Message, error) {
 	m := diam.NewRequest(CmdDER, AppIDAAP, conn.Dictionary())
 	m.Header.HopByHopID = hopByHop
 
-	addAVP := func(code interface{}, flags uint8, vendor uint32, data datatype.Type) error {
-		_, err := m.NewAVP(code, flags, vendor, data)
+	addAVP := func(code interface{}, flags uint8, _ uint32, data datatype.Type) error {
+		_, err := m.NewAVP(code, flags, 0, data)
 		return err
 	}
 
@@ -196,7 +184,6 @@ func (c *Client) SendDER(ctx context.Context, sessionID, userName string, eapPay
 		return nil, err
 	}
 	if err := addAVP(avp.OriginStateID, avp.Mbit, 0, datatype.Unsigned32(1)); err != nil {
-		// RFC 6733 §8.8: Origin-State-Type is mandatory.
 		return nil, err
 	}
 	if err := addAVP(avp.DestinationHost, avp.Mbit, 0, datatype.DiameterIdentity(c.cfg.DestinationHost)); err != nil {
@@ -211,13 +198,34 @@ func (c *Client) SendDER(ctx context.Context, sessionID, userName string, eapPay
 	if err := addAVP(209, 0, 0, datatype.OctetString(eapPayload)); err != nil {
 		return nil, err
 	}
+
 	snssaiAVP, err := EncodeSnssaiAVP(sst, sd)
 	if err != nil {
 		return nil, fmt.Errorf("diameter: failed to encode SNSSAI AVP: %w", err)
 	}
 	m.AddAVP(snssaiAVP)
 
-	// Set deadline on the connection.
+	return m, nil
+}
+
+// SendDER sends a Diameter-EAP-Request and waits for a DEA response.
+// Spec: RFC 4072, RFC 6733 §8.8, TS 29.561 §17
+func (c *Client) SendDER(ctx context.Context, sessionID, userName string, eapPayload []byte, sst uint8, sd string) ([]byte, error) {
+	conn, err := c.getConn()
+	if err != nil {
+		return nil, err
+	}
+
+	respCh := make(chan *diam.Message, 1)
+	hopByHop := c.nextHopByHopID()
+	c.addPending(hopByHop, respCh)
+	defer c.removePending(hopByHop)
+
+	m, err := c.buildDERMessage(conn, hopByHop, sessionID, userName, eapPayload, sst, sd)
+	if err != nil {
+		return nil, err
+	}
+
 	if deadline, ok := ctx.Deadline(); ok {
 		if dc, ok := conn.(interface {
 			SetWriteDeadline(t time.Time) error
@@ -240,13 +248,11 @@ func (c *Client) SendDER(ctx context.Context, sessionID, userName string, eapPay
 		"eap_len", len(eapPayload),
 	)
 
-	// Wait for response or context cancellation.
 	select {
 	case <-ctx.Done():
 		c.removePending(hopByHop)
 		return nil, ctx.Err()
 	case resp := <-respCh:
-		// Serialize to bytes for caller.
 		data, err := resp.Serialize()
 		if err != nil {
 			return nil, fmt.Errorf("diameter: failed to serialize DEA: %w", err)

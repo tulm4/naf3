@@ -113,14 +113,14 @@ func main() {
 			TokenFile:  cfg.Crypto.VaultConfig.TokenFile,
 		}
 	}
-	if err := crypto.Init(&crypto.Config{
+	if initErr := crypto.Init(&crypto.Config{
 		KeyManager:     cfg.Crypto.KeyManager,
 		MasterKeyHex:   cfg.Crypto.MasterKeyHex,
 		KEKOverlapDays: cfg.Crypto.KEKOverlapDays,
 		Vault:          vaultCfg,
 		SoftHSM:        nil, // SoftHSM config not wired in Phase 5
-	}); err != nil {
-		slog.Error("crypto.Init failed", "error", err)
+	}); initErr != nil {
+		slog.Error("crypto.Init failed", "error", initErr)
 		os.Exit(1)
 	}
 

@@ -38,7 +38,7 @@ type AAAConfig struct {
 	UpdatedAt     int64 // Unix timestamp
 }
 
-// Encryptor handles AES encryption/decryption for stored secrets.
+// SecretEncryptor handles AES encryption/decryption for stored secrets.
 type SecretEncryptor struct {
 	key []byte
 }

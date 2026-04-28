@@ -24,8 +24,8 @@ func TestPacketEncodeDecode(t *testing.T) {
 
 	decoded, err := DecodePacket(encoded)
 	assert.NoError(t, err)
-	assert.Equal(t, uint8(CodeAccessRequest), decoded.Code)
-	assert.Equal(t, uint8(1), decoded.Id)
+	assert.Equal(t, CodeAccessRequest, decoded.Code)
+	assert.Equal(t, uint8(1), decoded.ID)
 	assert.Equal(t, auth, decoded.Vector)
 	assert.Len(t, decoded.Attributes, 2)
 }
@@ -40,8 +40,8 @@ func TestPacketEncodeDecodeWithVSA(t *testing.T) {
 
 	decoded, err := DecodePacket(encoded)
 	assert.NoError(t, err)
-	assert.Equal(t, uint8(CodeAccessRequest), decoded.Code)
-	assert.Equal(t, uint8(5), decoded.Id)
+	assert.Equal(t, CodeAccessRequest, decoded.Code)
+	assert.Equal(t, uint8(5), decoded.ID)
 	assert.Len(t, decoded.Attributes, 1)
 }
 
@@ -66,8 +66,8 @@ func TestBuildAccessRequest(t *testing.T) {
 		MakeStringAttribute(AttrUserName, "alice"),
 	})
 
-	assert.Equal(t, uint8(CodeAccessRequest), packet.Code)
-	assert.Equal(t, uint8(42), packet.Id)
+	assert.Equal(t, CodeAccessRequest, packet.Code)
+	assert.Equal(t, uint8(42), packet.ID)
 	assert.Equal(t, auth, packet.Vector)
 	assert.Len(t, packet.Attributes, 1)
 }
@@ -78,15 +78,15 @@ func TestBuildAccessAccept(t *testing.T) {
 		MakeStringAttribute(AttrReplyMessage, "Welcome"),
 	})
 
-	assert.Equal(t, uint8(CodeAccessAccept), packet.Code)
-	assert.Equal(t, uint8(1), packet.Id)
+	assert.Equal(t, CodeAccessAccept, packet.Code)
+	assert.Equal(t, uint8(1), packet.ID)
 }
 
 func TestBuildAccessReject(t *testing.T) {
 	auth := [16]byte{}
 	packet := BuildAccessReject(1, auth, nil)
 
-	assert.Equal(t, uint8(CodeAccessReject), packet.Code)
+	assert.Equal(t, CodeAccessReject, packet.Code)
 }
 
 func TestBuildAccessChallenge(t *testing.T) {
@@ -95,8 +95,8 @@ func TestBuildAccessChallenge(t *testing.T) {
 		MakeStringAttribute(AttrState, "challenge-state"),
 	})
 
-	assert.Equal(t, uint8(CodeAccessChallenge), packet.Code)
-	assert.Equal(t, uint8(3), packet.Id)
+	assert.Equal(t, CodeAccessChallenge, packet.Code)
+	assert.Equal(t, uint8(3), packet.ID)
 	assert.Len(t, packet.Attributes, 1)
 }
 
@@ -253,8 +253,8 @@ func TestEncodeVSA(t *testing.T) {
 
 	decoded, err := DecodeVSA(&attr)
 	assert.NoError(t, err)
-	assert.Equal(t, uint32(VendorID3GPP), decoded.VendorID)
-	assert.Equal(t, uint8(VendorTypeSNSSAI), decoded.VendorType)
+	assert.Equal(t, VendorID3GPP, decoded.VendorID)
+	assert.Equal(t, VendorTypeSNSSAI, decoded.VendorType)
 	assert.Equal(t, []byte{1, 2, 3, 4}, decoded.Data)
 }
 
@@ -505,7 +505,7 @@ func TestFullPacketRoundTrip(t *testing.T) {
 	encoded := packet.Encode()
 	decoded, err := DecodePacket(encoded)
 	assert.NoError(t, err)
-	assert.Equal(t, uint8(CodeAccessRequest), decoded.Code)
+	assert.Equal(t, CodeAccessRequest, decoded.Code)
 	assert.Len(t, decoded.Attributes, 6)
 
 	// Check User-Name.

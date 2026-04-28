@@ -172,7 +172,7 @@ func TestClient_DiscoverUDM_CacheMiss(t *testing.T) {
 			},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -198,7 +198,7 @@ func TestClient_DiscoverUDM_NoUDMFound(t *testing.T) {
 			"nfInstances": []map[string]interface{}{},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -242,7 +242,7 @@ func TestClient_DiscoverAMF_CacheMiss(t *testing.T) {
 			"nfInstanceId": "amf-001",
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 

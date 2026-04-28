@@ -43,7 +43,7 @@ func NewPool(ctx context.Context, cfg Config) (*Pool, error) {
 	client := redis.NewClient(opt)
 
 	if err := client.Ping(ctx).Err(); err != nil {
-		client.Close()
+		_ = client.Close()
 		return nil, fmt.Errorf("redis: ping failed: %w", err)
 	}
 
@@ -69,7 +69,7 @@ func NewClusterPool(ctx context.Context, cfg Config) (*Pool, error) {
 	client := redis.NewClusterClient(opt)
 
 	if err := client.Ping(ctx).Err(); err != nil {
-		client.Close()
+		_ = client.Close()
 		return nil, fmt.Errorf("redis: cluster ping failed: %w", err)
 	}
 

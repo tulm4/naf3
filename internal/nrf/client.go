@@ -150,7 +150,7 @@ func (c *Client) Register(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("nrf: register: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusCreated {
 		return fmt.Errorf("nrf: unexpected status %d", resp.StatusCode)
 	}
@@ -181,7 +181,7 @@ func (c *Client) Heartbeat(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("nrf: heartbeat: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("nrf: heartbeat status %d", resp.StatusCode)
 	}
@@ -206,8 +206,8 @@ func (c *Client) StartHeartbeat(ctx context.Context) {
 
 // DiscoverUDM discovers a UDM that exposes the nudm-uem service.
 // REQ-03 / docs/design/05_nf_profile.md §3.2.
-func (c *Client) DiscoverUDM(ctx context.Context, plmnId string) (string, error) {
-	key := fmt.Sprintf("udm:uem:%s", plmnId)
+func (c *Client) DiscoverUDM(ctx context.Context, plmnID string) (string, error) {
+	key := fmt.Sprintf("udm:uem:%s", plmnID)
 	if endpoint, ok := c.cache.Get(key); ok {
 		return endpoint.(string), nil
 	}
@@ -221,7 +221,7 @@ func (c *Client) DiscoverUDM(ctx context.Context, plmnId string) (string, error)
 	if err != nil {
 		return "", fmt.Errorf("nrf: discover udm: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("nrf: discover udm status %d", resp.StatusCode)
 	}
@@ -248,17 +248,17 @@ func (c *Client) DiscoverUDM(ctx context.Context, plmnId string) (string, error)
 			}
 		}
 	}
-	return "", fmt.Errorf("nrf: no UDM found for plmnId %s", plmnId)
+	return "", fmt.Errorf("nrf: no UDM found for plmnId %s", plmnID)
 }
 
 // DiscoverAMF discovers an AMF by instance ID.
 // REQ-03 / docs/design/05_nf_profile.md §3.1.
-func (c *Client) DiscoverAMF(ctx context.Context, amfId string) (string, error) {
-	key := fmt.Sprintf("amf:%s", amfId)
+func (c *Client) DiscoverAMF(ctx context.Context, amfID string) (string, error) {
+	key := fmt.Sprintf("amf:%s", amfID)
 	if endpoint, ok := c.cache.Get(key); ok {
 		return endpoint.(string), nil
 	}
-	url := fmt.Sprintf("%s/nnrf-disc/v1/nf-instances/%s", c.baseURL, amfId)
+	url := fmt.Sprintf("%s/nnrf-disc/v1/nf-instances/%s", c.baseURL, amfID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", fmt.Errorf("nrf: create amf request: %w", err)
@@ -267,7 +267,7 @@ func (c *Client) DiscoverAMF(ctx context.Context, amfId string) (string, error) 
 	if err != nil {
 		return "", fmt.Errorf("nrf: discover amf: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("nrf: discover amf status %d", resp.StatusCode)
 	}
@@ -292,7 +292,7 @@ func (c *Client) Deregister(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("nrf: deregister: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	c.registered.Store(false)
 	return nil
 }

@@ -24,8 +24,8 @@ const MaxEAPSize = 65535
 // Packet represents a decoded EAP packet as defined in RFC 3748 §4.
 // Spec: RFC 3748 §4
 type Packet struct {
-	Code    EapCode
-	Id      uint8
+	Code    Code
+	ID      uint8
 	Length  uint16 // Total packet length including header
 	Type    uint8  // Only valid for Request/Response packets
 	Data    []byte // Type-specific data (may be empty)
@@ -40,7 +40,7 @@ func Parse(data []byte) (*Packet, error) {
 		return nil, fmt.Errorf("%w: need at least 4 bytes, got %d", ErrInvalidPacket, len(data))
 	}
 
-	code := EapCode(data[0])
+	code := Code(data[0])
 	id := data[1]
 	length := binary.BigEndian.Uint16(data[2:4])
 
@@ -60,7 +60,7 @@ func Parse(data []byte) (*Packet, error) {
 
 	p := &Packet{
 		Code:    code,
-		Id:      id,
+		ID:      id,
 		Length:  length,
 		RawData: data,
 	}
@@ -68,7 +68,7 @@ func Parse(data []byte) (*Packet, error) {
 	// Type field is only present for Request (1) and Response (2) packets.
 	// Success (3), Failure (4) have no Type field.
 	switch code {
-	case EapCodeRequest, EapCodeResponse:
+	case CodeRequest, CodeResponse:
 		if len(data) < 5 {
 			return nil, fmt.Errorf("%w: missing type field", ErrInvalidPacket)
 		}
@@ -88,7 +88,7 @@ func Encode(p *Packet) []byte {
 	// Calculate total length.
 	// Request/Response always have a Type byte; Success/Failure do not.
 	length := 4
-	if p.Code == EapCodeRequest || p.Code == EapCodeResponse {
+	if p.Code == CodeRequest || p.Code == CodeResponse {
 		length++
 	}
 	length += len(p.Data)
@@ -100,10 +100,10 @@ func Encode(p *Packet) []byte {
 
 	buf := make([]byte, length)
 	buf[0] = byte(p.Code)
-	buf[1] = p.Id
+	buf[1] = p.ID
 	binary.BigEndian.PutUint16(buf[2:4], uint16(length))
 
-	if p.Code == EapCodeRequest || p.Code == EapCodeResponse {
+	if p.Code == CodeRequest || p.Code == CodeResponse {
 		buf[4] = p.Type
 		copy(buf[5:], p.Data)
 	} else {
@@ -115,10 +115,10 @@ func Encode(p *Packet) []byte {
 
 // BuildRequest creates an EAP-Request packet with the given type and optional data.
 // Spec: RFC 3748 §4
-func BuildRequest(id uint8, method EapMethod, data []byte) *Packet {
+func BuildRequest(id uint8, method Method, data []byte) *Packet {
 	p := &Packet{
-		Code:   EapCodeRequest,
-		Id:     id,
+		Code:   CodeRequest,
+		ID:     id,
 		Type:   byte(method),
 		Data:   data,
 		Length: 5 + uint16(len(data)),
@@ -129,10 +129,10 @@ func BuildRequest(id uint8, method EapMethod, data []byte) *Packet {
 
 // BuildResponse creates an EAP-Response packet with the given type and data.
 // Spec: RFC 3748 §4
-func BuildResponse(id uint8, method EapMethod, data []byte) *Packet {
+func BuildResponse(id uint8, method Method, data []byte) *Packet {
 	p := &Packet{
-		Code:   EapCodeResponse,
-		Id:     id,
+		Code:   CodeResponse,
+		ID:     id,
 		Type:   byte(method),
 		Data:   data,
 		Length: 5 + uint16(len(data)),
@@ -145,8 +145,8 @@ func BuildResponse(id uint8, method EapMethod, data []byte) *Packet {
 // Spec: RFC 3748 §4.2
 func BuildSuccess(id uint8) *Packet {
 	p := &Packet{
-		Code:   EapCodeSuccess,
-		Id:     id,
+		Code:   CodeSuccess,
+		ID:     id,
 		Length: 4,
 		Data:   nil,
 	}
@@ -158,8 +158,8 @@ func BuildSuccess(id uint8) *Packet {
 // Spec: RFC 3748 §4.2
 func BuildFailure(id uint8) *Packet {
 	p := &Packet{
-		Code:   EapCodeFailure,
-		Id:     id,
+		Code:   CodeFailure,
+		ID:     id,
 		Length: 4,
 		Data:   nil,
 	}
@@ -169,8 +169,8 @@ func BuildFailure(id uint8) *Packet {
 
 // String implements fmt.Stringer.
 func (p *Packet) String() string {
-	return fmt.Sprintf("EAP[Code=%s, Id=%d, Type=%s, Len=%d]",
-		p.Code, p.Id, EapMethod(p.Type), p.Length)
+	return fmt.Sprintf("EAP[Code=%s, ID=%d, Type=%s, Len=%d]",
+		p.Code, p.ID, Method(p.Type), p.Length)
 }
 
 // Clone returns a deep copy of the packet.
@@ -179,7 +179,7 @@ func (p *Packet) Clone() *Packet {
 	copy(dataCopy, p.Data)
 	return &Packet{
 		Code:    p.Code,
-		Id:      p.Id,
+		ID:      p.ID,
 		Length:  p.Length,
 		Type:    p.Type,
 		Data:    dataCopy,

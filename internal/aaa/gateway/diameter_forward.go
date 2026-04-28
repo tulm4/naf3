@@ -199,6 +199,60 @@ func (df *diamForwarder) Close() error {
 	return nil
 }
 
+// buildDERMessage constructs a Diameter-EAP-Request message with all required AVPs.
+// Spec: RFC 4072, RFC 6733 §8.8, TS 29.561 §17
+func (df *diamForwarder) buildDERMessage(conn diam.Conn, hopByHop uint32, sessionID string, eapPayload []byte, sst uint8, sd string) (*diam.Message, error) {
+	m := diam.NewRequest(268, AppIDAAP, conn.Dictionary())
+	m.Header.HopByHopID = hopByHop
+
+	addAVP := func(code interface{}, flags uint8, _ uint32, data datatype.Type) error {
+		_, avpErr := m.NewAVP(code, flags, 0, data)
+		return avpErr
+	}
+
+	if avpErr := addAVP(avp.SessionID, avp.Mbit, 0, datatype.UTF8String(sessionID)); avpErr != nil {
+		return nil, avpErr
+	}
+	if avpErr := addAVP(avp.AuthApplicationID, avp.Mbit, 0, datatype.Unsigned32(AppIDAAP)); avpErr != nil {
+		return nil, avpErr
+	}
+	if avpErr := addAVP(avp.AuthRequestType, avp.Mbit, 0, datatype.Unsigned32(1)); avpErr != nil {
+		return nil, avpErr
+	}
+	if avpErr := addAVP(avp.AuthSessionState, avp.Mbit, 0, datatype.Unsigned32(1)); avpErr != nil {
+		return nil, avpErr
+	}
+	if avpErr := addAVP(avp.OriginHost, avp.Mbit, 0, df.settings.OriginHost); avpErr != nil {
+		return nil, avpErr
+	}
+	if avpErr := addAVP(avp.OriginRealm, avp.Mbit, 0, df.settings.OriginRealm); avpErr != nil {
+		return nil, avpErr
+	}
+	if avpErr := addAVP(avp.OriginStateID, avp.Mbit, 0, datatype.Unsigned32(1)); avpErr != nil {
+		return nil, avpErr
+	}
+	if avpErr := addAVP(avp.DestinationHost, avp.Mbit, 0, datatype.DiameterIdentity(df.destHost)); avpErr != nil {
+		return nil, avpErr
+	}
+	if avpErr := addAVP(avp.DestinationRealm, avp.Mbit, 0, datatype.DiameterIdentity(df.destRealm)); avpErr != nil {
+		return nil, avpErr
+	}
+	if avpErr := addAVP(avp.UserName, avp.Mbit, 0, datatype.UTF8String(sessionID)); avpErr != nil {
+		return nil, avpErr
+	}
+	if avpErr := addAVP(209, avp.Mbit, 0, datatype.OctetString(eapPayload)); avpErr != nil {
+		return nil, avpErr
+	}
+
+	snssaiAVP, err := encodeSnssaiAVP(sst, sd)
+	if err != nil {
+		return nil, fmt.Errorf("diameter_forward: failed to encode SNSSAI: %w", err)
+	}
+	m.AddAVP(snssaiAVP)
+
+	return m, nil
+}
+
 // Forward encodes raw EAP payload into a DER message, sends it to AAA-S,
 // and waits for the DEA response.
 // Spec: RFC 4072 (Diameter EAP), RFC 6733 §8.8, TS 29.561 §17
@@ -208,70 +262,16 @@ func (df *diamForwarder) Forward(ctx context.Context, eapPayload []byte, session
 		return nil, fmt.Errorf("diameter_forward: no connection: %w", err)
 	}
 
-	// Create channel for response.
 	respCh := make(chan *diam.Message, 1)
 	hopByHop := df.nextHopByHopID()
 	df.addPending(hopByHop, respCh)
 	defer df.removePending(hopByHop)
 
-	// Build DER message.
-	m := diam.NewRequest(268, AppIDAAP, conn.Dictionary())
-	m.Header.HopByHopID = hopByHop
-
-	addAVP := func(code interface{}, flags uint8, vendor uint32, data datatype.Type) error {
-		_, err := m.NewAVP(code, flags, vendor, data)
-		return err
-	}
-
-	if err := addAVP(avp.SessionID, avp.Mbit, 0, datatype.UTF8String(sessionID)); err != nil {
-		return nil, err
-	}
-	if err := addAVP(avp.AuthApplicationID, avp.Mbit, 0, datatype.Unsigned32(AppIDAAP)); err != nil {
-		return nil, err
-	}
-	if err := addAVP(avp.AuthRequestType, avp.Mbit, 0, datatype.Unsigned32(1)); err != nil {
-		return nil, err
-	}
-	if err := addAVP(avp.AuthSessionState, avp.Mbit, 0, datatype.Unsigned32(1)); err != nil {
-		return nil, err
-	}
-	if err := addAVP(avp.OriginHost, avp.Mbit, 0, df.settings.OriginHost); err != nil {
-		return nil, err
-	}
-	if err := addAVP(avp.OriginRealm, avp.Mbit, 0, df.settings.OriginRealm); err != nil {
-		return nil, err
-	}
-	if err := addAVP(avp.OriginStateID, avp.Mbit, 0, datatype.Unsigned32(1)); err != nil {
-		return nil, err
-	}
-	if err := addAVP(avp.DestinationHost, avp.Mbit, 0, datatype.DiameterIdentity(df.destHost)); err != nil {
-		return nil, err
-	}
-	if err := addAVP(avp.DestinationRealm, avp.Mbit, 0, datatype.DiameterIdentity(df.destRealm)); err != nil {
-		return nil, err
-	}
-	// User-Name: GPSI from sessionID (format: "nssAAF;{nano};{authCtxID}")
-	// Extract the GPSI/authCtxID portion for User-Name AVP.
-	userName := sessionID
-	if len(sessionID) > 0 {
-		// sessionID format: "nssAAF;{unixnano};{authCtxID}"
-		// Use the whole sessionID as User-Name; AAA-S can extract what it needs.
-	}
-	if err := addAVP(avp.UserName, avp.Mbit, 0, datatype.UTF8String(userName)); err != nil {
-		return nil, err
-	}
-	// EAP-Payload AVP (code 209, RFC 4072 §4.2) — M-bit required for NSSAA.
-	if err := addAVP(209, avp.Mbit, 0, datatype.OctetString(eapPayload)); err != nil {
-		return nil, err
-	}
-	// 3GPP-SNSSAI AVP (code 310).
-	snssaiAVP, err := encodeSnssaiAVP(sst, sd)
+	m, err := df.buildDERMessage(conn, hopByHop, sessionID, eapPayload, sst, sd)
 	if err != nil {
-		return nil, fmt.Errorf("diameter_forward: failed to encode SNSSAI: %w", err)
+		return nil, err
 	}
-	m.AddAVP(snssaiAVP)
 
-	// Set deadline on the connection.
 	if deadline, ok := ctx.Deadline(); ok {
 		if dc, ok := conn.(interface {
 			SetWriteDeadline(t time.Time) error
@@ -294,7 +294,6 @@ func (df *diamForwarder) Forward(ctx context.Context, eapPayload []byte, session
 		"eap_len", len(eapPayload),
 	)
 
-	// Wait for response or context cancellation.
 	select {
 	case <-ctx.Done():
 		df.removePending(hopByHop)

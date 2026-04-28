@@ -61,7 +61,7 @@ func DecodeSnssaiAVP(m *diam.Message) (sst uint8, sd string, err error) {
 	if !ok {
 		// Fallback: try as raw octet string (SST only).
 		if os, ok := avps[0].Data.(datatype.OctetString); ok && len(os) >= 1 {
-			return uint8(os[0]), "", nil
+			return os[0], "", nil
 		}
 		return 0, "", fmt.Errorf("diameter: 3GPP-S-NSSAI AVP has unexpected type %T", avps[0].Data)
 	}

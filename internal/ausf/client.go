@@ -60,7 +60,7 @@ func (c *Client) ForwardMSK(ctx context.Context, authCtxID string, msk []byte) e
 	if err != nil {
 		return fmt.Errorf("ausf: forward msk: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("ausf: unexpected status %d", resp.StatusCode)

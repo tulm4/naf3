@@ -53,7 +53,7 @@ func TestGetAuthContext_Success(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -112,7 +112,7 @@ func TestGetAuthContext_EmptyAuthContexts(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -131,7 +131,7 @@ func TestGetAuthContext_InvalidJSON(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{invalid json`))
+		_, _ = w.Write([]byte(`{invalid json`))
 	}))
 	defer server.Close()
 
@@ -189,7 +189,7 @@ func TestGetAuthContext_NRFDiscovery(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer nrfServer.Close()
 
@@ -293,10 +293,10 @@ func TestExtractPLMNFromSupi(t *testing.T) {
 		{"imu-208001000000000", "208001"},
 		{"imu-440010123456789", "440010"},
 		{"imu-310410999999999", "310410"},
-		{"imu-12345", "208001"},       // too short → default
-		{"", "208001"},                 // empty → default
-		{"imu-208", "208001"},         // just enough for "imu-" + MCC = 7 chars → "208001"
-		{"imu-208001", "208001"},     // "imu-"(4) + "208001"(6) = 10 → matches
+		{"imu-12345", "208001"},  // too short → default
+		{"", "208001"},           // empty → default
+		{"imu-208", "208001"},    // just enough for "imu-" + MCC = 7 chars → "208001"
+		{"imu-208001", "208001"}, // "imu-"(4) + "208001"(6) = 10 → matches
 	}
 
 	for _, tt := range tests {

@@ -5,7 +5,6 @@ package gateway
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"log/slog"
 	"net"
@@ -99,6 +98,7 @@ func (h *DiameterHandler) Listen(ctx context.Context, addr, protocol string) err
 		if err != nil {
 			return fmt.Errorf("diameter tcp listen: %w", err)
 		}
+		//nolint:contextcheck
 		go h.serveTCP(listener)
 	case "sctp":
 		listener, err := net.Listen("sctp", addr)
@@ -110,8 +110,10 @@ func (h *DiameterHandler) Listen(ctx context.Context, addr, protocol string) err
 				return fmt.Errorf("diameter tcp fallback listen: %w", err)
 			}
 			h.logger.Info("Diameter falling back to TCP", "addr", addr)
+			//nolint:contextcheck
 			go h.serveTCP(listener)
 		} else {
+			//nolint:contextcheck
 			go h.serveSCTP(listener)
 		}
 	default:
@@ -122,7 +124,7 @@ func (h *DiameterHandler) Listen(ctx context.Context, addr, protocol string) err
 
 // serveTCP accepts incoming TCP connections and handles each with sm.StateMachine.
 func (h *DiameterHandler) serveTCP(listener net.Listener) {
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 	h.logger.Info("Diameter TCP listener started", "addr", listener.Addr())
 
 	for {
@@ -137,7 +139,7 @@ func (h *DiameterHandler) serveTCP(listener net.Listener) {
 
 // serveSCTP accepts incoming SCTP connections and handles each with sm.StateMachine.
 func (h *DiameterHandler) serveSCTP(listener net.Listener) {
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 	h.logger.Info("Diameter SCTP listener started", "addr", listener.Addr())
 
 	for {
@@ -156,7 +158,7 @@ func (h *DiameterHandler) serveSCTP(listener net.Listener) {
 // receive messages. ASR is forwarded to the Biz Pod via forwardToBiz.
 // Spec: RFC 6733 §5.3 (CER/CEA — both peers MUST exchange), §5.5 (DWR/DWA)
 func (h *DiameterHandler) HandleConnection(conn net.Conn) {
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Wrap raw net.Conn with diam.Conn interface.
 	// diam.NewConn starts a goroutine that reads messages and dispatches to the handler.
@@ -295,8 +297,8 @@ func (h *DiameterHandler) sendASA(conn diam.Conn, m *diam.Message) {
 	ans := m.Answer(diam.Success)
 	ans.Header.HopByHopID = m.Header.HopByHopID
 	ans.Header.EndToEndID = m.Header.EndToEndID
-	ans.NewAVP(avp.OriginHost, avp.Mbit, 0, h.sm.Settings().OriginHost)
-	ans.NewAVP(avp.OriginRealm, avp.Mbit, 0, h.sm.Settings().OriginRealm)
+	_, _ = ans.NewAVP(avp.OriginHost, avp.Mbit, 0, h.sm.Settings().OriginHost)
+	_, _ = ans.NewAVP(avp.OriginRealm, avp.Mbit, 0, h.sm.Settings().OriginRealm)
 	_, err := ans.WriteTo(conn)
 	if err != nil {
 		h.logger.Error("failed to send ASA", "error", err)
@@ -308,8 +310,8 @@ func (h *DiameterHandler) sendRAA(conn diam.Conn, m *diam.Message) {
 	ans := m.Answer(diam.Success)
 	ans.Header.HopByHopID = m.Header.HopByHopID
 	ans.Header.EndToEndID = m.Header.EndToEndID
-	ans.NewAVP(avp.OriginHost, avp.Mbit, 0, h.sm.Settings().OriginHost)
-	ans.NewAVP(avp.OriginRealm, avp.Mbit, 0, h.sm.Settings().OriginRealm)
+	_, _ = ans.NewAVP(avp.OriginHost, avp.Mbit, 0, h.sm.Settings().OriginHost)
+	_, _ = ans.NewAVP(avp.OriginRealm, avp.Mbit, 0, h.sm.Settings().OriginRealm)
 	_, err := ans.WriteTo(conn)
 	if err != nil {
 		h.logger.Error("failed to send RAA", "error", err)
@@ -321,8 +323,8 @@ func (h *DiameterHandler) sendSTA(conn diam.Conn, m *diam.Message) {
 	ans := m.Answer(diam.Success)
 	ans.Header.HopByHopID = m.Header.HopByHopID
 	ans.Header.EndToEndID = m.Header.EndToEndID
-	ans.NewAVP(avp.OriginHost, avp.Mbit, 0, h.sm.Settings().OriginHost)
-	ans.NewAVP(avp.OriginRealm, avp.Mbit, 0, h.sm.Settings().OriginRealm)
+	_, _ = ans.NewAVP(avp.OriginHost, avp.Mbit, 0, h.sm.Settings().OriginHost)
+	_, _ = ans.NewAVP(avp.OriginRealm, avp.Mbit, 0, h.sm.Settings().OriginRealm)
 	_, err := ans.WriteTo(conn)
 	if err != nil {
 		h.logger.Error("failed to send STA", "error", err)
@@ -348,27 +350,6 @@ func extractSessionIDFromMsg(m *diam.Message) string {
 				return string(os)
 			}
 		}
-	}
-	return ""
-}
-
-// extractDiameterSessionID extracts the Session-Id AVP from raw bytes.
-// This is used for the legacy manual-parsing path.
-func extractDiameterSessionID(raw []byte) string {
-	if len(raw) < 24 {
-		return ""
-	}
-	pos := 20
-	for pos+8 <= len(raw) {
-		avpCode := binary.BigEndian.Uint32([]byte{0, raw[pos], raw[pos+1], raw[pos+2]})
-		avpLen := int(binary.BigEndian.Uint32([]byte{0, raw[pos+4], raw[pos+5], raw[pos+6]}))
-		if avpLen < 8 || pos+avpLen > len(raw) {
-			break
-		}
-		if avpCode == 263 { // Session-Id
-			return string(raw[pos+8 : pos+avpLen])
-		}
-		pos += avpLen
 	}
 	return ""
 }

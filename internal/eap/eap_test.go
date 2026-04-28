@@ -26,10 +26,10 @@ func TestParse_validRequest(t *testing.T) {
 	pkt, err := Parse(data)
 
 	require.NoError(t, err)
-	assert.Equal(t, EapCodeRequest, pkt.Code)
-	assert.Equal(t, uint8(1), pkt.Id)
+	assert.Equal(t, CodeRequest, pkt.Code)
+	assert.Equal(t, uint8(1), pkt.ID)
 	assert.Equal(t, uint16(9), pkt.Length)
-	assert.Equal(t, byte(EapMethodIdentity), pkt.Type)
+	assert.Equal(t, byte(MethodIdentity), pkt.Type)
 	assert.Equal(t, []byte("Anon"), pkt.Data)
 }
 
@@ -39,10 +39,10 @@ func TestParse_validResponse(t *testing.T) {
 	pkt, err := Parse(data)
 
 	require.NoError(t, err)
-	assert.Equal(t, EapCodeResponse, pkt.Code)
-	assert.Equal(t, uint8(1), pkt.Id)
+	assert.Equal(t, CodeResponse, pkt.Code)
+	assert.Equal(t, uint8(1), pkt.ID)
 	assert.Equal(t, uint16(10), pkt.Length)
-	assert.Equal(t, byte(EapMethodIdentity), pkt.Type)
+	assert.Equal(t, byte(MethodIdentity), pkt.Type)
 	assert.Equal(t, []byte("user@"), pkt.Data)
 }
 
@@ -52,8 +52,8 @@ func TestParse_success(t *testing.T) {
 	pkt, err := Parse(data)
 
 	require.NoError(t, err)
-	assert.Equal(t, EapCodeSuccess, pkt.Code)
-	assert.Equal(t, uint8(2), pkt.Id)
+	assert.Equal(t, CodeSuccess, pkt.Code)
+	assert.Equal(t, uint8(2), pkt.ID)
 	assert.Equal(t, uint16(4), pkt.Length)
 	assert.Equal(t, uint8(0), pkt.Type) // Success has no Type field
 	assert.Empty(t, pkt.Data)           // codec sets Data from data[4:], which is empty
@@ -65,8 +65,8 @@ func TestParse_failure(t *testing.T) {
 	pkt, err := Parse(data)
 
 	require.NoError(t, err)
-	assert.Equal(t, EapCodeFailure, pkt.Code)
-	assert.Equal(t, uint8(3), pkt.Id)
+	assert.Equal(t, CodeFailure, pkt.Code)
+	assert.Equal(t, uint8(3), pkt.ID)
 	assert.Equal(t, uint16(4), pkt.Length)
 }
 
@@ -77,9 +77,9 @@ func TestParse_eapTLS(t *testing.T) {
 	pkt, err := Parse(data)
 
 	require.NoError(t, err)
-	assert.Equal(t, EapCodeRequest, pkt.Code)
-	assert.Equal(t, uint8(5), pkt.Id)
-	assert.Equal(t, byte(EapMethodTLS), pkt.Type)
+	assert.Equal(t, CodeRequest, pkt.Code)
+	assert.Equal(t, uint8(5), pkt.ID)
+	assert.Equal(t, byte(MethodTLS), pkt.Type)
 	assert.Len(t, pkt.Data, 11) // bytes 5-15 = 11 bytes
 }
 
@@ -131,13 +131,13 @@ func TestEncode_successRoundTrip(t *testing.T) {
 
 	require.Len(t, raw, 4)
 	assert.Equal(t, byte(0x03), raw[0]) // Code=Success
-	assert.Equal(t, byte(42), raw[1])   // Id
+	assert.Equal(t, byte(42), raw[1])   // ID
 	assert.Equal(t, []byte{0x00, 0x04}, raw[2:4])
 
 	decoded, err := Parse(raw)
 	require.NoError(t, err)
-	assert.Equal(t, EapCodeSuccess, decoded.Code)
-	assert.Equal(t, uint8(42), decoded.Id)
+	assert.Equal(t, CodeSuccess, decoded.Code)
+	assert.Equal(t, uint8(42), decoded.ID)
 }
 
 func TestEncode_failureRoundTrip(t *testing.T) {
@@ -149,11 +149,11 @@ func TestEncode_failureRoundTrip(t *testing.T) {
 
 	decoded, err := Parse(raw)
 	require.NoError(t, err)
-	assert.Equal(t, EapCodeFailure, decoded.Code)
+	assert.Equal(t, CodeFailure, decoded.Code)
 }
 
 func TestEncode_requestIdentity(t *testing.T) {
-	pkt := BuildRequest(3, EapMethodIdentity, []byte("user@example.com"))
+	pkt := BuildRequest(3, MethodIdentity, []byte("user@example.com"))
 	raw := Encode(pkt)
 
 	// Length = 4 (header) + 1 (type) + len("user@example.com") = 21
@@ -163,28 +163,28 @@ func TestEncode_requestIdentity(t *testing.T) {
 
 	decoded, err := Parse(raw)
 	require.NoError(t, err)
-	assert.Equal(t, EapCodeRequest, decoded.Code)
-	assert.Equal(t, uint8(3), decoded.Id)
-	assert.Equal(t, byte(EapMethodIdentity), decoded.Type)
+	assert.Equal(t, CodeRequest, decoded.Code)
+	assert.Equal(t, uint8(3), decoded.ID)
+	assert.Equal(t, byte(MethodIdentity), decoded.Type)
 	assert.Equal(t, []byte("user@example.com"), decoded.Data)
 }
 
 func TestEncode_responseWithData(t *testing.T) {
 	data := []byte{0x80, 0x00, 0x00, 0x20} // TLS flags
-	pkt := BuildResponse(4, EapMethodTLS, data)
+	pkt := BuildResponse(4, MethodTLS, data)
 	raw := Encode(pkt)
 
 	decoded, err := Parse(raw)
 	require.NoError(t, err)
-	assert.Equal(t, EapCodeResponse, decoded.Code)
-	assert.Equal(t, uint8(4), decoded.Id)
-	assert.Equal(t, byte(EapMethodTLS), decoded.Type)
+	assert.Equal(t, CodeResponse, decoded.Code)
+	assert.Equal(t, uint8(4), decoded.ID)
+	assert.Equal(t, byte(MethodTLS), decoded.Type)
 	assert.Equal(t, data, decoded.Data)
 }
 
 func TestEncode_maxSize(t *testing.T) {
 	largeData := bytes.Repeat([]byte{0xAB}, MaxEAPSize-5)
-	pkt := BuildRequest(1, EapMethodTLS, largeData)
+	pkt := BuildRequest(1, MethodTLS, largeData)
 	assert.Equal(t, uint16(MaxEAPSize), pkt.Length)
 }
 
@@ -193,34 +193,34 @@ func TestEncode_maxSize(t *testing.T) {
 // ============================================================================
 
 func TestBuildRequest(t *testing.T) {
-	pkt := BuildRequest(1, EapMethodTLS, []byte{0x01, 0x02})
+	pkt := BuildRequest(1, MethodTLS, []byte{0x01, 0x02})
 
-	assert.Equal(t, EapCodeRequest, pkt.Code)
-	assert.Equal(t, uint8(1), pkt.Id)
-	assert.Equal(t, byte(EapMethodTLS), pkt.Type)
+	assert.Equal(t, CodeRequest, pkt.Code)
+	assert.Equal(t, uint8(1), pkt.ID)
+	assert.Equal(t, byte(MethodTLS), pkt.Type)
 	assert.Equal(t, uint16(7), pkt.Length)
 	assert.NotNil(t, pkt.RawData)
 }
 
 func TestBuildResponse(t *testing.T) {
-	pkt := BuildResponse(2, EapMethodAKAPrime, []byte("test"))
-	assert.Equal(t, EapCodeResponse, pkt.Code)
-	assert.Equal(t, uint8(2), pkt.Id)
-	assert.Equal(t, byte(EapMethodAKAPrime), pkt.Type)
+	pkt := BuildResponse(2, MethodAKAPrime, []byte("test"))
+	assert.Equal(t, CodeResponse, pkt.Code)
+	assert.Equal(t, uint8(2), pkt.ID)
+	assert.Equal(t, byte(MethodAKAPrime), pkt.Type)
 }
 
 func TestBuildSuccess(t *testing.T) {
 	pkt := BuildSuccess(5)
-	assert.Equal(t, EapCodeSuccess, pkt.Code)
-	assert.Equal(t, uint8(5), pkt.Id)
+	assert.Equal(t, CodeSuccess, pkt.Code)
+	assert.Equal(t, uint8(5), pkt.ID)
 	assert.Equal(t, uint16(4), pkt.Length)
 	assert.Nil(t, pkt.Data)
 }
 
 func TestBuildFailure(t *testing.T) {
 	pkt := BuildFailure(6)
-	assert.Equal(t, EapCodeFailure, pkt.Code)
-	assert.Equal(t, uint8(6), pkt.Id)
+	assert.Equal(t, CodeFailure, pkt.Code)
+	assert.Equal(t, uint8(6), pkt.ID)
 	assert.Equal(t, uint16(4), pkt.Length)
 }
 
@@ -229,56 +229,56 @@ func TestBuildFailure(t *testing.T) {
 // ============================================================================
 
 func TestEapCodeIsValid(t *testing.T) {
-	assert.True(t, EapCodeRequest.IsValid())
-	assert.True(t, EapCodeResponse.IsValid())
-	assert.True(t, EapCodeSuccess.IsValid())
-	assert.True(t, EapCodeFailure.IsValid())
-	assert.False(t, EapCode(5).IsValid())
-	assert.False(t, EapCode(0).IsValid())
+	assert.True(t, CodeRequest.IsValid())
+	assert.True(t, CodeResponse.IsValid())
+	assert.True(t, CodeSuccess.IsValid())
+	assert.True(t, CodeFailure.IsValid())
+	assert.False(t, Code(5).IsValid())
+	assert.False(t, Code(0).IsValid())
 }
 
 func TestEapCodeString(t *testing.T) {
-	assert.Equal(t, "REQUEST", EapCodeRequest.String())
-	assert.Equal(t, "RESPONSE", EapCodeResponse.String())
-	assert.Equal(t, "SUCCESS", EapCodeSuccess.String())
-	assert.Equal(t, "FAILURE", EapCodeFailure.String())
-	assert.Contains(t, EapCode(99).String(), "UNKNOWN")
+	assert.Equal(t, "REQUEST", CodeRequest.String())
+	assert.Equal(t, "RESPONSE", CodeResponse.String())
+	assert.Equal(t, "SUCCESS", CodeSuccess.String())
+	assert.Equal(t, "FAILURE", CodeFailure.String())
+	assert.Contains(t, Code(99).String(), "UNKNOWN")
 }
 
 func TestEapMethodIsValid(t *testing.T) {
-	assert.True(t, EapMethodIdentity.IsValid())
-	assert.True(t, EapMethodNotification.IsValid())
-	assert.True(t, EapMethodNak.IsValid())
-	assert.True(t, EapMethodTLS.IsValid())
-	assert.True(t, EapMethodTTLS.IsValid())
-	assert.True(t, EapMethodPEAP.IsValid())
-	assert.True(t, EapMethodAKAPrime.IsValid())
-	assert.False(t, EapMethod(99).IsValid())
+	assert.True(t, MethodIdentity.IsValid())
+	assert.True(t, MethodNotification.IsValid())
+	assert.True(t, MethodNak.IsValid())
+	assert.True(t, MethodTLS.IsValid())
+	assert.True(t, MethodTTLS.IsValid())
+	assert.True(t, MethodPEAP.IsValid())
+	assert.True(t, MethodAKAPrime.IsValid())
+	assert.False(t, Method(99).IsValid())
 }
 
 func TestEapMethodString(t *testing.T) {
-	assert.Equal(t, "Identity", EapMethodIdentity.String())
-	assert.Equal(t, "EAP-TLS", EapMethodTLS.String())
-	assert.Equal(t, "EAP-AKA'", EapMethodAKAPrime.String())
-	assert.Contains(t, EapMethod(99).String(), "Method")
+	assert.Equal(t, "Identity", MethodIdentity.String())
+	assert.Equal(t, "EAP-TLS", MethodTLS.String())
+	assert.Equal(t, "EAP-AKA'", MethodAKAPrime.String())
+	assert.Contains(t, Method(99).String(), "Method")
 }
 
 func TestEapMethodIsTunneled(t *testing.T) {
-	assert.False(t, EapMethodIdentity.IsTunneled())
-	assert.False(t, EapMethodTLS.IsTunneled())
-	assert.False(t, EapMethodAKAPrime.IsTunneled())
-	assert.True(t, EapMethodTTLS.IsTunneled())
-	assert.True(t, EapMethodPEAP.IsTunneled())
+	assert.False(t, MethodIdentity.IsTunneled())
+	assert.False(t, MethodTLS.IsTunneled())
+	assert.False(t, MethodAKAPrime.IsTunneled())
+	assert.True(t, MethodTTLS.IsTunneled())
+	assert.True(t, MethodPEAP.IsTunneled())
 }
 
 func TestEapTlsFlags(t *testing.T) {
-	var f EapTlsFlags = 0x60 // MoreFragments + Length
+	var f TLSFlags = 0x60 // MoreFragments + Length
 
 	assert.True(t, f.HasMoreFragments())
 	assert.True(t, f.HasLength())
 	assert.False(t, f.HasMoreFragments() == f.HasLength() && false) // sanity
 
-	f2 := EapTlsFlags(0x20)
+	f2 := TLSFlags(0x20)
 	assert.False(t, f2.HasMoreFragments())
 	assert.True(t, f2.HasLength())
 }
@@ -358,12 +358,12 @@ func TestSessionAdvanceFromIdle(t *testing.T) {
 
 func TestSessionRecordResponse(t *testing.T) {
 	session := NewSession("auth-1", "gpsi@test")
-	session.AdvanceToExchange()
+	_ = session.AdvanceToExchange()
 
 	payload := []byte("test-response")
 	session.RecordResponse(5, payload)
 
-	assert.Equal(t, uint8(6), session.ExpectedId) // Id+1
+	assert.Equal(t, uint8(6), session.ExpectedID) // ID+1
 	assert.Equal(t, 2, session.Rounds)
 	assert.NotNil(t, session.LastNonce)
 	assert.Len(t, session.LastNonce, 32) // SHA-256
@@ -645,8 +645,8 @@ func TestFragmentBufferSetTotalLengthAfterData(t *testing.T) {
 
 func TestFragmentBufferReset(t *testing.T) {
 	buf := NewFragmentBuffer("auth-123", 1)
-	buf.SetTotalLength(20)
-	buf.AddFragment(0, []byte("hello"), false)
+	_ = buf.SetTotalLength(20)
+	_, _ = buf.AddFragment(0, []byte("hello"), false)
 
 	buf.Reset()
 	assert.Equal(t, uint16(0), buf.FragmentSeq)
@@ -660,10 +660,10 @@ func TestFragmentBufferSize(t *testing.T) {
 	buf := NewFragmentBuffer("auth-123", 1)
 	assert.Equal(t, 0, buf.Size())
 
-	buf.AddFragment(0, []byte("hello"), true)
+	_, _ = buf.AddFragment(0, []byte("hello"), true)
 	assert.Equal(t, 1, buf.Size())
 
-	buf.AddFragment(1, []byte("world"), false)
+	_, _ = buf.AddFragment(1, []byte("world"), false)
 	assert.Equal(t, 2, buf.Size())
 }
 
@@ -948,11 +948,11 @@ func TestErrors(t *testing.T) {
 // ============================================================================
 
 func TestPacketClone(t *testing.T) {
-	pkt := BuildRequest(1, EapMethodTLS, []byte("test"))
+	pkt := BuildRequest(1, MethodTLS, []byte("test"))
 	clone := pkt.Clone()
 
 	assert.Equal(t, pkt.Code, clone.Code)
-	assert.Equal(t, pkt.Id, clone.Id)
+	assert.Equal(t, pkt.ID, clone.ID)
 	assert.Equal(t, pkt.Type, clone.Type)
 	assert.Equal(t, pkt.Data, clone.Data)
 

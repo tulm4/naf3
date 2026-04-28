@@ -71,7 +71,7 @@ func (c *Client) GetAuthContext(ctx context.Context, supi string) (interface{}, 
 	if err != nil {
 		return nil, fmt.Errorf("udm: get auth context: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotFound {
 		return nil, fmt.Errorf("udm: subscriber %s not found", supi)
@@ -95,7 +95,7 @@ func (c *Client) GetAuthContext(ctx context.Context, supi string) (interface{}, 
 // UpdateAuthContext calls Nudm_UECM_UpdateAuthContext to update auth status.
 // REQ-05: Called after EAP completion to update auth context in UDM.
 // Spec: TS 29.526 §7.3.3.
-func (c *Client) UpdateAuthContext(ctx context.Context, supi, authCtxId, status string) error {
+func (c *Client) UpdateAuthContext(ctx context.Context, supi, authCtxID, status string) error {
 	baseURL := c.baseURL
 	if baseURL == "" && c.nrfClient != nil {
 		plmn := extractPLMNFromSupi(supi)
@@ -106,7 +106,7 @@ func (c *Client) UpdateAuthContext(ctx context.Context, supi, authCtxId, status 
 		baseURL = udmEndpoint
 	}
 
-	url := fmt.Sprintf("%s/nudm-uem/v1/subscribers/%s/auth-contexts/%s", baseURL, supi, authCtxId)
+	url := fmt.Sprintf("%s/nudm-uem/v1/subscribers/%s/auth-contexts/%s", baseURL, supi, authCtxID)
 	payload := map[string]string{"authResult": status}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -123,7 +123,7 @@ func (c *Client) UpdateAuthContext(ctx context.Context, supi, authCtxId, status 
 	if err != nil {
 		return fmt.Errorf("udm: update auth context: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("udm: update status %d", resp.StatusCode)

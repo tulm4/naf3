@@ -31,7 +31,10 @@ type Config struct {
 type RoutingMode int
 
 const (
+	// RoutingModeDirect routes AAA requests directly to NSS-AAA servers.
 	RoutingModeDirect RoutingMode = iota
+	// RoutingModeProxy routes AAA requests through an intermediate proxy.
+	// RoutingModeProxy routes AAA requests through an intermediate proxy.
 	RoutingModeProxy
 )
 

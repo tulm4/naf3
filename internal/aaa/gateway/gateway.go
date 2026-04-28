@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -189,13 +190,13 @@ func (g *Gateway) Stop() {
 	}
 	g.wg.Wait()
 	if g.redis != nil {
-		g.redis.Close()
+		_ = g.redis.Close()
 	}
 	if g.diamForwarder != nil {
-		g.diamForwarder.Close()
+		_ = g.diamForwarder.Close()
 	}
 	if g.radiusForwarder != nil {
-		g.radiusForwarder.Close()
+		_ = g.radiusForwarder.Close()
 	}
 }
 
@@ -290,7 +291,7 @@ func (g *Gateway) HandleForward(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // dispatchResponse dispatches a response event to the appropriate pending channel.
@@ -387,8 +388,8 @@ func (g *Gateway) forwardToBiz(ctx context.Context, sessionID string, transportT
 	}
 	// Drain and close the body to allow connection reuse.
 	// io.Copy is idempotent and safe even if the body is already empty.
-	io.Copy(io.Discard, resp.Body)
-	resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		g.logger.Warn("biz returned non-OK for server-initiated",
@@ -401,7 +402,7 @@ func (g *Gateway) getSessionCorr(ctx context.Context, sessionID string) (*proto.
 	key := proto.SessionCorrKey(sessionID)
 	data, err := g.redis.Get(ctx, key).Bytes()
 	if err != nil {
-		if err == redis.Nil {
+		if errors.Is(err, redis.Nil) {
 			return nil, nil
 		}
 		return nil, err
@@ -425,7 +426,7 @@ func (g *Gateway) publishResponse(ctx context.Context, event *proto.AaaResponseE
 // subscribeResponses subscribes to nssaa:aaa-response and dispatches to pending handlers.
 func (g *Gateway) subscribeResponses(ctx context.Context) {
 	ch := g.redis.PSubscribe(ctx, proto.AaaResponseChannel)
-	defer ch.Close()
+	defer func() { _ = ch.Close() }()
 
 	for {
 		select {
@@ -449,14 +450,14 @@ func (g *Gateway) VIPHealthHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		g.logger.Warn("keepalived state file not readable", "path", statePath, "error", err)
 		w.WriteHeader(http.StatusServiceUnavailable)
-		fmt.Fprintf(w, `{"vip_owner":false,"error":"state file not readable"}`)
+		_, _ = fmt.Fprintf(w, `{"vip_owner":false,"error":"state file not readable"}`)
 		return
 	}
 	if data == "MASTER" {
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, `{"vip_owner":true}`)
+		_, _ = fmt.Fprintf(w, `{"vip_owner":true}`)
 	} else {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		fmt.Fprintf(w, `{"vip_owner":false,"state":"%s"}`, data)
+		_, _ = fmt.Fprintf(w, `{"vip_owner":false,"state":"%s"}`, data)
 	}
 }

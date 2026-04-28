@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"time"
 
@@ -64,7 +65,7 @@ func (c *IdempotencyCache) GetResponse(ctx context.Context, authCtxID string, pa
 	key := idempotencyKey(authCtxID, hashPayload(authCtxID, payload))
 	val, err := c.client.Get(ctx, key).Bytes()
 	if err != nil {
-		if err == redis.Nil {
+		if errors.Is(err, redis.Nil) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("idempotency get: %w", err)

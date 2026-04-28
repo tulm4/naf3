@@ -172,8 +172,8 @@ func (r *Registry) Get(key string) *CircuitBreaker {
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if cb, ok := r.breakers[key]; ok {
-		return cb
+	if cb2, ok := r.breakers[key]; ok {
+		return cb2
 	}
 	cb = NewCircuitBreaker(r.defaultFailureThreshold, r.defaultRecoveryTimeout, time.Duration(r.defaultSuccessThreshold))
 	r.breakers[key] = cb

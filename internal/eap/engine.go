@@ -161,7 +161,7 @@ func (e *Engine) Process(ctx context.Context, authCtxID string, eapPayload []byt
 	if bytesEqual(session.LastNonce, msgHash) && session.CachedResponse != nil {
 		e.logger.Debug("eap_retry_detected",
 			"auth_ctx_id", authCtxID,
-			"id", packet.Id,
+			"id", packet.ID,
 		)
 		respMsg := types.NewEapMessage(session.CachedResponse)
 		return &respMsg, types.AuthResultPending, nil
@@ -196,7 +196,7 @@ func (e *Engine) Process(ctx context.Context, authCtxID string, eapPayload []byt
 }
 
 // advanceState drives the EAP state machine for a given session.
-func (e *Engine) advanceState(ctx context.Context, session *Session, packet *Packet, rawPayload []byte) ([]byte, EapResult, error) {
+func (e *Engine) advanceState(ctx context.Context, session *Session, packet *Packet, rawPayload []byte) ([]byte, Result, error) {
 	switch session.State {
 	case SessionStateInit:
 		return e.handleInit(ctx, session, packet, rawPayload)
@@ -222,18 +222,18 @@ func (e *Engine) advanceState(ctx context.Context, session *Session, packet *Pac
 }
 
 // handleInit processes the first EAP message from AMF.
-func (e *Engine) handleInit(ctx context.Context, session *Session, packet *Packet, rawPayload []byte) ([]byte, EapResult, error) {
-	if packet.Code != EapCodeResponse {
+func (e *Engine) handleInit(ctx context.Context, session *Session, packet *Packet, rawPayload []byte) ([]byte, Result, error) {
+	if packet.Code != CodeResponse {
 		return nil, ResultIgnored, fmt.Errorf("init: expected Response, got %s", packet.Code)
 	}
 
-	session.ExpectedId = packet.Id + 1
+	session.ExpectedID = packet.ID + 1
 	session.Rounds = 1
 	session.State = SessionStateEapExchange
 	session.LastActivity = timeNow()
 
 	// Detect EAP method from identity response.
-	if packet.Type == byte(EapMethodIdentity) {
+	if packet.Type == byte(MethodIdentity) {
 		method := e.detectEapMethodFromIdentity(packet.Data)
 		session.Method = method
 		e.logger.Info("eap_method_detected",
@@ -243,7 +243,7 @@ func (e *Engine) handleInit(ctx context.Context, session *Session, packet *Packe
 	}
 
 	// Forward to AAA-S.
-	resp, _, err := e.forwardToAAA(ctx, session, rawPayload)
+	resp, err := e.forwardToAAA(ctx, session, rawPayload)
 	if resp == nil {
 		return nil, ResultFailure, fmt.Errorf("aaa client returned nil response")
 	}
@@ -251,13 +251,13 @@ func (e *Engine) handleInit(ctx context.Context, session *Session, packet *Packe
 }
 
 // handleExchange processes a mid-session EAP Response from AMF.
-func (e *Engine) handleExchange(ctx context.Context, session *Session, packet *Packet, rawPayload []byte) ([]byte, EapResult, error) {
+func (e *Engine) handleExchange(ctx context.Context, session *Session, packet *Packet, rawPayload []byte) ([]byte, Result, error) {
 	// Validate ID matches expected.
-	if packet.Id != session.ExpectedId {
+	if packet.ID != session.ExpectedID {
 		e.logger.Warn("eap_id_mismatch",
 			"auth_ctx_id", session.AuthCtxID,
-			"expected_id", session.ExpectedId,
-			"got_id", packet.Id,
+			"expected_id", session.ExpectedID,
+			"got_id", packet.ID,
 		)
 		return nil, ResultIgnored, ErrEapIDMismatch
 	}
@@ -274,11 +274,11 @@ func (e *Engine) handleExchange(ctx context.Context, session *Session, packet *P
 	}
 
 	session.Rounds++
-	session.ExpectedId = packet.Id + 1
+	session.ExpectedID = packet.ID + 1
 	session.LastActivity = timeNow()
 
 	// Forward to AAA-S.
-	response, _, err := e.forwardToAAA(ctx, session, rawPayload)
+	response, err := e.forwardToAAA(ctx, session, rawPayload)
 	if err != nil {
 		return nil, ResultFailure, err
 	}
@@ -297,7 +297,7 @@ func (e *Engine) handleExchange(ctx context.Context, session *Session, packet *P
 	session.CacheResponse(response)
 
 	switch respPacket.Code {
-	case EapCodeSuccess:
+	case CodeSuccess:
 		session.MarkDone()
 		e.logger.Info("eap_auth_success",
 			"auth_ctx_id", session.AuthCtxID,
@@ -305,7 +305,7 @@ func (e *Engine) handleExchange(ctx context.Context, session *Session, packet *P
 		)
 		return response, ResultSuccess, nil
 
-	case EapCodeFailure:
+	case CodeFailure:
 		session.MarkFailed()
 		e.logger.Info("eap_auth_failure",
 			"auth_ctx_id", session.AuthCtxID,
@@ -313,7 +313,7 @@ func (e *Engine) handleExchange(ctx context.Context, session *Session, packet *P
 		)
 		return response, ResultFailure, nil
 
-	case EapCodeRequest:
+	case CodeRequest:
 		// Continue exchange.
 		return response, ResultContinue, nil
 
@@ -323,10 +323,10 @@ func (e *Engine) handleExchange(ctx context.Context, session *Session, packet *P
 }
 
 // handleCompleting processes a final EAP message from AMF.
-func (e *Engine) handleCompleting(ctx context.Context, session *Session, packet *Packet, rawPayload []byte) ([]byte, EapResult, error) {
+func (e *Engine) handleCompleting(ctx context.Context, session *Session, packet *Packet, rawPayload []byte) ([]byte, Result, error) {
 	session.Rounds++
-	session.ExpectedId = packet.Id + 1
-	resp, _, err := e.forwardToAAA(ctx, session, rawPayload)
+	session.ExpectedID = packet.ID + 1
+	resp, err := e.forwardToAAA(ctx, session, rawPayload)
 	if resp == nil {
 		return nil, ResultFailure, fmt.Errorf("aaa client returned nil response")
 	}
@@ -334,9 +334,9 @@ func (e *Engine) handleCompleting(ctx context.Context, session *Session, packet 
 }
 
 // forwardToAAA forwards an EAP message to AAA-S and returns the response.
-func (e *Engine) forwardToAAA(ctx context.Context, session *Session, eapPayload []byte) ([]byte, EapResult, error) {
+func (e *Engine) forwardToAAA(ctx context.Context, session *Session, eapPayload []byte) ([]byte, error) {
 	if e.aaaClient == nil {
-		return nil, ResultFailure, errors.New("aaa client not configured")
+		return nil, errors.New("aaa client not configured")
 	}
 
 	e.logger.Debug("eap_forward_to_aaa",
@@ -352,21 +352,21 @@ func (e *Engine) forwardToAAA(ctx context.Context, session *Session, eapPayload 
 			"auth_ctx_id", session.AuthCtxID,
 			"error", err,
 		)
-		return nil, ResultFailure, fmt.Errorf("aaa client error: %w", err)
+		return nil, fmt.Errorf("aaa client error: %w", err)
 	}
 
-	return response, ResultContinue, nil
+	return response, nil
 }
 
 // detectEapMethodFromIdentity inspects the identity string to determine the EAP method.
 // This is a heuristic; AAA-S may override with a NAK response.
-func (e *Engine) detectEapMethodFromIdentity(data []byte) EapMethod {
+func (e *Engine) detectEapMethodFromIdentity(data []byte) Method {
 	if len(data) == 0 {
-		return EapMethodIdentity
+		return MethodIdentity
 	}
 	// Check for common EAP method prefixes in identity.
 	// This is a simplified heuristic; real implementation may consult AAA config.
-	return EapMethodTLS // Default to EAP-TLS for enterprise slices.
+	return MethodTLS // Default to EAP-TLS for enterprise slices.
 }
 
 // DeleteSession removes a session from the manager.
@@ -393,8 +393,8 @@ type EngineStats struct {
 	RoundTimeoutSecs int
 }
 
-// authResultFromEapResult converts an EapResult to an AuthResult.
-func authResultFromEapResult(r EapResult) types.AuthResult {
+// authResultFromEapResult converts a Result to an AuthResult.
+func authResultFromEapResult(r Result) types.AuthResult {
 	switch r {
 	case ResultSuccess:
 		return types.AuthResultSuccess

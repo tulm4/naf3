@@ -20,7 +20,10 @@ import (
 type ProxyMode int
 
 const (
+	// ProxyModeDirect forwards requests directly to NSS-AAA servers.
 	ProxyModeDirect ProxyMode = iota
+	// ProxyModeProxy forwards requests through an intermediate AAA proxy.
+	// ProxyModeProxy forwards requests through an intermediate AAA proxy.
 	ProxyModeProxy
 )
 
@@ -40,7 +43,10 @@ func (m ProxyMode) String() string {
 type Protocol int
 
 const (
+	// ProtocolRADIUS indicates the AAA server uses RADIUS.
 	ProtocolRADIUS Protocol = iota
+	// ProtocolDIAMETER indicates the AAA server uses Diameter.
+	// ProtocolDIAMETER indicates the AAA server uses Diameter.
 	ProtocolDIAMETER
 )
 
@@ -198,9 +204,9 @@ func (r *Router) SendEAP(ctx context.Context, authCtxID string, eapPayload []byt
 
 	switch decision.Protocol {
 	case ProtocolRADIUS:
-		response, err = r.sendRADIUS(ctx, authCtxID, eapPayload, decision)
+		response, err = r.sendRADIUS(ctx, authCtxID, eapPayload)
 	case ProtocolDIAMETER:
-		response, err = r.sendDIAMETER(ctx, authCtxID, eapPayload, decision)
+		response, err = r.sendDIAMETER(ctx, authCtxID, eapPayload)
 	default:
 		return nil, fmt.Errorf("aaa: unsupported protocol: %s", decision.Protocol)
 	}
@@ -224,7 +230,7 @@ func (r *Router) SendEAP(ctx context.Context, authCtxID string, eapPayload []byt
 }
 
 // sendRADIUS forwards an EAP message over RADIUS.
-func (r *Router) sendRADIUS(ctx context.Context, authCtxID string, eapPayload []byte, decision *RouteDecision) ([]byte, error) {
+func (r *Router) sendRADIUS(ctx context.Context, authCtxID string, eapPayload []byte) ([]byte, error) {
 	if r.radiusClient == nil {
 		return nil, fmt.Errorf("aaa: RADIUS client not configured")
 	}
@@ -237,7 +243,7 @@ func (r *Router) sendRADIUS(ctx context.Context, authCtxID string, eapPayload []
 }
 
 // sendDIAMETER forwards an EAP message over Diameter.
-func (r *Router) sendDIAMETER(ctx context.Context, authCtxID string, eapPayload []byte, decision *RouteDecision) ([]byte, error) {
+func (r *Router) sendDIAMETER(ctx context.Context, authCtxID string, eapPayload []byte) ([]byte, error) {
 	if r.diameterClient == nil {
 		return nil, fmt.Errorf("aaa: Diameter client not configured")
 	}

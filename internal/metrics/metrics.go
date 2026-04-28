@@ -56,99 +56,108 @@ func newGaugeVec(opts prometheus.GaugeOpts, labels []string) *prometheus.GaugeVe
 }
 
 var (
-	// Request metrics — REQ-14
+	// RequestsTotal counts total HTTP requests by method, path, and status.
 	RequestsTotal = newCounterVec(prometheus.CounterOpts{
 		Name: "nssAAF_requests_total",
 		Help: "Total NSSAA API requests",
 	}, []string{"service", "endpoint", "method", "status_code"})
 
+	// RequestDuration tracks HTTP request latency.
 	RequestDuration = newHistogramVec(prometheus.HistogramOpts{
 		Name:    "nssAAF_request_duration_seconds",
 		Help:    "NSSAA API request latency",
 		Buckets: []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1},
 	}, []string{"service", "endpoint", "method"})
 
-	// EAP session metrics — REQ-14
+	// EapSessionsActive tracks the number of active EAP sessions by method.
 	EapSessionsActive = newGauge(prometheus.GaugeOpts{
 		Name: "nssAAF_eap_sessions_active",
 		Help: "Number of active EAP sessions",
 	})
 
+	// EapSessionsTotal counts total EAP sessions by method and result.
 	EapSessionsTotal = newCounterVec(prometheus.CounterOpts{
 		Name: "nssAAF_eap_sessions_total",
 		Help: "Total EAP sessions",
 	}, []string{"result"})
 
+	// EapSessionDuration tracks EAP session duration.
 	EapSessionDuration = newHistogramVec(prometheus.HistogramOpts{
 		Name:    "nssAAF_eap_session_duration_seconds",
 		Help:    "EAP session duration",
 		Buckets: []float64{1, 5, 10, 30, 60, 120, 300},
 	}, []string{"eap_method"})
 
+	// EapRounds tracks the number of EAP rounds per session.
 	EapRounds = newHistogram(prometheus.HistogramOpts{
 		Name:    "nssAAF_eap_rounds",
 		Help:    "Number of EAP rounds per session",
 		Buckets: []float64{1, 2, 3, 5, 10, 20},
 	})
 
-	// AAA protocol metrics — REQ-14
+	// AaaRequestsTotal counts AAA requests by protocol and result.
 	AaaRequestsTotal = newCounterVec(prometheus.CounterOpts{
 		Name: "nssAAF_aaa_requests_total",
 		Help: "Total AAA protocol requests",
 	}, []string{"protocol", "server", "result"})
 
+	// AaaRequestDuration tracks AAA request latency.
 	AaaRequestDuration = newHistogramVec(prometheus.HistogramOpts{
 		Name:    "nssAAF_aaa_request_duration_seconds",
 		Help:    "AAA request latency",
 		Buckets: []float64{.001, .005, .01, .025, .05, .1, .25, .5},
 	}, []string{"protocol", "server"})
 
-	// Database metrics — REQ-14
+	// DbQueryDuration tracks database query latency.
 	DbQueryDuration = newHistogramVec(prometheus.HistogramOpts{
 		Name:    "nssAAF_db_query_duration_seconds",
 		Help:    "Database query latency",
 		Buckets: []float64{.001, .002, .005, .01, .025, .05, .1},
 	}, []string{"operation", "table"})
 
+	// DbConnectionsActive tracks active database connections.
 	DbConnectionsActive = newGauge(prometheus.GaugeOpts{
 		Name: "nssAAF_db_connections_active",
 		Help: "Active database connections",
 	})
 
-	// Redis metrics — REQ-14
+	// RedisOperationsTotal counts Redis operations by type and result.
 	RedisOperationsTotal = newCounterVec(prometheus.CounterOpts{
 		Name: "nssAAF_redis_operations_total",
 		Help: "Total Redis operations",
 	}, []string{"operation", "result"})
 
-	// Circuit breaker metrics — REQ-14
+	// CircuitBreakerState tracks circuit breaker state by key.
 	CircuitBreakerState = newGaugeVec(prometheus.GaugeOpts{
 		Name: "nssAAF_circuit_breaker_state",
 		Help: "Circuit breaker state (0=closed, 1=open, 2=half-open)",
 	}, []string{"server"})
 
+	// CircuitBreakerFailures tracks circuit breaker failures.
 	CircuitBreakerFailures = newCounterVec(prometheus.CounterOpts{
 		Name: "nssAAF_circuit_breaker_failures_total",
 		Help: "Total circuit breaker recorded failures",
 	}, []string{"server"})
 
-	// NRF discovery cache metrics — REQ-14
+	// NrfCacheHits tracks NRF discovery cache hit/miss ratio.
 	NrfCacheHits = newCounterVec(prometheus.CounterOpts{
 		Name: "nssAAF_nrf_cache_hits_total",
 		Help: "NRF cache hits",
 	}, nil)
 
+	// NrfCacheMisses tracks NRF cache misses.
 	NrfCacheMisses = newCounterVec(prometheus.CounterOpts{
 		Name: "nssAAF_nrf_cache_misses_total",
 		Help: "NRF cache misses",
 	}, nil)
 
-	// DLQ metrics — REQ-14
+	// DLQDepth tracks the depth of the dead letter queue.
 	DLQDepth = newGauge(prometheus.GaugeOpts{
 		Name: "nssAAF_dlq_depth",
 		Help: "Number of items in AMF notification DLQ",
 	})
 
+	// DLQProcessed tracks processed DLQ items.
 	DLQProcessed = newCounterVec(prometheus.CounterOpts{
 		Name: "nssAAF_dlq_processed_total",
 		Help: "Total DLQ items processed",

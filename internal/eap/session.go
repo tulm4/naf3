@@ -40,14 +40,14 @@ type Session struct {
 
 	// Current state
 	State  SessionState
-	Method EapMethod
+	Method Method
 
 	// Counters
 	Rounds    int
 	MaxRounds int
 
 	// Sequence (RFC 3748 §4)
-	ExpectedId uint8 // Next expected EAP ID for incoming Response
+	ExpectedID uint8 // Next expected EAP ID for incoming Response
 
 	// Cached response for idempotent retries
 	LastNonce      []byte // SHA-256 hash of last processed EAP message
@@ -67,12 +67,20 @@ type Session struct {
 type SessionState int
 
 const (
+	// SessionStateIdle means the session has been created but not yet started.
 	SessionStateIdle SessionState = iota
+	// SessionStateInit is the initial state after session creation.
+	// SessionStateInit is the initial state after session creation.
 	SessionStateInit
+	// SessionStateEapExchange is the active multi-round EAP authentication phase.
 	SessionStateEapExchange // multi-round EAP authentication
-	SessionStateCompleting  // waiting for final AAA-S response
+	// SessionStateCompleting is the final round, waiting for AAA-S response.
+	SessionStateCompleting // waiting for final AAA-S response
+	// SessionStateDone is the successful terminal state.
 	SessionStateDone
+	// SessionStateFailed is the terminal failure state.
 	SessionStateFailed
+	// SessionStateTimeout is the terminal timeout state.
 	SessionStateTimeout
 )
 
@@ -112,7 +120,7 @@ func NewSession(authCtxID, gpsi string) *Session {
 		State:        SessionStateInit,
 		MaxRounds:    DefaultMaxRounds,
 		Timeout:      DefaultRoundTimeout,
-		ExpectedId:   0, // Will be set on first Response
+		ExpectedID:   0, // Will be set on first Response
 		CreatedAt:    now,
 		LastActivity: now,
 	}
@@ -149,7 +157,7 @@ func (s *Session) AdvanceToExchange() error {
 
 // RecordResponse records an incoming Response and updates expected ID.
 func (s *Session) RecordResponse(id uint8, payload []byte) {
-	s.ExpectedId = id + 1
+	s.ExpectedID = id + 1
 	s.Rounds++
 	s.LastActivity = time.Now()
 	h := sha256.Sum256(payload)
@@ -218,7 +226,7 @@ type TLSSessionState struct {
 	MSK []byte
 
 	// Flags from most recent EAP-TLS packet
-	Flags EapTlsFlags
+	Flags TLSFlags
 
 	// Accumulated TLS data across fragments
 	TLSData []byte

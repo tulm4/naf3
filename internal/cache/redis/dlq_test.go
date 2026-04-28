@@ -22,7 +22,7 @@ func TestNewDLQ(t *testing.T) {
 		DialTimeout:  100 * time.Millisecond,
 	})
 	require.NoError(t, err)
-	defer pool.Close()
+	defer func() { _ = pool.Close() }()
 
 	dlq := NewDLQ(pool)
 	assert.NotNil(t, dlq)
@@ -40,7 +40,7 @@ func TestDLQ_Enqueue(t *testing.T) {
 		DialTimeout:  100 * time.Millisecond,
 	})
 	require.NoError(t, err)
-	defer pool.Close()
+	defer func() { _ = pool.Close() }()
 
 	dlq := NewDLQ(pool)
 
@@ -70,7 +70,7 @@ func TestDLQ_Len(t *testing.T) {
 		DialTimeout:  100 * time.Millisecond,
 	})
 	require.NoError(t, err)
-	defer pool.Close()
+	defer func() { _ = pool.Close() }()
 
 	dlq := NewDLQ(pool)
 
@@ -82,8 +82,8 @@ func TestDLQ_Len(t *testing.T) {
 	// Add items
 	for i := 0; i < 3; i++ {
 		item := &AMFDLQItem{ID: "item-" + string(rune('a'+i))}
-		err := dlq.Enqueue(context.Background(), item)
-		require.NoError(t, err)
+		enqErr := dlq.Enqueue(context.Background(), item)
+		require.NoError(t, enqErr)
 	}
 
 	length, err = dlq.Len(context.Background())

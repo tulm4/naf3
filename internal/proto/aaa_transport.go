@@ -13,7 +13,9 @@ import (
 type TransportType string
 
 const (
-	TransportRADIUS   TransportType = "RADIUS"
+	// TransportRADIUS indicates RADIUS transport.
+	TransportRADIUS TransportType = "RADIUS"
+	// TransportDIAMETER indicates Diameter transport.
 	TransportDIAMETER TransportType = "DIAMETER"
 )
 
@@ -21,7 +23,9 @@ const (
 type Direction string
 
 const (
+	// DirectionClientInitiated means the request was initiated by the client.
 	DirectionClientInitiated Direction = "CLIENT_INITIATED"
+	// DirectionServerInitiated means the request was initiated by the server.
 	DirectionServerInitiated Direction = "SERVER_INITIATED"
 )
 
@@ -29,8 +33,11 @@ const (
 type MessageType string
 
 const (
+	// MessageTypeRAR represents a RADIUS Re-Auth-Request (RFC 5176).
 	MessageTypeRAR MessageType = "RAR" // RADIUS Re-Auth-Request (RFC 5176)
+	// MessageTypeASR represents a Diameter Abort-Session-Request (RFC 6733).
 	MessageTypeASR MessageType = "ASR" // Diameter Abort-Session-Request (RFC 6733)
+	// MessageTypeCoA represents a RADIUS Change-of-Authorization (RFC 5176).
 	MessageTypeCoA MessageType = "COA" // RADIUS Change-of-Authorization (RFC 5176)
 )
 

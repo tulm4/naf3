@@ -19,7 +19,10 @@ import (
 type NotificationType string
 
 const (
-	NotificationTypeReAuth     NotificationType = "reauth"
+	// NotificationTypeReAuth indicates a slice re-authentication notification.
+	// NotificationTypeReAuth indicates a slice re-authentication notification.
+	NotificationTypeReAuth NotificationType = "reauth"
+	// NotificationTypeRevocation indicates a slice authorization revocation notification.
 	NotificationTypeRevocation NotificationType = "revocation"
 )
 
@@ -137,7 +140,7 @@ func (c *Client) sendNotification(ctx context.Context, typ NotificationType, uri
 			cb.RecordFailure()
 			return fmt.Errorf("amf: send %s: %w", typ, err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode >= 500 {
 			cb.RecordFailure()
@@ -172,7 +175,7 @@ func (c *Client) sendNotification(ctx context.Context, typ NotificationType, uri
 				"notify_error", err,
 				"dlq_error", dlqErr,
 			)
-			return fmt.Errorf("notification failed and dlq enqueue failed: %w (dlq: %v)", err, dlqErr)
+			return fmt.Errorf("notification failed and dlq enqueue failed: %w (dlq: %w)", err, dlqErr)
 		}
 		slog.Warn("amf notification: sent to DLQ after retries exhausted",
 			"auth_ctx_id", authCtxID,

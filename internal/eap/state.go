@@ -9,26 +9,26 @@ import (
 // EAP packet codes as defined in RFC 3748 §4.
 // Spec: RFC 3748 §4
 const (
-	EapCodeRequest  EapCode = 1
-	EapCodeResponse EapCode = 2
-	EapCodeSuccess  EapCode = 3
-	EapCodeFailure  EapCode = 4
+	CodeRequest  Code = 1
+	CodeResponse Code = 2
+	CodeSuccess  Code = 3
+	CodeFailure  Code = 4
 )
 
-// EapCode represents the code of an EAP packet.
+// Code represents the code of an EAP packet.
 // Spec: RFC 3748 §4
-type EapCode uint8
+type Code uint8
 
 // String implements fmt.Stringer.
-func (c EapCode) String() string {
+func (c Code) String() string {
 	switch c {
-	case EapCodeRequest:
+	case CodeRequest:
 		return "REQUEST"
-	case EapCodeResponse:
+	case CodeResponse:
 		return "RESPONSE"
-	case EapCodeSuccess:
+	case CodeSuccess:
 		return "SUCCESS"
-	case EapCodeFailure:
+	case CodeFailure:
 		return "FAILURE"
 	default:
 		return fmt.Sprintf("UNKNOWN(%d)", c)
@@ -36,41 +36,41 @@ func (c EapCode) String() string {
 }
 
 // IsValid reports whether c is a known EAP code.
-func (c EapCode) IsValid() bool {
-	return c >= EapCodeRequest && c <= EapCodeFailure
+func (c Code) IsValid() bool {
+	return c >= CodeRequest && c <= CodeFailure
 }
 
 // EAP method types.
 // Spec: RFC 3748 §5, TS 33.501 §5.13
 const (
-	EapMethodIdentity     EapMethod = 1  // EAP-Identity/NAK
-	EapMethodNotification EapMethod = 2  // RFC 3748 §5.2
-	EapMethodNak          EapMethod = 3  // RFC 3748 §5.3
-	EapMethodTLS          EapMethod = 13 // EAP-TLS (RFC 5216)
-	EapMethodTTLS         EapMethod = 21 // EAP-TTLS (RFC 5281)
-	EapMethodPEAP         EapMethod = 26 // PEAP
-	EapMethodAKAPrime     EapMethod = 50 // EAP-AKA' (RFC 5448)
+	MethodIdentity     Method = 1  // EAP-Identity/NAK
+	MethodNotification Method = 2  // RFC 3748 §5.2
+	MethodNak          Method = 3  // RFC 3748 §5.3
+	MethodTLS          Method = 13 // EAP-TLS (RFC 5216)
+	MethodTTLS         Method = 21 // EAP-TTLS (RFC 5281)
+	MethodPEAP         Method = 26 // PEAP
+	MethodAKAPrime     Method = 50 // EAP-AKA' (RFC 5448)
 )
 
-// EapMethod represents an EAP authentication method.
-type EapMethod uint8
+// Method represents an EAP authentication method.
+type Method uint8
 
 // String implements fmt.Stringer.
-func (m EapMethod) String() string {
+func (m Method) String() string {
 	switch m {
-	case EapMethodIdentity:
+	case MethodIdentity:
 		return "Identity"
-	case EapMethodNotification:
+	case MethodNotification:
 		return "Notification"
-	case EapMethodNak:
+	case MethodNak:
 		return "NAK"
-	case EapMethodTLS:
+	case MethodTLS:
 		return "EAP-TLS"
-	case EapMethodTTLS:
+	case MethodTTLS:
 		return "EAP-TTLS"
-	case EapMethodPEAP:
+	case MethodPEAP:
 		return "PEAP"
-	case EapMethodAKAPrime:
+	case MethodAKAPrime:
 		return "EAP-AKA'"
 	default:
 		return fmt.Sprintf("Method(%d)", m)
@@ -78,10 +78,10 @@ func (m EapMethod) String() string {
 }
 
 // IsValid reports whether m is a known EAP method.
-func (m EapMethod) IsValid() bool {
+func (m Method) IsValid() bool {
 	switch m {
-	case EapMethodIdentity, EapMethodNotification, EapMethodNak,
-		EapMethodTLS, EapMethodTTLS, EapMethodPEAP, EapMethodAKAPrime:
+	case MethodIdentity, MethodNotification, MethodNak,
+		MethodTLS, MethodTTLS, MethodPEAP, MethodAKAPrime:
 		return true
 	default:
 		return false
@@ -89,9 +89,9 @@ func (m EapMethod) IsValid() bool {
 }
 
 // IsTunneled reports whether m is a tunneled method that wraps other methods.
-func (m EapMethod) IsTunneled() bool {
+func (m Method) IsTunneled() bool {
 	switch m {
-	case EapMethodTTLS, EapMethodPEAP:
+	case MethodTTLS, MethodPEAP:
 		return true
 	default:
 		return false
@@ -101,33 +101,39 @@ func (m EapMethod) IsTunneled() bool {
 // EAP-TLS flags as defined in RFC 5216 §2.1.5.
 // Spec: RFC 5216 §2.1.5
 const (
-	EapTlsFlagsMoreFrags EapTlsFlags = 0x40 // More fragments follow
-	EapTlsFlagsLength    EapTlsFlags = 0x20 // Total length field is present
-	EapTlsFlagsReserved  EapTlsFlags = 0x1F // Reserved (must be zero)
+	TLSFlagsMoreFrags TLSFlags = 0x40 // More fragments follow
+	TLSFlagsLength    TLSFlags = 0x20 // Total length field is present
+	TLSFlagsReserved  TLSFlags = 0x1F // Reserved (must be zero)
 )
 
-// EapTlsFlags represents the flags field in EAP-TLS packets.
-type EapTlsFlags uint8
+// TLSFlags represents the flags field in EAP-TLS packets.
+type TLSFlags uint8
 
 // HasMoreFragments returns true if the More Fragments flag is set.
-func (f EapTlsFlags) HasMoreFragments() bool { return f&EapTlsFlagsMoreFrags != 0 }
+func (f TLSFlags) HasMoreFragments() bool { return f&TLSFlagsMoreFrags != 0 }
 
 // HasLength returns true if the Length flag is set.
-func (f EapTlsFlags) HasLength() bool { return f&EapTlsFlagsLength != 0 }
+func (f TLSFlags) HasLength() bool { return f&TLSFlagsLength != 0 }
 
-// EapResult describes the outcome of an EAP round.
-type EapResult int
+// Result describes the outcome of an EAP round.
+type Result int
 
 const (
-	ResultContinue EapResult = iota // More rounds needed
-	ResultSuccess                   // EAP-Success received
-	ResultFailure                   // EAP-Failure received
-	ResultIgnored                   // Message ignored (duplicate/out-of-order)
-	ResultTimeout                   // No response within timeout
+	// ResultContinue means more rounds are needed.
+	ResultContinue Result = iota // More rounds needed
+	// ResultSuccess means EAP authentication succeeded.
+	// ResultSuccess means EAP authentication succeeded.
+	ResultSuccess // EAP-Success received
+	// ResultFailure means EAP authentication failed.
+	ResultFailure // EAP-Failure received
+	// ResultIgnored means the message was ignored (duplicate or out-of-order).
+	ResultIgnored // Message ignored (duplicate/out-of-order)
+	// ResultTimeout means no response was received within the timeout period.
+	ResultTimeout // No response within timeout
 )
 
 // String implements fmt.Stringer.
-func (r EapResult) String() string {
+func (r Result) String() string {
 	switch r {
 	case ResultContinue:
 		return "CONTINUE"
@@ -140,6 +146,6 @@ func (r EapResult) String() string {
 	case ResultTimeout:
 		return "TIMEOUT"
 	default:
-		return fmt.Sprintf("EapResult(%d)", r)
+		return fmt.Sprintf("Result(%d)", r)
 	}
 }

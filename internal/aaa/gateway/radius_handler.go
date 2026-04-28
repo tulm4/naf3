@@ -3,6 +3,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -36,7 +37,7 @@ func (h *RadiusHandler) Listen(ctx context.Context, addr string) {
 		h.logger.Error("failed to listen on RADIUS UDP", "addr", addr, "error", err)
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	h.logger.Info("RADIUS UDP listener started", "addr", conn.LocalAddr())
 
@@ -46,10 +47,11 @@ func (h *RadiusHandler) Listen(ctx context.Context, addr string) {
 		case <-ctx.Done():
 			return
 		default:
-			conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+			_ = conn.SetReadDeadline(time.Now().Add(1 * time.Second))
 			n, clientAddr, err := conn.ReadFromUDP(buf)
 			if err != nil {
-				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				var netErr net.Error
+				if errors.As(err, &netErr) && netErr.Timeout() {
 					continue
 				}
 				h.logger.Error("RADIUS read error", "error", err)
@@ -61,7 +63,7 @@ func (h *RadiusHandler) Listen(ctx context.Context, addr string) {
 }
 
 // handlePacket processes an incoming RADIUS packet from AAA-S.
-func (h *RadiusHandler) handlePacket(ctx context.Context, conn *net.UDPConn, addr *net.UDPAddr, raw []byte) {
+func (h *RadiusHandler) handlePacket(ctx context.Context, _ *net.UDPConn, addr *net.UDPAddr, raw []byte) {
 	if len(raw) < 4 {
 		h.logger.Warn("radius_packet_too_short", "len", len(raw))
 		return
@@ -147,14 +149,4 @@ func extractSessionID(raw []byte) string {
 		pos += attrLen
 	}
 	return ""
-}
-
-// sendRARnak sends a RAR-Nak (CoA-Nak) response to AAA-S.
-// TODO: Implement fully with RFC 5176 §3.2: RAR-Nak = Access-Reject (code=2) with
-// Error-Cause AVP (Type=161, Vendor-ID=0) = 20051 (Session-Not-Found).
-// For now, logs a warning and drops the packet.
-func sendRARnak(logger *slog.Logger, originalPacket []byte) {
-	logger.Warn("rar_nak_not_implemented",
-		"note", "RFC 5176 §3.2: send Error-Cause 20051 back to AAA-S",
-		"session_id", "unknown")
 }

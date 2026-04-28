@@ -56,7 +56,7 @@ func (m *mockAAAClient) SendEAP(ctx context.Context, authCtxID string, eapPayloa
 
 	delay := m.delay
 	responses := m.responses
-	defaultResp := BuildRequest(1, EapMethodIdentity, []byte("server-challenge")).RawData
+	defaultResp := BuildRequest(1, MethodIdentity, []byte("server-challenge")).RawData
 
 	// Release the lock before sleeping so other goroutines aren't blocked.
 	m.mu.Unlock()
@@ -242,7 +242,7 @@ func TestProcessFirstResponse(t *testing.T) {
 	require.NoError(t, err)
 
 	// Build EAP-Response/Identity from AMF.
-	eapResp := BuildResponse(1, EapMethodIdentity, []byte("user@test"))
+	eapResp := BuildResponse(1, MethodIdentity, []byte("user@test"))
 	eapData := eapResp.RawData
 
 	// Process.
@@ -287,7 +287,7 @@ func TestProcessSessionTimeout(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 
 	// Process should detect timeout.
-	eapResp := BuildResponse(1, EapMethodIdentity, []byte("user@test"))
+	eapResp := BuildResponse(1, MethodIdentity, []byte("user@test"))
 	_, _, err = engine.Process(context.Background(), "auth-timeout", eapResp.RawData)
 	assert.ErrorIs(t, err, ErrSessionTimeout)
 }
@@ -304,7 +304,7 @@ func TestProcessRetry(t *testing.T) {
 	_, err := engine.StartSession("auth-retry", "user@test")
 	require.NoError(t, err)
 
-	eapResp := BuildResponse(1, EapMethodIdentity, []byte("user@test"))
+	eapResp := BuildResponse(1, MethodIdentity, []byte("user@test"))
 	eapData := eapResp.RawData
 
 	// First call.
@@ -332,14 +332,14 @@ func TestProcessEAPSuccess(t *testing.T) {
 	require.NoError(t, err)
 
 	// Set up: first response triggers a second exchange, second response is Success.
-	mock.SetResponse("auth-success", BuildRequest(2, EapMethodTLS, []byte{0x00}).RawData)
+	mock.SetResponse("auth-success", BuildRequest(2, MethodTLS, []byte{0x00}).RawData)
 	mock.SetResponse("auth-success", BuildSuccess(2).RawData)
 
-	eapResp1 := BuildResponse(1, EapMethodIdentity, []byte("user@test"))
+	eapResp1 := BuildResponse(1, MethodIdentity, []byte("user@test"))
 	_, _, err = engine.Process(context.Background(), "auth-success", eapResp1.RawData)
 	require.NoError(t, err)
 
-	eapResp2 := BuildResponse(2, EapMethodTLS, []byte{0x01, 0x02})
+	eapResp2 := BuildResponse(2, MethodTLS, []byte{0x01, 0x02})
 	eapMsg, result, err := engine.Process(context.Background(), "auth-success", eapResp2.RawData)
 	require.NoError(t, err)
 	assert.Equal(t, types.AuthResultSuccess, result)
@@ -364,7 +364,7 @@ func TestProcessEAPFailure(t *testing.T) {
 	// AMF translates the EAP-Failure into the final NSSAA result.
 	mock.SetResponse("auth-fail", BuildFailure(1).RawData)
 
-	eapResp := BuildResponse(1, EapMethodIdentity, []byte("user@test"))
+	eapResp := BuildResponse(1, MethodIdentity, []byte("user@test"))
 	eapMsg, result, err := engine.Process(context.Background(), "auth-fail", eapResp.RawData)
 	require.NoError(t, err)
 	assert.Equal(t, types.AuthResultPending, result)
@@ -375,7 +375,7 @@ func TestProcessEAPFailure(t *testing.T) {
 	require.NoError(t, decodeErr, "eapMsg should contain valid base64")
 	eapPkt, parseErr := Parse(eapBytes)
 	require.NoError(t, parseErr)
-	assert.Equal(t, EapCodeFailure, eapPkt.Code)
+	assert.Equal(t, CodeFailure, eapPkt.Code)
 }
 
 // ---------------------------------------------------------------------------
@@ -393,7 +393,7 @@ func TestProcessAAAError(t *testing.T) {
 	// Configure AAA to fail on next call.
 	mock.SetNextFailure(errors.New("AAA connection refused"))
 
-	eapResp := BuildResponse(1, EapMethodIdentity, []byte("user@test"))
+	eapResp := BuildResponse(1, MethodIdentity, []byte("user@test"))
 	_, _, err = engine.Process(context.Background(), "auth-aaa-err", eapResp.RawData)
 	assert.Error(t, err)
 }
@@ -410,7 +410,7 @@ func TestProcessNilResponseFromAAA(t *testing.T) {
 	// Set AAA to return a nil response.
 	mock.SetResponse("auth-nil-resp", nil)
 
-	eapResp := BuildResponse(1, EapMethodIdentity, []byte("user@test"))
+	eapResp := BuildResponse(1, MethodIdentity, []byte("user@test"))
 	_, _, processErr := engine.Process(context.Background(), "auth-nil-resp", eapResp.RawData)
 	// Should return an error, not nil. The old code would panic on nil dereference.
 	require.Error(t, processErr, "nil response should produce an error, not panic")
@@ -433,7 +433,7 @@ func TestProcessContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 
-	eapResp := BuildResponse(1, EapMethodIdentity, []byte("user@test"))
+	eapResp := BuildResponse(1, MethodIdentity, []byte("user@test"))
 	_, _, err = engine.Process(ctx, "auth-cancel", eapResp.RawData)
 	assert.Error(t, err) // either timeout or context error
 }
@@ -471,7 +471,7 @@ func TestProcessMaxRoundsExceeded(t *testing.T) {
 
 	// Keep sending responses until max rounds.
 	for i := uint8(1); i <= 4; i++ {
-		eapResp := BuildResponse(i, EapMethodTLS, []byte{0x01})
+		eapResp := BuildResponse(i, MethodTLS, []byte{0x01})
 		_, _, _ = engine.Process(context.Background(), "auth-max-rounds", eapResp.RawData)
 	}
 
@@ -494,12 +494,12 @@ func TestProcessIdMismatch(t *testing.T) {
 	require.NoError(t, err)
 
 	// First response sets ExpectedId=2.
-	eapResp1 := BuildResponse(1, EapMethodIdentity, []byte("user@test"))
+	eapResp1 := BuildResponse(1, MethodIdentity, []byte("user@test"))
 	_, _, err = engine.Process(context.Background(), "auth-id-mismatch", eapResp1.RawData)
 	require.NoError(t, err)
 
 	// Second response with Id=5 (not 2).
-	eapResp2 := BuildResponse(5, EapMethodTLS, []byte{0x01})
+	eapResp2 := BuildResponse(5, MethodTLS, []byte{0x01})
 	_, _, err = engine.Process(context.Background(), "auth-id-mismatch", eapResp2.RawData)
 	assert.ErrorIs(t, err, ErrEapIDMismatch)
 }
@@ -517,7 +517,7 @@ func TestProcessDoneSession(t *testing.T) {
 	require.NoError(t, err)
 	session.MarkDone()
 
-	eapResp := BuildResponse(1, EapMethodIdentity, []byte("user@test"))
+	eapResp := BuildResponse(1, MethodIdentity, []byte("user@test"))
 	_, _, err = engine.Process(context.Background(), "auth-done", eapResp.RawData)
 	assert.ErrorIs(t, err, ErrSessionAlreadyDone)
 }
@@ -531,7 +531,7 @@ func TestProcessFailedSession(t *testing.T) {
 	require.NoError(t, err)
 	session.MarkFailed()
 
-	eapResp := BuildResponse(1, EapMethodIdentity, []byte("user@test"))
+	eapResp := BuildResponse(1, MethodIdentity, []byte("user@test"))
 	_, _, err = engine.Process(context.Background(), "auth-failed", eapResp.RawData)
 	assert.ErrorIs(t, err, ErrSessionAlreadyDone)
 }
