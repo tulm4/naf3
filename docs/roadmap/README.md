@@ -59,7 +59,7 @@ make run-aaa-gateway  # AAA GW on :9090
 | **Phase R: 3-Component Refactor** | ✅ DONE | `internal/proto/`, `cmd/biz/`, `cmd/http-gateway/`, `cmd/aaa-gateway/`, `internal/aaa/gateway/` |
 | Phase 4: NF Integration & Observability | ✅ DONE | `internal/nrf/` (NRF client wired, startup registration, heartbeat), `internal/udm/` (Nudm_UECM_Get wired to N58 handler, UpdateAuthContext), `internal/amf/` (AMF notifier wired, Re-Auth/Revocation POSTs), `internal/ausf/` (AUSF N60 client, MSK forwarding), `internal/resilience/` (circuit breaker, retry), `internal/metrics/` (Prometheus metrics), `internal/logging/` (structured JSON logging), `internal/tracing/` (OpenTelemetry), `cmd/biz/main.go` (full NF wiring) |
 | Phase 5: Security & Crypto | ✅ DONE | `internal/auth/` (JWT validation, JWKS cache, scope enforcement), `internal/crypto/` (AES-256-GCM, KEK/DEK, KeyManager, VaultKeyManager, SoftHSMKeyManager, secret encryption) |
-| Phase 6: Integration Testing & NRM | ⏳ PENDING | `test/`, `internal/nrm/` |
+| Phase 6: Integration Testing & NRM | 🔄 IN PROGRESS | `test/`, `internal/nrm/` (Wave 2: NRM RESTCONF + AlarmManager — DONE) |
 | Phase 7: Kubernetes Deployment | ⏳ PENDING | `deployments/helm/`, `deployments/kustomize/`, `deployments/argo/` |
 | Phase 8: Performance & Load Testing | ⏳ PENDING | `test/load/`, chaos testing |
 
@@ -96,7 +96,7 @@ make run-aaa-gateway  # AAA GW on :9090
 | `internal/tracing/` | `docs/roadmap/PHASE_4_NFIntegration_Observability.md` | 4 | TBD |
 | `internal/auth/` | `docs/design/15_sbi_security.md`, `docs/design/16_aaa_security.md`, `docs/roadmap/PHASE_5_Security_Crypto.md` | 5 | TBD |
 | `internal/crypto/` | `docs/design/17_crypto.md`, `docs/roadmap/PHASE_5_Security_Crypto.md` | 5 | TBD |
-| `internal/nrm/` | `docs/design/18_nrm_fcaps.md`, `docs/roadmap/PHASE_6_Testing_NRM.md` | 6 | TBD |
+| `internal/nrm/` | `docs/design/18_nrm_fcaps.md`, `docs/roadmap/PHASE_6_Testing_NRM.md` | 6 | READY — NRM RESTCONF + AlarmManager (Wave 2) |
 | *(cross-cutting)* | `docs/design/19_observability.md` | 4 | TBD |
 | *(cross-cutting)* | `docs/design/20_config_management.md` | ALL | TBD |
 | *(cross-cutting)* | `docs/design/24_test_strategy.md` | 6 | TBD |
