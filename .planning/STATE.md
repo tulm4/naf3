@@ -41,7 +41,7 @@ See: `.planning/PROJECT.md` (updated 2026-04-25)
 | R: 3-Component Refactor | ✅ Done | HTTP GW, Biz Pod, AAA GW |
 | 4: NF Integration & Observability | ✅ Done | 5 plans, 26 tasks, 5 waves — REQ-01 to REQ-19 |
 | 5: Security & Crypto | ✅ Done | TLS, mTLS, KEK/DEK, KeyManager, Vault, SoftHSM |
-| 6: Integration Testing & NRM | ⏳ In Progress | 6 plans — 5/5 done (PLAN-1 through PLAN-5) |
+| 6: Integration Testing & NRM | ✅ Done | 6 plans — PLAN-1 through PLAN-5 complete, PLAN-4 done (9 integration test files) |
 | 7: Kubernetes Deployment | ⏳ Pending | Helm, Kustomize, ArgoCD |
 | 8: Performance & Load Testing | ⏳ Pending | Load, chaos |
 
