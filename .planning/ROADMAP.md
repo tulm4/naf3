@@ -107,15 +107,15 @@
 | **Modules** | `test/`, `internal/nrm/` |
 | **Requirements** | REQ-26, REQ-27, REQ-28, REQ-29, REQ-30, REQ-31, REQ-32, REQ-33, REQ-34 |
 | **Design Docs** | `docs/design/18_nrm_fcaps.md`, `docs/design/24_test_strategy.md` |
-| **Plans** | **5 plans** |
+| **Plans** | **6 plans** |
 | | |
 | | `Plans:` |
 | | `- [x] 06-PLAN-1-SUMMARY.md — Mocks: NRF, UDM, AMF, AUSF, compose, AAA-S simulator` |
 | | `- [x] 06-PLAN-2-SUMMARY.md — NRM: RESTCONF server, AlarmManager` |
-| | `- [ ] 06-PLAN-3 — Unit tests: handler, storage, cache, resilience` |
-| | `- [ ] 06-PLAN-4 — Integration tests: API, storage, cache, NRF, UDM` |
+| | `- [x] 06-PLAN-3 — Unit tests: handler, storage, cache, resilience (11 files, 4 bug fixes)` |
+| | `- [x] 06-PLAN-4 — Integration tests: API, storage, cache, NRF, UDM (9 test files)` |
 | | `- [x] 06-PLAN-5-SUMMARY.md — E2E harness + conformance suites (86 cases)` |
-| **Status** | In Progress |
+| **Status** | Done |
 | **Depends on** | Phase 5 |
 
 ### Phase 7: Kubernetes Deployment
