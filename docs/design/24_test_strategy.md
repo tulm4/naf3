@@ -440,6 +440,346 @@ func TestE2E_NSSAA_Revocation(t *testing.T) {
 }
 ```
 
+### 5.3 AIW E2E Test Cases (N60 / AUSF / SUPI)
+
+> **Note:** Nnssaaf_AIW (N60 interface) uses AUSF as consumer with SUPI instead of GPSI. MSK is returned on EAP_SUCCESS (RFC 5216 §2.1.4). Re-authentication and revocation are **not applicable** to AIW (per TS 29.526 AC8). AIW tests use the same 3-component model as §5.2, with AUSF Mock replacing AMF Mock.
+
+```go
+// Full AIW flow E2E test (3-component model)
+func TestE2E_AIW_BasicFlow(t *testing.T) {
+    if testing.Short() {
+        t.Skip("Skipping E2E in short mode")
+    }
+
+    // Setup: start all 3 components
+    httpGW := StartHTTPGateway(&HTTPGatewayConfig{Port: 8443})
+    defer httpGW.Stop()
+
+    bizPod := StartBizPod(&BizPodConfig{
+        DBURL:       testDBURL,
+        RedisURL:    testRedisURL,
+        AAAProxyURL: "http://localhost:9443", // AAA Gateway internal HTTP
+    })
+    defer bizPod.Stop()
+
+    aaaGW := StartAAAGateway(&AAAGatewayConfig{
+        Port: 1812, // RADIUS UDP
+        BizPodURL:   "http://localhost:8080", // internal HTTP callback
+    })
+    defer aaaGW.Stop()
+
+    // Mock external services
+    ausfMock := StartAUSFMock()
+    defer ausfMock.Stop()
+
+    aaaSim := StartAAASimulator(&AAASimulatorConfig{
+        Mode:       "EAP_TLS",
+        AuthResult: "SUCCESS",
+        MSK:        generateRandomBytes(64), // RFC 5216: 64-byte MSK
+        PVSInfo: []PVSInfo{
+            {ServerType: "PROSE", ServerId: "pvs-001"},
+        },
+    })
+    defer aaaSim.Stop()
+
+    // AUSF sends initial request via HTTP Gateway
+    ctx := &AiwAuthInfo{
+        Supi:         "imu-208046000000001",
+        EapIdRsp:     EncodeEAPIdentityResponse("user@example.com"),
+        SupportedFeatures: "3GPP-R18-AIW",
+    }
+
+    resp1, err := ausfMock.Authenticate(ctx)
+    require.NoError(t, err)
+
+    // Verify: HTTP Gateway routed to Biz Pod, Biz Pod sent to AAA Gateway
+    assert.NotEmpty(t, resp1.AuthCtxId)
+    assert.NotEmpty(t, resp1.EapMessage)
+
+    // Multi-round confirmation if EAP challenge returned
+    for i := 0; i < 10; i++ {
+        if resp1.AuthResult != nil {
+            break
+        }
+
+        resp1, err = ausfMock.Confirm(resp1.AuthCtxId, &AiwConfirmInfo{
+            Supi:       ctx.Supi,
+            EapMessage: resp1.EapMessage,
+        })
+        require.NoError(t, err)
+    }
+
+    // Final verification
+    assert.Equal(t, "EAP_SUCCESS", resp1.AuthResult)
+    assert.NotEmpty(t, resp1.Msk)
+    assert.NotNil(t, resp1.PvsInfo)
+    assert.Len(t, resp1.PvsInfo, 1)
+    assert.Equal(t, "pvs-001", resp1.PvsInfo[0].ServerId)
+}
+
+func TestE2E_AIW_MSKExtraction(t *testing.T) {
+    if testing.Short() {
+        t.Skip("Skipping E2E in short mode")
+    }
+
+    httpGW := StartHTTPGateway(&HTTPGatewayConfig{Port: 8443})
+    defer httpGW.Stop()
+
+    bizPod := StartBizPod(&BizPodConfig{
+        DBURL:       testDBURL,
+        RedisURL:    testRedisURL,
+        AAAProxyURL: "http://localhost:9443",
+    })
+    defer bizPod.Stop()
+
+    aaaGW := StartAAAGateway(&AAAGatewayConfig{Port: 1812, BizPodURL: "http://localhost:8080"})
+    defer aaaGW.Stop()
+
+    ausfMock := StartAUSFMock()
+    defer ausfMock.Stop()
+
+    expectedMSK := generateRandomBytes(64) // RFC 5216 §2.1.4: MSK = 64 octets
+    aaaSim := StartAAASimulator(&AAASimulatorConfig{
+        Mode:       "EAP_TLS",
+        AuthResult: "SUCCESS",
+        MSK:        expectedMSK,
+    })
+    defer aaaSim.Stop()
+
+    ctx := &AiwAuthInfo{
+        Supi:         "imu-208046000000001",
+        EapIdRsp:     EncodeEAPIdentityResponse("user@example.com"),
+        SupportedFeatures: "3GPP-R18-AIW",
+    }
+
+    resp, err := ausfMock.Authenticate(ctx)
+    require.NoError(t, err)
+
+    // Multi-round to completion
+    for resp.AuthResult == nil {
+        resp, err = ausfMock.Confirm(resp.AuthCtxId, &AiwConfirmInfo{
+            Supi:       ctx.Supi,
+            EapMessage: resp.EapMessage,
+        })
+        require.NoError(t, err)
+    }
+
+    // Decode base64 MSK
+    mskBytes, err := base64.StdEncoding.DecodeString(resp.Msk)
+    require.NoError(t, err)
+
+    // Verify MSK length: RFC 5216 §2.1.4
+    assert.Len(t, mskBytes, 64, "MSK must be 64 octets per RFC 5216 §2.1.4")
+
+    // Verify MSK[:32] != MSK[32:] (MSK != EMSK)
+    assert.NotEqual(t, mskBytes[:32], mskBytes[32:],
+        "MSK lower 32 octets must differ from upper 32 (EMSK)")
+}
+
+func TestE2E_AIW_EAPFailure(t *testing.T) {
+    if testing.Short() {
+        t.Skip("Skipping E2E in short mode")
+    }
+
+    httpGW := StartHTTPGateway(&HTTPGatewayConfig{Port: 8443})
+    defer httpGW.Stop()
+
+    bizPod := StartBizPod(&BizPodConfig{
+        DBURL:       testDBURL,
+        RedisURL:    testRedisURL,
+        AAAProxyURL: "http://localhost:9443",
+    })
+    defer bizPod.Stop()
+
+    aaaGW := StartAAAGateway(&AAAGatewayConfig{Port: 1812, BizPodURL: "http://localhost:8080"})
+    defer aaaGW.Stop()
+
+    ausfMock := StartAUSFMock()
+    defer ausfMock.Stop()
+
+    // AAA Simulator returns Access-Reject
+    aaaSim := StartAAASimulator(&AAASimulatorConfig{
+        Mode:       "EAP_TLS",
+        AuthResult: "REJECT",
+    })
+    defer aaaSim.Stop()
+
+    ctx := &AiwAuthInfo{
+        Supi:         "imu-208046000000001",
+        EapIdRsp:     EncodeEAPIdentityResponse("user@example.com"),
+        SupportedFeatures: "3GPP-R18-AIW",
+    }
+
+    resp, err := ausfMock.Authenticate(ctx)
+    require.NoError(t, err)
+
+    // Multi-round to completion
+    for resp.AuthResult == nil {
+        resp, err = ausfMock.Confirm(resp.AuthCtxId, &AiwConfirmInfo{
+            Supi:       ctx.Supi,
+            EapMessage: resp.EapMessage,
+        })
+        require.NoError(t, err)
+    }
+
+    // On EAP Failure: HTTP 200 with authResult=EAP_FAILURE in body (not HTTP 403)
+    assert.Equal(t, "EAP_FAILURE", resp.AuthResult)
+    assert.Empty(t, resp.Msk)
+    assert.Empty(t, resp.EapMessage)
+    assert.Nil(t, resp.PvsInfo)
+}
+
+func TestE2E_AIW_InvalidSupi(t *testing.T) {
+    if testing.Short() {
+        t.Skip("Skipping E2E in short mode")
+    }
+
+    httpGW := StartHTTPGateway(&HTTPGatewayConfig{Port: 8443})
+    defer httpGW.Stop()
+
+    bizPod := StartBizPod(&BizPodConfig{
+        DBURL:       testDBURL,
+        RedisURL:    testRedisURL,
+        AAAProxyURL: "http://localhost:9443",
+    })
+    defer bizPod.Stop()
+
+    ausfMock := StartAUSFMock()
+    defer ausfMock.Stop()
+
+    // Send request with invalid SUPI format
+    ctx := &AiwAuthInfo{
+        Supi:         "invalid-supi-format",
+        EapIdRsp:     EncodeEAPIdentityResponse("user@example.com"),
+        SupportedFeatures: "3GPP-R18-AIW",
+    }
+
+    resp, err := ausfMock.Authenticate(ctx)
+    require.NoError(t, err)
+
+    // HTTP 400: invalid SUPI does not match ^imu-[0-9]{15}$
+    assert.Equal(t, 400, resp.StatusCode)
+
+    var problem ProblemDetails
+    json.NewDecoder(resp.Body).Decode(&problem)
+    assert.Equal(t, "INVALID_SUPI", problem.Cause)
+    assert.Contains(t, problem.Detail, "supi")
+}
+
+func TestE2E_AIW_AAA_NotConfigured(t *testing.T) {
+    if testing.Short() {
+        t.Skip("Skipping E2E in short mode")
+    }
+
+    httpGW := StartHTTPGateway(&HTTPGatewayConfig{Port: 8443})
+    defer httpGW.Stop()
+
+    bizPod := StartBizPod(&BizPodConfig{
+        DBURL:       testDBURL,
+        RedisURL:    testRedisURL,
+        AAAProxyURL: "http://localhost:9443",
+    })
+    defer bizPod.Stop()
+
+    ausfMock := StartAUSFMock()
+    defer ausfMock.Stop()
+
+    // SUPI in range that has no AAA config
+    ctx := &AiwAuthInfo{
+        Supi:         "imu-999999999999999", // No AAA server for this SUPI range
+        EapIdRsp:     EncodeEAPIdentityResponse("user@example.com"),
+        SupportedFeatures: "3GPP-R18-AIW",
+    }
+
+    resp, err := ausfMock.Authenticate(ctx)
+    require.NoError(t, err)
+
+    // HTTP 404: no AAA server configured for this SUPI range
+    assert.Equal(t, 404, resp.StatusCode)
+
+    var problem ProblemDetails
+    json.NewDecoder(resp.Body).Decode(&problem)
+    assert.Equal(t, "AAA_SERVER_NOT_CONFIGURED", problem.Cause)
+}
+
+func TestE2E_AIW_TTLS(t *testing.T) {
+    if testing.Short() {
+        t.Skip("Skipping E2E in short mode")
+    }
+
+    httpGW := StartHTTPGateway(&HTTPGatewayConfig{Port: 8443})
+    defer httpGW.Stop()
+
+    bizPod := StartBizPod(&BizPodConfig{
+        DBURL:       testDBURL,
+        RedisURL:    testRedisURL,
+        AAAProxyURL: "http://localhost:9443",
+    })
+    defer bizPod.Stop()
+
+    aaaGW := StartAAAGateway(&AAAGatewayConfig{Port: 1812, BizPodURL: "http://localhost:8080"})
+    defer aaaGW.Stop()
+
+    ausfMock := StartAUSFMock()
+    defer ausfMock.Stop()
+
+    // EAP-TTLS with inner method
+    ttlsInner := encodeTTLSInnerMethod("PAP", "user", "pass")
+    aaaSim := StartAAASimulator(&AAASimulatorConfig{
+        Mode:       "EAP_TTLS",
+        AuthResult: "SUCCESS",
+        MSK:        generateRandomBytes(64),
+        PVSInfo: []PVSInfo{
+            {ServerType: "PROSE", ServerId: "pvs-ttls-001"},
+        },
+    })
+    defer aaaSim.Stop()
+
+    ctx := &AiwAuthInfo{
+        Supi:                   "imu-208046000000001",
+        EapIdRsp:               EncodeEAPIdentityResponse("user@example.com"),
+        TtlsInnerMethodContainer: base64.StdEncoding.EncodeToString(ttlsInner),
+        SupportedFeatures:      "3GPP-R18-AIW",
+    }
+
+    resp, err := ausfMock.Authenticate(ctx)
+    require.NoError(t, err)
+
+    // ttlsInnerMethodContainer echoed back in response
+    assert.Equal(t, ctx.TtlsInnerMethodContainer, resp.TtlsInnerMethodContainer)
+
+    // Multi-round TTLS
+    for resp.AuthResult == nil {
+        resp, err = ausfMock.Confirm(resp.AuthCtxId, &AiwConfirmInfo{
+            Supi:       ctx.Supi,
+            EapMessage: resp.EapMessage,
+        })
+        require.NoError(t, err)
+    }
+
+    // Verify TTLS completed successfully
+    assert.Equal(t, "EAP_SUCCESS", resp.AuthResult)
+    assert.NotEmpty(t, resp.Msk)
+    assert.NotNil(t, resp.PvsInfo)
+}
+
+// AIW Conformance Tests: TS 29.526 §7.3.2.2, §7.3.2.3 / TS 33.501 §I.2.2.2 / RFC 5216 §2.1.4
+
+func TestConformance_AIW_01_BasicAuthFlow(t *testing.T) { /* AIW-01: TS 29.526 §7.3.2.2 */ }
+func TestConformance_AIW_02_MSKReturnedOnSuccess(t *testing.T) { /* AIW-02: RFC 5216 §2.1.4 */ }
+func TestConformance_AIW_03_PVSInfoReturned(t *testing.T) { /* AIW-03: TS 33.501 §I.2.2.2 */ }
+func TestConformance_AIW_04_EAPFailureInBody(t *testing.T) { /* AIW-04: TS 29.526 §7.3.2.3 */ }
+func TestConformance_AIW_05_InvalidSupiRejected(t *testing.T) { /* AIW-05: TS 29.526 §7.3.2.2 */ }
+func TestConformance_AIW_06_AAA_NotConfigured(t *testing.T) { /* AIW-06: TS 29.526 §7.3.2.2 */ }
+func TestConformance_AIW_07_MultiRoundChallenge(t *testing.T) { /* AIW-07: TS 29.526 §7.3.2.3 */ }
+func TestConformance_AIW_08_SupportedFeaturesEcho(t *testing.T) { /* AIW-08: TS 29.526 §7.3.2.2 */ }
+func TestConformance_AIW_09_TTLSInnerMethodContainer(t *testing.T) { /* AIW-09: TS 33.501 §I.2.2.2 */ }
+func TestConformance_AIW_10_MSKLength64Octets(t *testing.T) { /* AIW-10: RFC 5216 §2.1.4 */ }
+func TestConformance_AIW_11_MSKNotEqualEMSK(t *testing.T) { /* AIW-11: RFC 5216 §2.1.4 */ }
+func TestConformance_AIW_12_NoReauthSupport(t *testing.T) { /* AIW-12: TS 29.526 AC8 — AIW excludes re-auth */ }
+func TestConformance_AIW_13_NoRevocationSupport(t *testing.T) { /* AIW-13: TS 29.526 AC8 — AIW excludes revocation */ }
+```
+
 ---
 
 ## 6. 3GPP Conformance Tests
