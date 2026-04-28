@@ -78,6 +78,30 @@
 
 ---
 
+## Area 6: NSSAA E2E 2-Layer Coverage
+
+||| Option | Description | Selected |
+||--------|-------------|----------|
+|| Already covered (both layers) | PLAN-3 Task 8 (Biz Pod unit) + PLAN-5 Tasks 2-4 (3-component E2E) | ✓ |
+
+**User's choice:** Already covered
+**Notes:** NSSAA has both layers. PLAN-3 Task 8: `test/unit/e2e_amf/amf_notification_test.go` (AMF notification unit tests, 5 cases). PLAN-5 Tasks 2-4: `test/e2e/nssaa_flow_test.go` (8 cases) + `test/e2e/reauth_test.go` (4 cases) + `test/e2e/revocation_test.go` (3 cases).
+
+---
+
+## Area 7: AIW E2E 2-Layer Coverage
+
+||| Option | Description | Selected |
+||--------|-------------|----------|
+|| Add PLAN-6: AIW E2E (3-component) + AIW conformance | `test/e2e/aiw_flow_test.go` (6 cases) + `test/conformance/aiw_conformance_test.go` (13 cases) | ✓ |
+|| Skip — conformance tests cover critical cases | PLAN-5 conformance tests sufficient | |
+|| Skip — unit tests sufficient | PLAN-3 Task 6 Biz Pod unit tests sufficient | |
+
+**User's choice:** Add PLAN-6: both AIW E2E and conformance
+**Notes:** Two gaps found: (1) AIW 3-component E2E not covered in any plan — PLAN-5 Tasks 2-4 cover NSSAA E2E only. (2) AIW conformance (TS 29.526 §7.3) not covered in PLAN-5. PLAN-6 created with both: `test/e2e/aiw_flow_test.go` (6 cases: BasicFlow, MSKExtraction, EAPFailure, InvalidSupi, AAA_NotConfigured, TTLS) + `test/conformance/aiw_conformance_test.go` (13 cases TC-AIW-01 through TC-AIW-13). D-08 honored: both layers now covered for AIW.
+
+---
+
 ## Claude's Discretion
 
 The following remain open for the planner to decide:
