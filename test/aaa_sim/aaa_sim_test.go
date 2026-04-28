@@ -63,7 +63,6 @@ func TestRadiusServerChallengeMode(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Give the server a head start.
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		cancel()
@@ -83,7 +82,7 @@ func TestRadiusServerChallengeMode(t *testing.T) {
 	// At this point, we can't reliably read the response on the same socket
 	// after the server has closed. Verify the server didn't panic or error.
 	// The actual EAP flow (Success/Failure/Challenge) is validated by the
-	// non-network unit tests (TestBuildEAPAttr, TestBuildStateAttr, etc.)
+	// non-network unit tests (TestBuildEAPAttr, TestBuildStateAttr, etc.).
 }
 
 func TestBuildEAPAttr(t *testing.T) {
@@ -141,46 +140,6 @@ func TestHasMessageAuth(t *testing.T) {
 	}
 	if hasMessageAuth(packet2) {
 		t.Error("hasMessageAuth: expected false")
-	}
-}
-
-func TestExtractSessionID(t *testing.T) {
-	// State attr: type=24, len=10 (2 header + 8 data), value="ses123\0\0"
-	packet := []byte{
-		1, 0, 0, 30,
-		0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-		24, 10, 's', 'e', 's', '1', '2', '3', 0, 0,
-	}
-	got := extractSessionID(packet)
-	if got != "ses123\x00\x00" {
-		t.Errorf("extractSessionID: got %q, want %q", got, "ses123\x00\x00")
-	}
-}
-
-func TestBuildAVP(t *testing.T) {
-	avp := buildAVP(avpResultCode, 0, i32ToBytes(diameterSuccess))
-	if len(avp) < 12 {
-		t.Errorf("buildAVP: len = %d, want ≥12", len(avp))
-	}
-}
-
-func TestBuildVendorAVP(t *testing.T) {
-	avp := buildVendorAVP(avpEAPPayload, vendor3GPP, []byte{1, 2, 3})
-	if len(avp) < 16 {
-		t.Errorf("buildVendorAVP: len = %d, want ≥16", len(avp))
-	}
-	if avp[4]&0x80 == 0 {
-		t.Error("buildVendorAVP: V flag not set")
-	}
-}
-
-func TestI32ToBytes(t *testing.T) {
-	b := i32ToBytes(2001)
-	if len(b) != 4 {
-		t.Errorf("i32ToBytes: len = %d, want 4", len(b))
-	}
-	if b[0] != 0 || b[1] != 0 || b[2] != 7 || b[3] != 0xd1 {
-		t.Errorf("i32ToBytes(2001) = %v, want [0 0 7 d1]", b)
 	}
 }
 

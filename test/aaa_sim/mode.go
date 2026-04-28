@@ -67,6 +67,7 @@ func Run(mode Mode, logger *slog.Logger) {
 
 	radiusAddr := ":1812"
 	diameterAddr := ":3868"
+	diameterTransport := "tcp"
 	sharedSecret := []byte("testing123")
 	if v := os.Getenv("AAA_SIM_RADIUS_ADDR"); v != "" {
 		radiusAddr = v
@@ -76,6 +77,9 @@ func Run(mode Mode, logger *slog.Logger) {
 	}
 	if v := os.Getenv("AAA_SIM_SECRET"); v != "" {
 		sharedSecret = []byte(v)
+	}
+	if v := os.Getenv("AAA_SIM_DIAMETER_TRANSPORT"); v != "" {
+		diameterTransport = v
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -89,19 +93,18 @@ func Run(mode Mode, logger *slog.Logger) {
 	radServer := NewRadiusServer(radLn, mode, sharedSecret, logger)
 	go radServer.Run(ctx)
 
-	diaLn, err := net.Listen("tcp", diameterAddr)
-	if err != nil {
-		logger.Error("failed to listen Diameter", "addr", diameterAddr, "error", err)
-		cancel()
-		return
-	}
-	diaServer := NewDiameterServer(diaLn, mode, logger)
-	go diaServer.Run(ctx)
+	diaServer := NewDiameterServer(diameterTransport, diameterAddr, mode, logger)
+	go func() {
+		if err := diaServer.Run(ctx); err != nil && ctx.Err() == nil {
+			logger.Error("diameter_server_error", "error", err)
+		}
+	}()
 
 	logger.Info("aaa-sim started",
 		"mode", mode.String(),
 		"radius", radiusAddr,
 		"diameter", diameterAddr,
+		"diameter_transport", diameterTransport,
 		"secret", "***")
 
 	sigCh := make(chan os.Signal, 1)
@@ -110,6 +113,5 @@ func Run(mode Mode, logger *slog.Logger) {
 	cancel()
 
 	_ = radLn.Close()
-	_ = diaLn.Close()
 	logger.Info("aaa-sim stopped")
 }

@@ -2,7 +2,12 @@
 phase: 06-integration-testing-nrm
 plan: "06-PLAN-1"
 subsystem: testing
-tags: [httptest, radius, diameter, docker-compose, sqlmock, e2e, integration]
+tags: [httptest, radius, diameter, docker-compose, sqlmock, e2e, integration, go-diameter, sctp]
+note: |
+  RE-PLANNED (2026-04-28): Task 6 (AAA-S Simulator) re-planned and re-executed to use
+  github.com/fiorix/go-diameter/v4/sm for CER/CEA handshake (D-09) and add SCTP
+  transport support (D-10). Original commits f9e6127 and prior remain; new commits below
+  supersede the diameter.go implementation.
 
 # Dependency graph
 requires: []
@@ -196,6 +201,28 @@ completed: 2026-04-28
 - **Files modified:** `test/aaa_sim/radius.go`
 - **Verification:** Unit tests for `hasMessageAuth`, `verifyMessageAuth`, `buildEAPAttr`, `buildStateAttr` all pass
 - **Committed in:** `f9e6127` (Task 6 commit)
+
+---
+
+## Re-plan Deviations (2026-04-28)
+
+Task 6 (AAA-S Simulator) was re-planned and re-executed per decisions D-09 and D-10 from the supplemental context discussion:
+
+**D-09 — go-diameter/v4 for Diameter CER/CEA:**
+- Replaced manual CER/CEA header parsing in `diameter.go` with `github.com/fiorix/go-diameter/v4/sm`
+- `diam.ListenAndServeNetwork(network, addr, machine, dict)` handles CER/CEA handshake and DWR/DWA watchdog automatically
+- DER/DEA EAP response building stays in manual code within `test/aaa_sim/`
+- `NewDiameterServer` signature changed from `(net.Listener, Mode, *slog.Logger)` to `(network, addr string, Mode, *slog.Logger)`
+
+**D-10 — SCTP transport support:**
+- No separate `sctp.go` needed — `diam.ListenAndServeNetwork` with `network="sctp"` uses go-diameter's `MultistreamListen` internally
+- `AAA_SIM_DIAMETER_TRANSPORT` env var added to `mode.go` (values: `tcp`, `sctp`; default: `tcp`)
+- Verified SCTP startup works: `AAA_SIM_DIAMETER_TRANSPORT=sctp /tmp/aaa-sim` starts without error
+
+**Files changed in re-plan:**
+- `test/aaa_sim/diameter.go` — fully rewritten (removed 7 helper functions, added go-diameter imports)
+- `test/aaa_sim/mode.go` — updated to read `AAA_SIM_DIAMETER_TRANSPORT`, pass network+addr to `NewDiameterServer`
+- `test/aaa_sim/aaa_sim_test.go` — removed tests for deleted helpers (`TestExtractSessionID`, `TestBuildAVP`, `TestBuildVendorAVP`, `TestI32ToBytes`)
 
 ---
 
