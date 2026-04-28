@@ -1,0 +1,100 @@
+# Phase 6: Integration Testing & NRM - Context
+
+**Gathered:** 2026-04-28
+**Status:** Ready for planning
+
+<domain>
+## Phase Boundary
+
+Comprehensive testing (unit, integration, E2E, conformance) plus the NRM/FCAPS management interface for NSSAAF. Unit tests cover every package with >80% line coverage. Integration tests exercise all API endpoints against real PostgreSQL and Redis via docker-compose. E2E tests run the full AMF → HTTP GW → Biz Pod → AAA GW → AAA-S flow. Conformance tests validate TS 29.526 §7.2, RFC 3579, and RFC 5216. NRM implements the YANG model, RESTCONF API, and alarm management per TS 28.541 §5.3.145.
+
+Not this phase: k6 load tests (Phase 8), chaos testing (Phase 8), Kubernetes manifests (Phase 7).
+
+</domain>
+
+<decisions>
+## Implementation Decisions
+
+### Test infrastructure
+- **D-01:** Docker-compose for real PostgreSQL and Redis — infrastructure started separately (`docker-compose up -d`) before running tests, not managed in-process
+- Real databases for integration and E2E tests; in-process mocks (miniredis, sqlmock) for unit tests
+- Docker-compose sidecar pattern: familiar since compose already exists for local dev; separate test entrypoint (`docker-compose -f compose.yaml -f compose.test.yaml`) with isolated networks
+- No testcontainers — keeps test runs deterministic and CI simple
+
+### Claude's Discretion
+- Exact test directory structure (`test/unit/`, `test/integration/`, `test/e2e/`, `test/conformance/` vs co-located `*_test.go` alongside source)
+- Naming conventions for conformance test suites
+- RESTCONF/NRM server deployment: embedded in Biz Pod, standalone binary, or separate Kubernetes deployment
+- Alarm severity thresholds and deduplication policy
+- Whether RESTCONF uses YAML or JSON encoding
+
+</decisions>
+
+<canonical_refs>
+## Canonical References
+
+**Downstream agents MUST read these before planning or implementing.**
+
+### Testing
+- `docs/design/24_test_strategy.md` — Test pyramid, unit/integration/E2E patterns, conformance test specs, k6 load test (read for structure; load testing is Phase 8)
+- `docs/design/06_eap_engine.md` — EAP engine internals for unit test coverage
+- `docs/design/07_radius_client.md` — RADIUS encoding for RFC 3579 conformance tests
+- `docs/design/08_diameter_client.md` — Diameter encoding for protocol conformance
+
+### NRM/FCAPS
+- `docs/design/18_nrm_fcaps.md` — YANG model (3gpp-nssaaf-nrm), alarm types, RESTCONF API, FCAPS implementation patterns
+
+### Existing Code
+- `internal/eap/engine_test.go` — Existing test patterns: mockAAAClient, testify assertions, in-process mocks
+- `internal/api/aiw/handler_test.go` — API handler test patterns: mockStore, httptest, doRequest helper
+- `cmd/biz/main_test.go` — Main test patterns: httptest server, JSON request helpers
+- `compose/configs/biz.yaml` — Existing docker-compose config (reference for test compose)
+- `go.mod` — Existing test dependencies: testify, miniredis/v2
+
+### 3GPP Specifications
+- TS 29.526 §7.2 — N58 API operations and error codes
+- TS 28.541 §5.3.145-148 — NSSAAFFunction IOC, NRM attributes
+- RFC 3579 — RADIUS EAP extension
+- RFC 5216 — EAP-TLS MSK derivation
+
+</canonical_refs>
+
+<code_context>
+## Existing Code Insights
+
+### Reusable Assets
+- `internal/eap/engine_test.go` — mockAAAClient with configurable delay, failure injection, response codes — reuse pattern for other mock clients
+- `internal/api/aiw/handler_test.go` — mockStore implementing interface, doRequest helper, makeRouter helper — reuse for nssaa handler tests
+- `go.mod` has `testify` and `miniredis/v2` already — no new deps needed for unit and Redis tests
+- `test/` directory already has `e2e/` and `integration/` subdirectories — populate these
+
+### Established Patterns
+- `testify/assert` + `testify/require` for all existing tests
+- In-process mocks embedded in test files (not separate _mock.go files)
+- `httptest.NewRecorder` + `httptest.NewRequest` for HTTP handler tests
+- `testing.Short()` skip pattern for long-running tests in `internal/eap/engine_test.go`
+
+### Integration Points
+- `test/` directory: organize into `test/unit/`, `test/integration/`, `test/e2e/`, `test/conformance/` (or use `*_test.go` co-located with source)
+- `compose.yaml` + `compose/configs/` — test compose extends existing dev compose
+- `internal/nrm/` does not exist yet — new package needed for RESTCONF server and alarm manager
+- All 21 existing `*_test.go` files already cover core paths — Phase 6 fills gaps and adds NRM
+
+</code_context>
+
+<deferred>
+## Deferred Ideas
+
+- Load testing (k6) — Phase 8
+- Chaos testing — Phase 8
+- Kubernetes manifests for NRM RESTCONF server — Phase 7
+
+### Reviewed Todos (not folded)
+None.
+
+</deferred>
+
+---
+
+*Phase: 06-integration-testing-nrm*
+*Context gathered: 2026-04-28*
