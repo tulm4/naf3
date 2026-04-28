@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/operator/nssAAF/internal/crypto"
 	"github.com/operator/nssAAF/internal/types"
 )
 
@@ -58,6 +59,23 @@ func NewEncryptor(key []byte) (*Encryptor, error) {
 		return nil, errors.New("encryptor: key must be 16, 24, or 32 bytes")
 	}
 	return &Encryptor{key: key}, nil
+}
+
+// NewEncryptorFromKeyManager creates an Encryptor backed by the global crypto.KeyManager.
+// The KeyManager must have been initialized via crypto.Init() before calling this.
+// Returns an error if the key manager has no key available.
+func NewEncryptorFromKeyManager(km crypto.KeyManager) (*Encryptor, error) {
+	if km == nil {
+		return nil, errors.New("encryptor: key manager is nil, call crypto.Init first")
+	}
+	if key, ok := km.GetKey(); ok {
+		// Soft key manager: extract the raw master key.
+		return NewEncryptor(key)
+	}
+	// Vault and SoftHSM: these backends do not expose the raw key.
+	// The session store must use crypto.EnvelopeEncrypt/Decrypt for vault/softhsm.
+	// For Phase 5, we fail clearly rather than silently using no encryption.
+	return nil, errors.New("encryptor: unsupported key manager backend (use soft mode for session encryption in Phase 5)")
 }
 
 // Encrypt encrypts plaintext using AES-256-GCM.

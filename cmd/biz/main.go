@@ -25,6 +25,7 @@ import (
 	"github.com/operator/nssAAF/internal/ausf"
 	"github.com/operator/nssAAF/internal/cache/redis"
 	"github.com/operator/nssAAF/internal/config"
+	"github.com/operator/nssAAF/internal/crypto"
 	"github.com/operator/nssAAF/internal/metrics"
 	"github.com/operator/nssAAF/internal/nrf"
 	"github.com/operator/nssAAF/internal/proto"
@@ -99,10 +100,35 @@ func main() {
 	}
 	defer pgPool.Close()
 
-	// Encryption key from config — use empty key for dev (Phase 4)
-	// Phase 5 will add proper key management
-	var encryptor *postgres.Encryptor
-	encryptor, _ = postgres.NewEncryptor([]byte{}) // empty key = no encryption for now
+	// Initialize crypto key manager — Phase 5 envelope encryption.
+	// crypto.Init must succeed; session data must not be stored with an empty key.
+	var vaultCfg *crypto.VaultConfig
+	if cfg.Crypto.VaultConfig != nil {
+		vaultCfg = &crypto.VaultConfig{
+			Address:    cfg.Crypto.VaultConfig.Address,
+			KeyName:    cfg.Crypto.VaultConfig.KeyName,
+			AuthMethod: cfg.Crypto.VaultConfig.AuthMethod,
+			K8sRole:    cfg.Crypto.VaultConfig.K8sRole,
+			Token:      cfg.Crypto.VaultConfig.Token,
+		}
+	}
+	if err := crypto.Init(&crypto.Config{
+		KeyManager:     cfg.Crypto.KeyManager,
+		MasterKeyHex:   cfg.Crypto.MasterKeyHex,
+		KEKOverlapDays: cfg.Crypto.KEKOverlapDays,
+		Vault:          vaultCfg,
+		SoftHSM:        nil, // SoftHSM config not wired in Phase 5
+	}); err != nil {
+		slog.Error("crypto.Init failed", "error", err)
+		os.Exit(1)
+	}
+
+	// Build encryptor using the initialized key manager.
+	encryptor, err := postgres.NewEncryptorFromKeyManager(crypto.KM())
+	if err != nil {
+		slog.Error("session encryptor initialization failed", "error", err)
+		os.Exit(1)
+	}
 
 	// REQ-09: NewSessionStore/NewAIWSessionStore per D-06
 	nssaaStore := postgres.NewSessionStore(pgPool, encryptor)

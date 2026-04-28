@@ -78,6 +78,12 @@ func (m *SoftKeyManager) GetKeyVersion(ctx context.Context) (int, error) {
 	return m.currentVer, nil
 }
 
+func (m *SoftKeyManager) GetKey() ([]byte, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.masterKey, true
+}
+
 func (m *SoftKeyManager) Rotate(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -257,6 +263,10 @@ func (m *VaultKeyManager) Rotate(ctx context.Context) error {
 	return m.RotateKey(ctx)
 }
 
+func (m *VaultKeyManager) GetKey() ([]byte, bool) {
+	return nil, false
+}
+
 func (m *VaultKeyManager) RotateKey(ctx context.Context) error {
 	url := fmt.Sprintf("%s/v1/transit/rotate/%s", m.address, m.keyName)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
@@ -329,6 +339,10 @@ func (m *SoftHSMKeyManager) GetKeyVersion(ctx context.Context) (int, error) {
 
 func (m *SoftHSMKeyManager) Rotate(ctx context.Context) error {
 	return nil
+}
+
+func (m *SoftHSMKeyManager) GetKey() ([]byte, bool) {
+	return nil, false
 }
 
 func (m *SoftHSMKeyManager) Close() error {

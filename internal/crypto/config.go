@@ -103,6 +103,9 @@ type KeyManager interface {
 	Wrap(ctx context.Context, dek []byte) ([]byte, int, error)
 	Unwrap(ctx context.Context, wrappedDEK []byte) ([]byte, error)
 	GetKeyVersion(ctx context.Context) (int, error)
+	// GetKey returns the raw master key bytes for the soft key manager.
+	// Returns nil, false for vault/softhsm backends that do not expose the raw key.
+	GetKey() ([]byte, bool)
 }
 
 type KeyMetadata struct {
