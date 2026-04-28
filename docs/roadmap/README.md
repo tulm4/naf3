@@ -58,7 +58,7 @@ make run-aaa-gateway  # AAA GW on :9090
 | Phase 3: Data & Storage | ✅ DONE | `internal/storage/`, `internal/cache/` |
 | **Phase R: 3-Component Refactor** | ✅ DONE | `internal/proto/`, `cmd/biz/`, `cmd/http-gateway/`, `cmd/aaa-gateway/`, `internal/aaa/gateway/` |
 | Phase 4: NF Integration & Observability | ✅ DONE | `internal/nrf/` (NRF client wired, startup registration, heartbeat), `internal/udm/` (Nudm_UECM_Get wired to N58 handler, UpdateAuthContext), `internal/amf/` (AMF notifier wired, Re-Auth/Revocation POSTs), `internal/ausf/` (AUSF N60 client, MSK forwarding), `internal/resilience/` (circuit breaker, retry), `internal/metrics/` (Prometheus metrics), `internal/logging/` (structured JSON logging), `internal/tracing/` (OpenTelemetry), `cmd/biz/main.go` (full NF wiring) |
-| Phase 5: Security & Crypto | ⏳ PENDING | `internal/auth/`, `internal/crypto/` |
+| Phase 5: Security & Crypto | ✅ DONE | `internal/auth/` (JWT validation, JWKS cache, scope enforcement), `internal/crypto/` (AES-256-GCM, KEK/DEK, KeyManager, VaultKeyManager, SoftHSMKeyManager, secret encryption) |
 | Phase 6: Integration Testing & NRM | ⏳ PENDING | `test/`, `internal/nrm/` |
 | Phase 7: Kubernetes Deployment | ⏳ PENDING | `deployments/helm/`, `deployments/kustomize/`, `deployments/argo/` |
 | Phase 8: Performance & Load Testing | ⏳ PENDING | `test/load/`, chaos testing |
@@ -132,16 +132,16 @@ make run-aaa-gateway  # AAA GW on :9090
 - [x] Unit test coverage >90%
 
 ### Phase 5: Security & Crypto
-- [ ] TLS 1.3 for all external interfaces (SBI)
-- [ ] mTLS between components (Biz↔AAA GW)
-- [ ] JWT token validation with NRF public key
-- [ ] OAuth2 scopes: `nnssaaf-nssaa`, `nnssaaf-aiw`
-- [ ] AES-256-GCM encryption for session state
-- [ ] KEK/DEK envelope encryption hierarchy
-- [ ] KEK rotation with 30-day overlap window
-- [ ] GPSI hashed in audit logs
-- [ ] HSM/KMS interface defined
-- [ ] Unit test coverage >90%
+- [x] TLS 1.3 for all external interfaces (SBI)
+- [x] mTLS between components (Biz↔AAA GW)
+- [x] JWT token validation with NRF public key
+- [x] OAuth2 scopes: `nnssaaf-nssaa`, `nnssaaf-aiw`
+- [x] AES-256-GCM encryption for session state
+- [x] KEK/DEK envelope encryption hierarchy
+- [x] KEK rotation with 30-day overlap window
+- [x] GPSI hashed in audit logs
+- [x] HSM/KMS interface defined
+- [x] golangci-lint: 0 issues on phase 5 packages
 
 ### Phase 6: Integration Testing & NRM
 - [ ] Unit test coverage >80% overall
