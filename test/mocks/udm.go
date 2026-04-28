@@ -35,12 +35,15 @@ type UDMMock struct {
 	mu sync.Mutex
 	// registrations maps supi → registration data
 	registrations map[string]*NudmUECMRegistration
+	// errorCodes maps supi → HTTP status code for error injection
+	errorCodes map[string]int
 }
 
 // NewUDMMock creates a UDM mock server.
 func NewUDMMock() *UDMMock {
 	m := &UDMMock{
 		registrations: make(map[string]*NudmUECMRegistration),
+		errorCodes:   make(map[string]int),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/nudm-uemm/v1/", m.handleRegistration)
@@ -63,6 +66,14 @@ func (m *UDMMock) SetRegistration(supi string, reg *NudmUECMRegistration) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.registrations[supi] = reg
+}
+
+// SetError configures an HTTP status code to return for a given SUPI.
+// Useful for simulating timeouts (504) or other error conditions.
+func (m *UDMMock) SetError(supi string, statusCode int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.errorCodes[supi] = statusCode
 }
 
 // SetGPSI sets the GPSI for a given SUPI, creating a default registration.
@@ -98,8 +109,14 @@ func (m *UDMMock) handleRegistration(w http.ResponseWriter, r *http.Request) {
 	}
 
 	m.mu.Lock()
+	errorCode, hasError := m.errorCodes[supi]
 	reg, ok := m.registrations[supi]
 	m.mu.Unlock()
+
+	if hasError {
+		http.Error(w, fmt.Sprintf(`{"cause":"UDM_ERROR_%d"}`, errorCode), errorCode)
+		return
+	}
 
 	if !ok {
 		http.Error(w, fmt.Sprintf(`{"cause":"USER_NOT_FOUND","supi":"%s"}`, supi), http.StatusNotFound)
