@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"regexp"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -342,12 +343,25 @@ func (c *Config) Validate() error {
 }
 
 // expandEnv expands ${VAR} and ${VAR:-default} placeholders.
+// Supports empty-default form ${VAR:-} and variable-name-only form ${VAR}.
+var envVarRegex = regexp.MustCompile(`\$\{([^}:]+)(?::-([^}]*))?\}`)
+
 func expandEnv(s string) string {
-	// Simple expansion: ${VAR} → os.Getenv("VAR")
-	result := os.Expand(s, func(key string) string {
-		return os.Getenv(key)
+	return envVarRegex.ReplaceAllStringFunc(s, func(match string) string {
+		parts := envVarRegex.FindStringSubmatch(match)
+		if len(parts) < 2 {
+			return match
+		}
+		key := parts[1]
+		defaultVal := ""
+		if len(parts) >= 3 {
+			defaultVal = parts[2]
+		}
+		if val := os.Getenv(key); val != "" {
+			return val
+		}
+		return defaultVal
 	})
-	return result
 }
 
 // applyDefaults sets sensible defaults for unset fields.
