@@ -98,14 +98,6 @@ func main() {
 		"istio_mtls", os.Getenv("ISTIO_MTLS") == "1",
 	)
 
-	bizClient := &httpBizClient{
-		bizServiceURL: cfg.HTTPgw.BizServiceURL,
-		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
-		},
-		version: cfg.Version,
-	}
-
 	// REQ-22: Initialize JWT validator with NRF JWKS URL.
 	// Falls back to default if nrf: section absent from http-gateway.yaml.
 	nrfBaseURL := cfg.NRF.BaseURL
@@ -120,10 +112,21 @@ func main() {
 		AllowedNfTypes: []string{"AMF", "AUSF"},
 		AllowedScopes:  []string{"nnssaaf-nssaa", "nnssaaf-aiw"},
 	}); err != nil {
-		slog.Error("auth.Init failed", "error", err)
+		// Use a local logger so the error is logged regardless of slog.SetDefault
+		// ordering — avoids silent failure if SetDefault is moved in a future refactor.
+		tmpLog := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+		tmpLog.Error("auth.Init failed", "error", err)
 		os.Exit(1)
 	}
 	slog.Info("auth initialized", "jwks_url", jwksURL)
+
+	bizClient := &httpBizClient{
+		bizServiceURL: cfg.HTTPgw.BizServiceURL,
+		httpClient: &http.Client{
+			Timeout: 10 * time.Second,
+		},
+		version: cfg.Version,
+	}
 
 	// Use a mux for path-based auth scoping.
 	mux := http.NewServeMux()
@@ -165,11 +168,13 @@ func main() {
 	} else if cfg.HTTPgw.TLS != nil && cfg.HTTPgw.TLS.Cert != "" && cfg.HTTPgw.TLS.Key != "" {
 		tlsConfig = &tls.Config{
 			MinVersion: tls.VersionTLS13,
+			MaxVersion: tls.VersionTLS13, // Enforce ceiling — prevents TLS 1.2 fallback
 			CurvePreferences: []tls.CurveID{
 				tls.X25519,
 				tls.CurveP384,
 				tls.CurveP256,
 			},
+			// Cipher suites per docs/design/15_sbi_security.md §2.1 (TLS 1.3 suites only)
 			CipherSuites: []uint16{
 				tls.TLS_AES_256_GCM_SHA384,
 				tls.TLS_AES_128_GCM_SHA256,

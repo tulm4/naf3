@@ -295,8 +295,17 @@ func main() {
 	}
 }
 
+// handleAaaForward forwards a request from the AAA Gateway to the Biz Pod.
+// This endpoint is reserved for future AAA-initiated callbacks (e.g., NAS re-auth
+// triggered by AAA-S without a preceding Nnssaaf_NSSAA_Authenticate request).
+//
+// Currently not implemented — AAA-initiated flows are handled via the
+// /aaa/server-initiated endpoint instead. This route exists as a placeholder
+// for the N59-like reverse direction and will be implemented when the
+// AAA Gateway needs to push requests to the Biz Pod without a correlating
+// outbound call.
 func handleAaaForward(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "not implemented", http.StatusNotImplemented)
+	http.Error(w, "aaa-forward is not implemented; use /aaa/server-initiated", http.StatusNotImplemented)
 }
 
 func handleServerInitiated(w http.ResponseWriter, r *http.Request) {

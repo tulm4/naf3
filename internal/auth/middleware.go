@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -58,15 +57,14 @@ func Middleware(requiredScope string) func(http.Handler) http.Handler {
 }
 
 // writeError writes a JSON error response.
-//
-//nolint:unparam // writeError is designed to accept any status code for flexibility
+// RFC 7807 ProblemDetails requires "status" as an integer.
 func writeError(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"type":   "https://tools.ietf.org/html/rfc9110#section-15.5.2",
 		"title":  "Unauthorized",
-		"status": fmt.Sprintf("%d", status),
+		"status": status,
 		"detail": message,
 	})
 }
