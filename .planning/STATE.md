@@ -143,8 +143,7 @@ Phase 6 context supplemented with new E2E and conformance test decisions from `d
 
 - D-08: AIW E2E at two layers — Biz Pod unit tests with mock AAA client + 3-component E2E with AUSF mock httptest server and `mock-aaa-s` container
 - Conformance tests use table-driven naming (one function per spec, subtests by case type) — matches `engine_test.go` pattern
-
-Not this phase: k6 load tests (Phase 8), chaos testing (Phase 8), K8s manifests for NRM (Phase 7).
+- AIW E2E gap identified: PLAN-5 covered NSSAA E2E but not AIW E2E at 3-component level. **PLAN-6 added** covering AIW 3-component E2E (6 cases) + AIW conformance TS 29.526 §7.3 (13 cases)
 
 See: `.planning/phases/06-integration-testing-nrm/06-CONTEXT.md`
 

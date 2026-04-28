@@ -47,6 +47,7 @@ Not this phase: k6 load tests (Phase 8), chaos testing (Phase 8), Kubernetes man
   - **3-component E2E tests** — verify HTTP GW routing, AAA GW transport, and MSK forwarding end-to-end via `StartAUSFMock()` httptest server + `mock-aaa-s` container
 - Both layers use the AUSF mock from `test/mocks/ausf.go` (httptest server, matching D-02)
 - Covers all AIW test cases from `docs/design/24_test_strategy.md` §5.3: MSK extraction, TTLS inner method, EAP failure, invalid SUPI, AAA not configured
+- **PLAN-6 added** to cover the AIW 3-component E2E gap (test/e2e/aiw_flow_test.go, 6 cases) and AIW conformance gap (test/conformance/aiw_conformance_test.go, 13 cases)
 
 ### Claude's Discretion
 - Alarm severity thresholds and deduplication policy
