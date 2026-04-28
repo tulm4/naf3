@@ -21,6 +21,12 @@ Not this phase: k6 load tests (Phase 8), chaos testing (Phase 8), Kubernetes man
 - Docker-compose sidecar pattern: familiar since compose already exists for local dev; separate test entrypoint (`docker-compose -f compose.yaml -f compose.test.yaml`) with isolated networks
 - No testcontainers — keeps test runs deterministic and CI simple
 
+### NF mock strategy
+- **D-02:** NRF, UDM, AMF, AUSF mocked as in-process httptest servers in the test binary — HTTP/JSON mocks, no separate containers needed
+- **D-03:** AAA-S (RADIUS/Diameter EAP simulator) gets its own dedicated container — real EAP-TLS stack, configurable auth results (Success/Failure/Challenge), can test actual TLS certificate chain validation
+- AAA-S simulator: lightweight Go binary in `test/mocks/aaasim/` or a test helper package; configured via environment variables or config file in the test compose
+- AMF mock also needs to receive re-auth/revocation HTTP POST callbacks from NSSAAF — httptest server handles this for unit/integration; E2E uses the dedicated AMF mock container
+
 ### Claude's Discretion
 - Exact test directory structure (`test/unit/`, `test/integration/`, `test/e2e/`, `test/conformance/` vs co-located `*_test.go` alongside source)
 - Naming conventions for conformance test suites
@@ -79,6 +85,7 @@ Not this phase: k6 load tests (Phase 8), chaos testing (Phase 8), Kubernetes man
 - `compose.yaml` + `compose/configs/` — test compose extends existing dev compose
 - `internal/nrm/` does not exist yet — new package needed for RESTCONF server and alarm manager
 - All 21 existing `*_test.go` files already cover core paths — Phase 6 fills gaps and adds NRM
+- `test/mocks/` directory: `test/mocks/aaasim/` for the AAA-S simulator (dedicated container); `test/mocks/` for NRF/UDM/AMF/AUSF httptest helpers
 
 </code_context>
 
