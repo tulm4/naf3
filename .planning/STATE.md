@@ -137,6 +137,17 @@ Not this phase: k6 load tests (Phase 8), chaos testing (Phase 8), K8s manifests 
 
 See: `.planning/phases/06-integration-testing-nrm/06-CONTEXT.md`
 
+### 2026-04-28 — Phase 6 discussion (supplemental)
+
+Phase 6 context supplemented with new E2E and conformance test decisions from `docs/design/24_test_strategy.md` §5-6:
+
+- D-08: AIW E2E at two layers — Biz Pod unit tests with mock AAA client + 3-component E2E with AUSF mock httptest server and `mock-aaa-s` container
+- Conformance tests use table-driven naming (one function per spec, subtests by case type) — matches `engine_test.go` pattern
+
+Not this phase: k6 load tests (Phase 8), chaos testing (Phase 8), K8s manifests for NRM (Phase 7).
+
+See: `.planning/phases/06-integration-testing-nrm/06-CONTEXT.md`
+
 ---
 
 *Last updated: 2026-04-28*
