@@ -38,9 +38,15 @@ func (s *Store) Load(id string) (*nssaa.AuthCtx, error) {
 }
 
 // Save stores or updates a slice authentication context.
+// If the session does not exist (Update returns ErrSessionNotFound),
+// Create is called to insert it first.
 func (s *Store) Save(ctx *nssaa.AuthCtx) error {
 	session := authCtxToSession(ctx)
-	return s.repo.Update(context.Background(), session)
+	err := s.repo.Update(context.Background(), session)
+	if errors.Is(err, ErrSessionNotFound) {
+		return s.repo.Create(context.Background(), session)
+	}
+	return err
 }
 
 // Delete removes a slice authentication context by authCtxID.
@@ -77,9 +83,15 @@ func (s *AIWStore) Load(id string) (*aiw.AuthContext, error) {
 }
 
 // Save stores or updates an AIW authentication context.
+// If the session does not exist (Update returns ErrSessionNotFound),
+// Create is called to insert it first.
 func (s *AIWStore) Save(ctx *aiw.AuthContext) error {
 	session := aiwAuthCtxToSession(ctx)
-	return s.repo.Update(context.Background(), session)
+	err := s.repo.Update(context.Background(), session)
+	if errors.Is(err, ErrSessionNotFound) {
+		return s.repo.Create(context.Background(), session)
+	}
+	return err
 }
 
 // Delete removes an AIW authentication context by authCtxID.

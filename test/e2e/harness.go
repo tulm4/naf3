@@ -68,6 +68,12 @@ type Harness struct {
 func NewHarness(t *testing.T) *Harness {
 	t.Helper()
 
+	// Check if docker-compose is available; skip if not.
+	if _, err := exec.LookPath("docker-compose"); err != nil {
+		t.Skip("docker-compose not found in $PATH; E2E tests require Docker. Skipping.")
+		return &Harness{t: t, mu: sync.Mutex{}}
+	}
+
 	h := &Harness{
 		t:            t,
 		composeFile:  getEnv("DOCKER_COMPOSE", "-f compose/dev.yaml -f compose/test.yaml"),
@@ -199,21 +205,23 @@ func (h *Harness) StartAMFMock() *httptest.Server {
 // ─── Internal helpers ───────────────────────────────────────────────────────
 
 func (h *Harness) upCompose(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, "docker-compose", parseComposeFlags(h.composeFile)...)
+	args := []string{"-f", "compose/dev.yaml", "-f", "compose/test.yaml", "up", "-d"}
+	cmd := exec.CommandContext(ctx, "docker-compose", args...)
 	cmd.Dir = projectRoot()
 	cmd.Env = os.Environ()
-	out, _ := cmd.CombinedOutput()
+	out, err := cmd.CombinedOutput()
 	h.t.Logf("compose up output:\n%s", out)
-	return cmd.Wait()
+	return err
 }
 
 func (h *Harness) downCompose(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, "docker-compose", parseComposeFlags(h.composeFile)...)
+	args := []string{"-f", "compose/dev.yaml", "-f", "compose/test.yaml", "down"}
+	cmd := exec.CommandContext(ctx, "docker-compose", args...)
 	cmd.Dir = projectRoot()
 	cmd.Env = os.Environ()
-	out, _ := cmd.CombinedOutput()
+	out, err := cmd.CombinedOutput()
 	h.t.Logf("compose down output:\n%s", out)
-	return cmd.Wait()
+	return err
 }
 
 func parseComposeFlags(s string) []string {

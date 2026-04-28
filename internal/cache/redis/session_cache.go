@@ -25,8 +25,8 @@ func NewSessionCache(client redis.Cmdable, ttl time.Duration) *SessionCache {
 	return &SessionCache{client: client, ttl: ttl}
 }
 
-// sessionCacheEntry is the serialized session cache value.
-type sessionCacheEntry struct {
+// SessionCacheEntry is the serialized session cache value.
+type SessionCacheEntry struct {
 	SnssaiSST   uint8  `json:"snssai_sst"`
 	SnssaiSD    string `json:"snssai_sd"`
 	NssaaStatus string `json:"nssaa_status"`
@@ -40,7 +40,7 @@ func sessionKey(authCtxID string) string {
 }
 
 // Get retrieves a cached session entry.
-func (c *SessionCache) Get(ctx context.Context, authCtxID string) (*sessionCacheEntry, error) {
+func (c *SessionCache) Get(ctx context.Context, authCtxID string) (*SessionCacheEntry, error) {
 	key := sessionKey(authCtxID)
 	val, err := c.client.Get(ctx, key).Bytes()
 	if err != nil {
@@ -50,7 +50,7 @@ func (c *SessionCache) Get(ctx context.Context, authCtxID string) (*sessionCache
 		return nil, fmt.Errorf("session cache get: %w", err)
 	}
 
-	var entry sessionCacheEntry
+	var entry SessionCacheEntry
 	if err := json.Unmarshal(val, &entry); err != nil {
 		return nil, fmt.Errorf("session cache unmarshal: %w", err)
 	}
@@ -58,7 +58,7 @@ func (c *SessionCache) Get(ctx context.Context, authCtxID string) (*sessionCache
 }
 
 // Set stores a session entry with TTL.
-func (c *SessionCache) Set(ctx context.Context, authCtxID string, entry *sessionCacheEntry) error {
+func (c *SessionCache) Set(ctx context.Context, authCtxID string, entry *SessionCacheEntry) error {
 	key := sessionKey(authCtxID)
 	data, err := json.Marshal(entry)
 	if err != nil {

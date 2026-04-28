@@ -6,6 +6,7 @@
   "agents_installed": true,
   "parallelization": true,
   "commit_docs": true,
+  "runtime": "claude",
   "model_profile": "balanced",
   "workflow": {
     "research": true,
@@ -19,8 +20,17 @@
     "commit_docs": true
   },
   "agent_skills": {
-    "gsd-executor": ["skills/golang-patterns", "skills/golang-testing"],
-    "gsd-code-reviewer": ["skills/golang-patterns", "skills/golang-testing"],
-    "gsd-code-fixer": ["skills/golang-patterns", "skills/golang-testing"]
+    "gsd-executor": [
+      "skills/golang-patterns",
+      "skills/golang-testing"
+    ],
+    "gsd-code-reviewer": [
+      "skills/golang-patterns",
+      "skills/golang-testing"
+    ],
+    "gsd-code-fixer": [
+      "skills/golang-patterns",
+      "skills/golang-testing"
+    ]
   }
 }

@@ -247,7 +247,7 @@ Check off validation items:
 
 - [x] `go build ./...` compiles without errors
 - [x] `go test ./...` passes
-- [ ] `golangci-lint run ./...` passes
+- [x] `golangci-lint run ./...` passes
 ```
 
 #### 4. GSD State Files

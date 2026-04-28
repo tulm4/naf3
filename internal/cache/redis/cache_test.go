@@ -69,7 +69,7 @@ func TestHashPayloadEmpty(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestSessionCacheEntry(t *testing.T) {
-	entry := &sessionCacheEntry{
+	entry := &SessionCacheEntry{
 		SnssaiSST:   1,
 		SnssaiSD:    "ABCDEF",
 		NssaaStatus: "PENDING",
@@ -155,7 +155,7 @@ func TestKeyPrefixes(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestSessionCacheEntryRoundTrip(t *testing.T) {
-	entry := &sessionCacheEntry{
+	entry := &SessionCacheEntry{
 		SnssaiSST:   1,
 		SnssaiSD:    "ABCDEF",
 		NssaaStatus: "EAP_SUCCESS",

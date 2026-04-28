@@ -23,8 +23,7 @@ provides:
 affects:
   - 06-PLAN-3 (integration tests using these mocks)
   - 06-PLAN-4 (AIW integration tests)
-  - 06-PLAN-5 (NSSAA 3-component E2E)
-  - 06-PLAN-6 (AIW 3-component E2E)
+  - 06-PLAN-5 (E2E + conformance: NSSAA + AIW)
 
 # Tech tracking
 tech-stack:
