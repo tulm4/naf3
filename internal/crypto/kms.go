@@ -49,9 +49,6 @@ func (m *SoftKeyManager) Wrap(ctx context.Context, dek []byte) ([]byte, int, err
 func (m *SoftKeyManager) Unwrap(ctx context.Context, wrappedDEK []byte) ([]byte, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if m == nil {
-		return nil, ErrDEKUnwrapFailed
-	}
 	dek, err := m.unwrapWithKey(wrappedDEK, m.masterKey)
 	if err == nil {
 		return dek, nil
@@ -162,21 +159,21 @@ func (m *VaultKeyManager) Wrap(ctx context.Context, dek []byte) ([]byte, int, er
 		return nil, 0, fmt.Errorf("vault wrap: new request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if err := m.setAuthHeader(req); err != nil {
-		return nil, 0, fmt.Errorf("vault wrap: auth: %w", err)
+	if authErr := m.setAuthHeader(req); authErr != nil {
+		return nil, 0, fmt.Errorf("vault wrap: auth: %w", authErr)
 	}
 	resp, err := m.httpClient.Do(req)
 	if err != nil {
 		return nil, 0, fmt.Errorf("vault wrap: request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return nil, 0, fmt.Errorf("vault wrap: status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 	var vaultResp vaultEncryptResponse
-	if err := json.NewDecoder(resp.Body).Decode(&vaultResp); err != nil {
-		return nil, 0, fmt.Errorf("vault wrap: decode: %w", err)
+	if decodeErr := json.NewDecoder(resp.Body).Decode(&vaultResp); decodeErr != nil {
+		return nil, 0, fmt.Errorf("vault wrap: decode: %w", decodeErr)
 	}
 	ver, err := m.GetKeyVersion(ctx)
 	if err != nil {
@@ -196,21 +193,21 @@ func (m *VaultKeyManager) Unwrap(ctx context.Context, wrappedDEK []byte) ([]byte
 		return nil, fmt.Errorf("vault unwrap: new request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if err := m.setAuthHeader(req); err != nil {
-		return nil, fmt.Errorf("vault unwrap: auth: %w", err)
+	if authErr := m.setAuthHeader(req); authErr != nil {
+		return nil, fmt.Errorf("vault unwrap: auth: %w", authErr)
 	}
 	resp, err := m.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("vault unwrap: request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("vault unwrap: status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 	var vaultResp vaultDecryptResponse
-	if err := json.NewDecoder(resp.Body).Decode(&vaultResp); err != nil {
-		return nil, fmt.Errorf("vault unwrap: decode: %w", err)
+	if decodeErr := json.NewDecoder(resp.Body).Decode(&vaultResp); decodeErr != nil {
+		return nil, fmt.Errorf("vault unwrap: decode: %w", decodeErr)
 	}
 	dek, err := base64.StdEncoding.DecodeString(vaultResp.Data.Plaintext)
 	if err != nil {
@@ -225,20 +222,20 @@ func (m *VaultKeyManager) GetKeyVersion(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("vault keyversion: new request: %w", err)
 	}
-	if err := m.setAuthHeader(req); err != nil {
-		return 0, fmt.Errorf("vault keyversion: auth: %w", err)
+	if authErr := m.setAuthHeader(req); authErr != nil {
+		return 0, fmt.Errorf("vault keyversion: auth: %w", authErr)
 	}
 	resp, err := m.httpClient.Do(req)
 	if err != nil {
 		return 0, fmt.Errorf("vault keyversion: request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return 0, fmt.Errorf("vault keyversion: status %d", resp.StatusCode)
 	}
 	var info vaultKeyInfo
-	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
-		return 0, fmt.Errorf("vault keyversion: decode: %w", err)
+	if decodeErr := json.NewDecoder(resp.Body).Decode(&info); decodeErr != nil {
+		return 0, fmt.Errorf("vault keyversion: decode: %w", decodeErr)
 	}
 	maxVer := 0
 	for v := range info.Data.Keys {
@@ -266,14 +263,14 @@ func (m *VaultKeyManager) RotateKey(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("vault rotate: new request: %w", err)
 	}
-	if err := m.setAuthHeader(req); err != nil {
-		return fmt.Errorf("vault rotate: auth: %w", err)
+	if authErr := m.setAuthHeader(req); authErr != nil {
+		return fmt.Errorf("vault rotate: auth: %w", authErr)
 	}
 	resp, err := m.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("vault rotate: request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("vault rotate: status %d: %s", resp.StatusCode, string(bodyBytes))
@@ -314,7 +311,7 @@ func NewSoftHSMKeyManager(cfg *SoftHSMConfig) (*SoftHSMKeyManager, error) {
 	return &SoftHSMKeyManager{
 		libraryPath: cfg.LibraryPath,
 		tokenLabel:  cfg.TokenLabel,
-		pin:        cfg.PIN,
+		pin:         cfg.PIN,
 	}, nil
 }
 

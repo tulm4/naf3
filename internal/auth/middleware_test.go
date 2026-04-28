@@ -20,7 +20,7 @@ func TestAuthMiddleware(t *testing.T) {
 	t.Run("missing_auth_header", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/nnssaaf-nssaa/v1/", nil)
 		rr := httptest.NewRecorder()
-		mw := AuthMiddleware("nnssaaf-nssaa")(nextHandler)
+		mw := Middleware("nnssaaf-nssaa")(nextHandler)
 		mw.ServeHTTP(rr, req)
 		if rr.Code != http.StatusUnauthorized {
 			t.Errorf("expected 401, got %d", rr.Code)
@@ -32,7 +32,7 @@ func TestAuthMiddleware(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/nnssaaf-nssaa/v1/", nil)
 		req.Header.Set("Authorization", "Basic dXNlcjpwYXNz")
 		rr := httptest.NewRecorder()
-		mw := AuthMiddleware("nnssaaf-nssaa")(nextHandler)
+		mw := Middleware("nnssaaf-nssaa")(nextHandler)
 		mw.ServeHTTP(rr, req)
 		if rr.Code != http.StatusUnauthorized {
 			t.Errorf("expected 401, got %d", rr.Code)
@@ -44,7 +44,7 @@ func TestAuthMiddleware(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/nnssaaf-nssaa/v1/", nil)
 		req.Header.Set("Authorization", "Bearer ")
 		rr := httptest.NewRecorder()
-		mw := AuthMiddleware("nnssaaf-nssaa")(nextHandler)
+		mw := Middleware("nnssaaf-nssaa")(nextHandler)
 		mw.ServeHTTP(rr, req)
 		if rr.Code != http.StatusUnauthorized {
 			t.Errorf("expected 401, got %d", rr.Code)
@@ -93,7 +93,7 @@ func TestAuthMiddlewareWithOptions_SkipPaths(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	mw := AuthMiddlewareWithOptions("nnssaaf-nssaa", WithSkipPaths("/healthz/"))
+	mw := MiddlewareWithOptions("nnssaaf-nssaa", WithSkipPaths("/healthz/"))
 
 	// Skip path → no auth
 	t.Run("skip_path", func(t *testing.T) {

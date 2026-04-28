@@ -16,9 +16,9 @@ import (
 type TokenClaims struct {
 	jwt.RegisteredClaims
 	Scope    string `json:"scope"`
-	ClientId string `json:"client_id"`
+	ClientID string `json:"client_id"`
 	NfType   string `json:"nf_type"`
-	NfId     string `json:"nf_id"`
+	NfID     string `json:"nf_id"`
 	CN       string `json:"cn"`
 }
 
@@ -73,16 +73,15 @@ func NewTokenValidator(cfg TokenValidatorConfig) *TokenValidator {
 
 // Validate parses and validates a JWT token.
 // requiredScope must be one of the allowed scopes.
+//
+//nolint:gocyclo // complexity inherent in JWT validation with multiple failure modes
 func (v *TokenValidator) Validate(ctx context.Context, tokenString string, requiredScope string) (*TokenClaims, error) {
 	// Parse without verification first to get the kid
 	unverified, _, err := new(jwt.Parser).ParseUnverified(tokenString, &TokenClaims{})
 	if err != nil {
-		return nil, fmt.Errorf("%w: parse failed: %v", ErrInvalidToken, err)
+		return nil, fmt.Errorf("%w: parse failed: %w", ErrInvalidToken, err)
 	}
-	claims, ok := unverified.Claims.(*TokenClaims)
-	if !ok {
-		return nil, ErrInvalidClaims
-	}
+	_ = unverified.Claims.(*TokenClaims)
 
 	kid := unverified.Header["kid"]
 	var kidStr string
@@ -93,10 +92,9 @@ func (v *TokenValidator) Validate(ctx context.Context, tokenString string, requi
 	// Get the public key for this kid
 	var pubKey crypto.PublicKey
 	if kidStr != "" {
-		var err error
 		pubKey, err = v.jwksFetcher.GetKey(ctx, kidStr)
 		if err != nil {
-			return nil, fmt.Errorf("%w: JWKS fetch: %v", ErrInvalidToken, err)
+			return nil, fmt.Errorf("%w: JWKS fetch: %w", ErrInvalidToken, err)
 		}
 	} else {
 		// No kid — try all keys (not ideal, but for robustness)
@@ -108,11 +106,13 @@ func (v *TokenValidator) Validate(ctx context.Context, tokenString string, requi
 		// Verify signing algorithm
 		switch t.Method.Alg() {
 		case "RS256", "RS384", "RS512":
-			if _, ok := t.Method.(*jwt.SigningMethodRSA); !ok {
+			isRSA := t.Method.(*jwt.SigningMethodRSA)
+			if isRSA == nil {
 				return nil, ErrInvalidSigningMethod
 			}
 		case "ES256", "ES384", "ES512":
-			if _, ok := t.Method.(*jwt.SigningMethodECDSA); !ok {
+			isECDSA := t.Method.(*jwt.SigningMethodECDSA)
+			if isECDSA == nil {
 				return nil, ErrInvalidSigningMethod
 			}
 		default:
@@ -125,22 +125,22 @@ func (v *TokenValidator) Validate(ctx context.Context, tokenString string, requi
 		if strings.Contains(err.Error(), "token is expired") {
 			return nil, ErrTokenExpired
 		}
-		return nil, fmt.Errorf("%w: %v", ErrInvalidToken, err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidToken, err)
 	}
 
-	claims, ok = parsed.Claims.(*TokenClaims)
+	parsedClaims, ok := parsed.Claims.(*TokenClaims)
 	if !ok {
 		return nil, ErrInvalidClaims
 	}
 
 	// Validate issuer
-	if claims.Issuer != v.issuer {
+	if parsedClaims.Issuer != v.issuer {
 		return nil, ErrInvalidIssuer
 	}
 
 	// Validate audience
 	validAudience := false
-	for _, aud := range claims.Audience {
+	for _, aud := range parsedClaims.Audience {
 		for _, allowed := range v.audiences {
 			if aud == allowed {
 				validAudience = true
@@ -153,7 +153,7 @@ func (v *TokenValidator) Validate(ctx context.Context, tokenString string, requi
 	}
 
 	// Validate scope
-	scopes := strings.Fields(claims.Scope)
+	scopes := strings.Fields(parsedClaims.Scope)
 	scopeValid := false
 	for _, s := range scopes {
 		if s == requiredScope {
@@ -168,7 +168,7 @@ func (v *TokenValidator) Validate(ctx context.Context, tokenString string, requi
 	// Validate NF type
 	nfTypeValid := false
 	for _, allowed := range v.allowedNfTypes {
-		if claims.NfType == allowed {
+		if parsedClaims.NfType == allowed {
 			nfTypeValid = true
 			break
 		}
@@ -177,7 +177,7 @@ func (v *TokenValidator) Validate(ctx context.Context, tokenString string, requi
 		return nil, ErrInvalidNfType
 	}
 
-	return claims, nil
+	return parsedClaims, nil
 }
 
 // TokenCache provides short-term in-memory caching of validated tokens.

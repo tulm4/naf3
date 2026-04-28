@@ -100,14 +100,14 @@ func (f *JWKSFetcher) refreshLocked(ctx context.Context) error {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.jwksURL, nil)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrJWKSFetch, err)
+		return fmt.Errorf("%w: %w", ErrJWKSFetch, err)
 	}
 
 	resp, err := f.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrJWKSFetch, err)
+		return fmt.Errorf("%w: %w", ErrJWKSFetch, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("%w: NRF JWKS returned %d", ErrJWKSFetch, resp.StatusCode)
@@ -115,7 +115,7 @@ func (f *JWKSFetcher) refreshLocked(ctx context.Context) error {
 
 	var jwks JWKS
 	if err := json.NewDecoder(resp.Body).Decode(&jwks); err != nil {
-		return fmt.Errorf("%w: invalid JSON: %v", ErrJWKSFetch, err)
+		return fmt.Errorf("%w: invalid JSON: %w", ErrJWKSFetch, err)
 	}
 
 	newEntries := make(map[string]crypto.PublicKey)

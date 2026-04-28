@@ -2,6 +2,7 @@ package crypto
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"testing"
 )
@@ -411,7 +412,7 @@ func TestSoftKeyManagerWrapUnwrap(t *testing.T) {
 		dek[i] = byte(i)
 	}
 
-	wrapped, ver, err := mgr.Wrap(nil, dek)
+	wrapped, ver, err := mgr.Wrap(context.Background(), dek)
 	if err != nil {
 		t.Fatalf("Wrap: %v", err)
 	}
@@ -419,7 +420,7 @@ func TestSoftKeyManagerWrapUnwrap(t *testing.T) {
 		t.Errorf("Wrap: got version %d, want 1", ver)
 	}
 
-	unwrapped, err := mgr.Unwrap(nil, wrapped)
+	unwrapped, err := mgr.Unwrap(context.Background(), wrapped)
 	if err != nil {
 		t.Fatalf("Unwrap: %v", err)
 	}
@@ -443,12 +444,12 @@ func TestSoftKeyManagerUnwrapWrongKey(t *testing.T) {
 		dek[i] = byte(i)
 	}
 
-	wrapped, _, err := mgr1.Wrap(nil, dek)
+	wrapped, _, err := mgr1.Wrap(context.Background(), dek)
 	if err != nil {
 		t.Fatalf("Wrap: %v", err)
 	}
 
-	_, err = mgr2.Unwrap(nil, wrapped)
+	_, err = mgr2.Unwrap(context.Background(), wrapped)
 	if err == nil {
 		t.Error("Unwrap with wrong manager's key: expected error, got nil")
 	}
@@ -458,9 +459,10 @@ func TestInitTwice(t *testing.T) {
 	defer func() {
 		globalKM = nil
 	}()
-	Init(&Config{KeyManager: "soft", MasterKeyHex: "0102030405060708091011121314151617181920212223242526272829303132"})
-	err := Init(&Config{KeyManager: "soft", MasterKeyHex: "0102030405060708091011121314151617181920212223242526272829303132"})
-	if err == nil {
+	if err := Init(&Config{KeyManager: "soft", MasterKeyHex: "0102030405060708091011121314151617181920212223242526272829303132"}); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if init2err := Init(&Config{KeyManager: "soft", MasterKeyHex: "0102030405060708091011121314151617181920212223242526272829303132"}); init2err == nil {
 		t.Error("Init twice: expected error, got nil")
 	}
 }

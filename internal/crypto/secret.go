@@ -6,13 +6,13 @@ import (
 )
 
 type EncryptedSecret struct {
-	ID            string    `json:"id"`
+	ID           string    `json:"id"`
 	AaaConfigID  string    `json:"aaa_config_id"`
 	Ciphertext   []byte    `json:"ct"`
 	Nonce        []byte    `json:"n"`
 	Tag          []byte    `json:"t"`
 	EncryptedDEK []byte    `json:"ed"`
-	DEKVersion  int       `json:"dv"`
+	DEKVersion   int       `json:"dv"`
 	Version      int       `json:"v"`
 	CreatedAt    time.Time `json:"created_at"`
 	ExpiresAt    time.Time `json:"expires_at"`
@@ -46,7 +46,7 @@ func EncryptSecret(ctx context.Context, plaintextSecret string, km KeyManager) (
 		Nonce:        dataEnc.Nonce,
 		Tag:          dataEnc.Tag,
 		EncryptedDEK: wrappedDEK,
-		DEKVersion:  ver,
+		DEKVersion:   ver,
 		Version:      1,
 		CreatedAt:    now,
 		ExpiresAt:    now.Add(90 * 24 * time.Hour),
@@ -62,8 +62,8 @@ func DecryptSecret(ctx context.Context, es *EncryptedSecret, km KeyManager) (str
 
 	raw, err := Decrypt(EncryptedData{
 		Ciphertext: es.Ciphertext,
-		Nonce:     es.Nonce,
-		Tag:       es.Tag,
+		Nonce:      es.Nonce,
+		Tag:        es.Tag,
 	}, dek, nil)
 	if err != nil {
 		return "", err

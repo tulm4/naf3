@@ -54,6 +54,8 @@ func newHTTPAAAClient(aaaGatewayURL, redisAddr, podID, version string, httpClien
 
 // newHTTPAAAClientForTest creates a new HTTP AAA client with a provided Redis client.
 // This is for unit tests that need to inject a mock Redis client.
+//
+//nolint:unparam // podID parameter is always "test-pod" in test calls
 func newHTTPAAAClientForTest(aaaGatewayURL, podID, version string, httpClient *http.Client, redisClient *redis.Client) *httpAAAClient {
 	return &httpAAAClient{
 		aaaGatewayURL: aaaGatewayURL,
@@ -95,7 +97,7 @@ func (c *httpAAAClient) SendEAP(ctx context.Context, authCtxID string, eapPayloa
 	if err != nil {
 		return nil, fmt.Errorf("aaa gateway unavailable: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("aaa gateway returned %d", resp.StatusCode)
@@ -115,7 +117,7 @@ func (c *httpAAAClient) subscribeResponses(ctx context.Context) {
 		return
 	}
 	ch := c.redis.PSubscribe(ctx, proto.AaaResponseChannel)
-	defer ch.Close()
+	defer func() { _ = ch.Close() }()
 
 	for {
 		select {

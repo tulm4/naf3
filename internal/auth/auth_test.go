@@ -6,6 +6,7 @@ import (
 	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -36,7 +37,7 @@ func TestTokenValidator_Validate(t *testing.T) {
 				},
 			},
 		}
-		json.NewEncoder(w).Encode(jwks)
+		_ = json.NewEncoder(w).Encode(jwks)
 	}))
 	defer jwksServer.Close()
 
@@ -90,7 +91,7 @@ func TestTokenValidator_Validate(t *testing.T) {
 		"iat":     time.Now().Add(-2 * time.Hour).Unix(),
 	})
 	_, err = validator.Validate(context.Background(), expiredToken, "nnssaaf-nssaa")
-	if err != ErrTokenExpired {
+	if !errors.Is(err, ErrTokenExpired) {
 		t.Errorf("expected ErrTokenExpired, got %v", err)
 	}
 
@@ -102,7 +103,7 @@ func TestTokenValidator_Validate(t *testing.T) {
 		"exp":   time.Now().Add(time.Hour).Unix(),
 	})
 	_, err = validator.Validate(context.Background(), wrongIssuerToken, "nnssaaf-nssaa")
-	if err != ErrInvalidIssuer {
+	if !errors.Is(err, ErrInvalidIssuer) {
 		t.Errorf("expected ErrInvalidIssuer, got %v", err)
 	}
 
@@ -114,7 +115,7 @@ func TestTokenValidator_Validate(t *testing.T) {
 		"exp":   time.Now().Add(time.Hour).Unix(),
 	})
 	_, err = validator.Validate(context.Background(), wrongAudToken, "nnssaaf-nssaa")
-	if err != ErrInvalidAudience {
+	if !errors.Is(err, ErrInvalidAudience) {
 		t.Errorf("expected ErrInvalidAudience, got %v", err)
 	}
 
@@ -126,11 +127,12 @@ func TestTokenValidator_Validate(t *testing.T) {
 		"exp":   time.Now().Add(time.Hour).Unix(),
 	})
 	_, err = validator.Validate(context.Background(), noScopeToken, "nnssaaf-nssaa")
-	if err != ErrInsufficientScope {
+	if !errors.Is(err, ErrInsufficientScope) {
 		t.Errorf("expected ErrInsufficientScope, got %v", err)
 	}
 }
 
+//nolint:unparam // test helper where kid parameter is always "test-key-1"
 func createTestToken(t *testing.T, privKey *rsa.PrivateKey, kid string, claims jwt.MapClaims) string {
 	t.Helper()
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)

@@ -123,7 +123,7 @@ func main() {
 		slog.Error("redis pool", "error", err)
 		os.Exit(1)
 	}
-	defer redisPool.Close()
+	defer func() { _ = redisPool.Close() }()
 
 	// REQ-10: DLQ for AMF notification failures
 	dlq := redis.NewDLQ(redisPool)
@@ -260,8 +260,8 @@ func main() {
 			_ = nrf.Deregister(nrfCtx) // best-effort
 		}
 
-		srv.Shutdown(ctx)
-		aaaClient.Close()
+		_ = srv.Shutdown(ctx)
+		_ = aaaClient.Close()
 	}
 }
 
@@ -308,7 +308,7 @@ func handleServerInitiated(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(proto.AaaServerInitiatedResponse{
+	_ = json.NewEncoder(w).Encode(proto.AaaServerInitiatedResponse{
 		Version:   proto.CurrentVersion,
 		SessionID: req.SessionID,
 		AuthCtxID: req.AuthCtxID,
@@ -316,17 +316,17 @@ func handleServerInitiated(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func handleReAuth(ctx context.Context, req *proto.AaaServerInitiatedRequest) []byte {
+func handleReAuth(_ context.Context, req *proto.AaaServerInitiatedRequest) []byte {
 	slog.Info("handle_re_auth", "auth_ctx_id", req.AuthCtxID, "session_id", req.SessionID)
 	return []byte{2, 0, 0, 12}
 }
 
-func handleRevocation(ctx context.Context, req *proto.AaaServerInitiatedRequest) []byte {
+func handleRevocation(_ context.Context, req *proto.AaaServerInitiatedRequest) []byte {
 	slog.Info("handle_revoc", "auth_ctx_id", req.AuthCtxID, "session_id", req.SessionID)
 	return []byte{}
 }
 
-func handleCoA(ctx context.Context, req *proto.AaaServerInitiatedRequest) []byte {
+func handleCoA(_ context.Context, req *proto.AaaServerInitiatedRequest) []byte {
 	slog.Info("handle_coa", "auth_ctx_id", req.AuthCtxID, "session_id", req.SessionID)
 	return []byte{2, 0, 0, 12}
 }
@@ -335,7 +335,7 @@ func handleCoA(ctx context.Context, req *proto.AaaServerInitiatedRequest) []byte
 // On context cancellation, it removes the pod from the SET.
 func podHeartbeat(ctx context.Context, redisAddr, podID string) {
 	rdb := goredis.NewClient(&goredis.Options{Addr: redisAddr})
-	defer rdb.Close()
+	defer func() { _ = rdb.Close() }()
 
 	// Register immediately on startup
 	if err := rdb.SAdd(ctx, proto.PodsKey, podID).Err(); err != nil {
@@ -391,7 +391,7 @@ func mustLoadCert(certPath, keyPath string) tls.Certificate {
 func handleLiveness(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(common.HeaderContentType, common.MediaTypeJSONVersion)
 	w.WriteHeader(http.StatusOK)
-	io.WriteString(w, `{"status":"ok","service":"nssAAF-biz"}`)
+	_, _ = io.WriteString(w, `{"status":"ok","service":"nssAAF-biz"}`)
 }
 
 // handleReadiness implements /healthz/ready — checks PostgreSQL, Redis, AAA GW, NRF.
@@ -408,6 +408,7 @@ func handleReadiness(w http.ResponseWriter, r *http.Request) {
 			checks["postgres"] = "ok"
 		}
 	} else {
+		//nolint:goconst // degraded string reflects actual runtime health check status
 		checks["postgres"] = "degraded (not initialized)"
 	}
 
@@ -444,7 +445,7 @@ func handleReadiness(w http.ResponseWriter, r *http.Request) {
 	} else {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}
-	json.NewEncoder(w).Encode(checks)
+	_ = json.NewEncoder(w).Encode(checks)
 }
 
 func signalReceived() <-chan struct{} {

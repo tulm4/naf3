@@ -17,6 +17,7 @@ const (
 	ComponentBiz         ComponentType = "biz"
 	ComponentAAAGateway  ComponentType = "aaa-gateway"
 	ComponentHTTPGateway ComponentType = "http-gateway"
+	keyManagerSoft       string        = "soft"
 )
 
 // Config holds all runtime configuration for nssAAF.
@@ -238,6 +239,8 @@ func Load(path string) (*Config, error) {
 
 // Validate checks that required fields are present for the configured component.
 // Returns an error describing the first missing field found.
+//
+//nolint:gocyclo // complexity inherent in config validation
 func (c *Config) Validate() error {
 	switch c.Component {
 	case ComponentBiz:
@@ -286,7 +289,7 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	if c.Crypto.KeyManager == "soft" {
+	if c.Crypto.KeyManager == keyManagerSoft {
 		if c.Crypto.MasterKeyHex == "" {
 			return fmt.Errorf("config.crypto.masterKeyHex is required when keyManager is soft (or set MASTER_KEY_HEX env var)")
 		}
@@ -348,6 +351,8 @@ func expandEnv(s string) string {
 }
 
 // applyDefaults sets sensible defaults for unset fields.
+//
+//nolint:gocyclo // complexity inherent in config defaults
 func applyDefaults(cfg *Config) {
 	if cfg.Server.Addr == "" {
 		cfg.Server.Addr = ":8080"
@@ -441,12 +446,12 @@ func applyDefaults(cfg *Config) {
 
 	// Crypto defaults (Phase 5 — Security & Crypto)
 	if cfg.Crypto.KeyManager == "" {
-		cfg.Crypto.KeyManager = "soft"
+		cfg.Crypto.KeyManager = keyManagerSoft
 	}
 	if cfg.Crypto.KEKOverlapDays == 0 {
 		cfg.Crypto.KEKOverlapDays = 30
 	}
-	if cfg.Crypto.KeyManager == "soft" && cfg.Crypto.MasterKeyHex == "" {
+	if cfg.Crypto.KeyManager == keyManagerSoft && cfg.Crypto.MasterKeyHex == "" {
 		cfg.Crypto.MasterKeyHex = os.Getenv("MASTER_KEY_HEX")
 	}
 }

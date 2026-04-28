@@ -21,16 +21,20 @@ func TestServer_HealthEndpoint(t *testing.T) {
 		if r.URL.Path == "/health" {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"status":"ok","service":"nssAAF-biz"}`))
+			_, _ = w.Write([]byte(`{"status":"ok","service":"nssAAF-biz"}`))
 			return
 		}
 		http.NotFound(w, r)
 	}))
 	defer server.Close()
 
-	resp, err := http.Get(server.URL + "/health")
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL+"/health", nil)
+	require.NoError(t, err)
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
 
 	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.NotEmpty(t, resp.Header.Get("Content-Type"))
 }
@@ -41,16 +45,20 @@ func TestServer_ReadyEndpoint(t *testing.T) {
 		if r.URL.Path == "/ready" {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"status":"ready","service":"nssAAF-biz"}`))
+			_, _ = w.Write([]byte(`{"status":"ready","service":"nssAAF-biz"}`))
 			return
 		}
 		http.NotFound(w, r)
 	}))
 	defer server.Close()
 
-	resp, err := http.Get(server.URL + "/ready")
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL+"/ready", nil)
+	require.NoError(t, err)
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
 
 	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
@@ -67,13 +75,15 @@ func TestServer_AaaForwardEndpoint_NotImplemented(t *testing.T) {
 	defer server.Close()
 
 	body := bytes.NewReader([]byte(`{}`))
-	req, err := http.NewRequest("POST", server.URL+"/aaa/forward", body)
+	req, err := http.NewRequestWithContext(context.Background(), "POST", server.URL+"/aaa/forward", body)
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
 
 	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
 	assert.Equal(t, http.StatusNotImplemented, resp.StatusCode)
 }
 
@@ -100,13 +110,15 @@ func TestServer_ServerInitiated_RAR(t *testing.T) {
 	body, err := json.Marshal(reqBody)
 	require.NoError(t, err)
 
-	req, err := http.NewRequest("POST", server.URL+"/aaa/server-initiated", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(context.Background(), "POST", server.URL+"/aaa/server-initiated", bytes.NewReader(body))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
 
 	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
 }
@@ -132,13 +144,15 @@ func TestServer_ServerInitiated_InvalidMessageType(t *testing.T) {
 	body, err := json.Marshal(reqBody)
 	require.NoError(t, err)
 
-	req, err := http.NewRequest("POST", server.URL+"/aaa/server-initiated", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(context.Background(), "POST", server.URL+"/aaa/server-initiated", bytes.NewReader(body))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
 
 	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }
 
@@ -154,12 +168,14 @@ func TestServer_ServerInitiated_WrongMethod(t *testing.T) {
 	}))
 	defer server.Close()
 
-	req, err := http.NewRequest("GET", server.URL+"/aaa/server-initiated", nil)
+	req, err := http.NewRequestWithContext(context.Background(), "GET", server.URL+"/aaa/server-initiated", nil)
 	require.NoError(t, err)
 
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
 
 	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
 	assert.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
 }
 
@@ -175,13 +191,15 @@ func TestServer_ServerInitiated_NonJSONContentType(t *testing.T) {
 	}))
 	defer server.Close()
 
-	req, err := http.NewRequest("POST", server.URL+"/aaa/server-initiated", bytes.NewReader([]byte(`{}`)))
+	req, err := http.NewRequestWithContext(context.Background(), "POST", server.URL+"/aaa/server-initiated", bytes.NewReader([]byte(`{}`)))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "text/plain")
 
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
 
 	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
 	assert.Equal(t, http.StatusUnsupportedMediaType, resp.StatusCode)
 }
 
@@ -222,9 +240,4 @@ func TestHandleCoA_Placeholder(t *testing.T) {
 
 	assert.NotNil(t, payload)
 	assert.NotEmpty(t, payload)
-}
-
-// testHTTPTimeout returns a 200ms timeout for use in HTTP client tests.
-func testHTTPTimeout() time.Duration {
-	return 200 * time.Millisecond
 }

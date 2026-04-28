@@ -26,8 +26,8 @@ func DeriveKey(ikm, salt, info []byte, length int) ([]byte, error) {
 	return hkdf.Expand(sha256.New, prk, string(info), length)
 }
 
-func SessionKEK(masterKey []byte, authCtxId string) ([]byte, error) {
-	info := []byte("nssaa-session-kek:" + authCtxId)
+func SessionKEK(masterKey []byte, authCtxID string) ([]byte, error) {
+	info := []byte("nssaa-session-kek:" + authCtxID)
 	return DeriveKey(masterKey, nil, info, 32)
 }
 

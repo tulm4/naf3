@@ -10,9 +10,8 @@ import (
 )
 
 var (
-	globalKM     KeyManager
-	globalConfig *Config
-	kmMu         sync.RWMutex
+	globalKM KeyManager
+	kmMu     sync.RWMutex
 )
 
 type Config struct {
@@ -24,17 +23,17 @@ type Config struct {
 }
 
 type VaultConfig struct {
-	Address   string
-	KeyName   string
+	Address    string
+	KeyName    string
 	AuthMethod string
-	K8sRole   string
-	Token     string
+	K8sRole    string
+	Token      string
 }
 
 type SoftHSMConfig struct {
 	LibraryPath string
-	TokenLabel string
-	PIN        string
+	TokenLabel  string
+	PIN         string
 }
 
 func DefaultConfig() *Config {
@@ -47,7 +46,6 @@ func Init(cfg *Config) error {
 	if globalKM != nil {
 		return errors.New("crypto.Init called twice")
 	}
-	globalConfig = cfg
 	switch cfg.KeyManager {
 	case "soft":
 		if cfg.MasterKeyHex == "" {
@@ -83,7 +81,7 @@ func Init(cfg *Config) error {
 		mgr := &SoftHSMKeyManager{
 			libraryPath: cfg.SoftHSM.LibraryPath,
 			tokenLabel:  cfg.SoftHSM.TokenLabel,
-			pin:        cfg.SoftHSM.PIN,
+			pin:         cfg.SoftHSM.PIN,
 		}
 		globalKM = mgr
 	default:

@@ -15,11 +15,11 @@ type contextKey string
 
 const claimsContextKey contextKey = "auth_claims"
 
-// AuthMiddleware returns an HTTP middleware that validates Bearer tokens.
+// Middleware returns an HTTP middleware that validates Bearer tokens.
 // Extracts token from Authorization header, validates with TokenValidator,
 // and injects claims into request context.
 // D-01: HTTP Gateway validates all inbound N58/N60 tokens; Biz Pod trusts gateway.
-func AuthMiddleware(requiredScope string) func(http.Handler) http.Handler {
+func Middleware(requiredScope string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Extract Bearer token
@@ -58,10 +58,12 @@ func AuthMiddleware(requiredScope string) func(http.Handler) http.Handler {
 }
 
 // writeError writes a JSON error response.
+//
+//nolint:unparam // writeError is designed to accept any status code for flexibility
 func writeError(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"type":   "https://tools.ietf.org/html/rfc9110#section-15.5.2",
 		"title":  "Unauthorized",
 		"status": fmt.Sprintf("%d", status),
@@ -108,8 +110,8 @@ func WithSkipPaths(paths ...string) MiddlewareOption {
 	}
 }
 
-// AuthMiddlewareWithOptions is an alternative constructor with options.
-func AuthMiddlewareWithOptions(requiredScope string, opts ...MiddlewareOption) func(http.Handler) http.Handler {
+// MiddlewareWithOptions is an alternative constructor with options.
+func MiddlewareWithOptions(requiredScope string, opts ...MiddlewareOption) func(http.Handler) http.Handler {
 	cfg := &middlewareConfig{requiredScope: requiredScope}
 	for _, opt := range opts {
 		opt(cfg)
@@ -126,7 +128,7 @@ func AuthMiddlewareWithOptions(requiredScope string, opts ...MiddlewareOption) f
 				next.ServeHTTP(w, r)
 				return
 			}
-			AuthMiddleware(cfg.requiredScope)(next).ServeHTTP(w, r)
+			Middleware(cfg.requiredScope)(next).ServeHTTP(w, r)
 		})
 	}
 }

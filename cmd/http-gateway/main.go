@@ -47,7 +47,7 @@ func (c *httpBizClient) ForwardRequest(ctx context.Context, path, method string,
 		}
 		return nil, 502, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, _ := io.ReadAll(resp.Body)
 	return respBody, resp.StatusCode, nil
@@ -71,7 +71,7 @@ func (c *httpBizClient) forwardToBiz(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(status)
 	if len(respBody) > 0 {
-		w.Write(respBody)
+		_, _ = w.Write(respBody)
 	}
 }
 
@@ -129,14 +129,14 @@ func main() {
 	mux := http.NewServeMux()
 
 	// N58: Nnssaaf_NSSAA — requires nnssaaf-nssaa scope
-	mux.Handle("/nnssaaf-nssaa/", auth.AuthMiddleware("nnssaaf-nssaa")(
+	mux.Handle("/nnssaaf-nssaa/", auth.Middleware("nnssaaf-nssaa")(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			bizClient.forwardToBiz(w, r)
 		}),
 	))
 
 	// N60: Nnssaaf_AIW — requires nnssaaf-aiw scope
-	mux.Handle("/nnssaaf-aiw/", auth.AuthMiddleware("nnssaaf-aiw")(
+	mux.Handle("/nnssaaf-aiw/", auth.Middleware("nnssaaf-aiw")(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			bizClient.forwardToBiz(w, r)
 		}),
@@ -145,7 +145,7 @@ func main() {
 	// Health endpoints — no auth required
 	mux.HandleFunc("/healthz/", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok"}`))
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 
 	handler := mux
@@ -214,7 +214,7 @@ func main() {
 	slog.Info("shutting down HTTP Gateway")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	srv.Shutdown(ctx)
+	_ = srv.Shutdown(ctx)
 }
 
 func signalReceived() <-chan struct{} {

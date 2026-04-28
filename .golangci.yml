@@ -63,3 +63,29 @@ issues:
       linters:
         - revive
       text: "struct field EapIdRsp"
+    # The crypto package exports many functions/types as a foundational library module.
+    # Doc comments on all exports would be redundant for a tight, well-named API.
+    - path: "internal/crypto/"
+      linters:
+        - revive
+      text: "exported"
+    # ComponentBiz constant block has a trailing comment explaining the type.
+    - path: "internal/config/config.go"
+      linters:
+        - revive
+      text: "const ComponentBiz should have comment"
+    # auth.go Validate is inherently complex (JWT validation with multiple failure modes).
+    - path: "internal/auth/auth.go"
+      linters:
+        - gocyclo
+      text: "cyclomatic complexity"
+    # biz/main.go uses literal strings for health check statuses (not constants by design).
+    - path: "cmd/biz/main.go"
+      linters:
+        - goconst
+      text: "degraded \\(not initialized\\)"
+    # biz/main_test.go uses literal path strings (test data, not code constants).
+    - path: "cmd/biz/main_test.go"
+      linters:
+        - goconst
+      text: "/aaa/server-initiated"

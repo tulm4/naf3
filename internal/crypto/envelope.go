@@ -7,7 +7,7 @@ import (
 
 var (
 	ErrEnvelopeMalformed = errors.New("envelope: malformed encrypted DEK")
-	ErrDEKUnwrapFailed  = errors.New("envelope: DEK unwrap failed (wrong KEK?)")
+	ErrDEKUnwrapFailed   = errors.New("envelope: DEK unwrap failed (wrong KEK?)")
 )
 
 type Envelope struct {

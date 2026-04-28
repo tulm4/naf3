@@ -24,11 +24,11 @@ crypto:
 `
 	tmp, err := os.CreateTemp("", "config-*.yaml")
 	require.NoError(t, err)
-	defer os.Remove(tmp.Name())
+	defer func() { _ = os.Remove(tmp.Name()) }()
 
 	_, err = tmp.WriteString(content)
 	require.NoError(t, err)
-	tmp.Close()
+	_ = tmp.Close()
 
 	cfg, err := Load(tmp.Name())
 	require.NoError(t, err)
@@ -54,8 +54,8 @@ func TestLoadFileNotFound(t *testing.T) {
 }
 
 func TestExpandEnv(t *testing.T) {
-	os.Setenv("TEST_VAR", "test-value")
-	defer os.Unsetenv("TEST_VAR")
+	_ = os.Setenv("TEST_VAR", "test-value")
+	defer func() { _ = os.Unsetenv("TEST_VAR") }()
 
 	result := expandEnv("key=${TEST_VAR}")
 	assert.Equal(t, "key=test-value", result)

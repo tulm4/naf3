@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestHttpGateway_ForwardsRequests verifies that the http-gateway forwards
@@ -16,15 +17,16 @@ func TestHttpGateway_ForwardsRequests(t *testing.T) {
 	bizServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok"}`))
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	}))
 	defer bizServer.Close()
 
-	resp, err := http.Get(bizServer.URL)
-	if err != nil {
-		t.Fatalf("biz server unreachable: %v", err)
-	}
-	defer resp.Body.Close()
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, bizServer.URL, nil)
+	require.NoError(t, err)
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
@@ -39,7 +41,7 @@ func TestHttpGateway_ForwardRequest_Success(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"result":"success"}`))
+		_, _ = w.Write([]byte(`{"result":"success"}`))
 	}))
 	defer bizServer.Close()
 
@@ -121,7 +123,7 @@ func TestHttpGateway_SetsXVersionHeader(t *testing.T) {
 		receivedVersion = r.Header.Get("X-NSSAAF-Version")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer bizServer.Close()
 

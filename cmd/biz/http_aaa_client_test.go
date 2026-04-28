@@ -40,7 +40,7 @@ func TestSendEAP_Success(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -51,7 +51,7 @@ func TestSendEAP_Success(t *testing.T) {
 		&http.Client{Timeout: 5 * time.Second},
 		nil, // no Redis in unit tests
 	)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	payload, err := c.SendEAP(context.Background(), "auth-ctx-test", []byte{1, 2, 3})
 
@@ -74,7 +74,7 @@ func TestSendEAP_Non200Error(t *testing.T) {
 		&http.Client{Timeout: 5 * time.Second},
 		nil,
 	)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	_, err := c.SendEAP(context.Background(), "auth-ctx-fail", []byte{1, 2, 3})
 
@@ -88,7 +88,7 @@ func TestSendEAP_InvalidJSONResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("not json"))
+		_, _ = w.Write([]byte("not json"))
 	}))
 	defer server.Close()
 
@@ -99,7 +99,7 @@ func TestSendEAP_InvalidJSONResponse(t *testing.T) {
 		&http.Client{Timeout: 5 * time.Second},
 		nil,
 	)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	_, err := c.SendEAP(context.Background(), "auth-ctx-badjson", []byte{1, 2, 3})
 
@@ -114,7 +114,7 @@ func TestSendEAP_BuildsSessionID(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req proto.AaaForwardRequest
-		json.NewDecoder(r.Body).Decode(&req)
+		_ = json.NewDecoder(r.Body).Decode(&req)
 		receivedPayload = req.Payload
 
 		resp := proto.AaaForwardResponse{
@@ -125,7 +125,7 @@ func TestSendEAP_BuildsSessionID(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -136,7 +136,7 @@ func TestSendEAP_BuildsSessionID(t *testing.T) {
 		&http.Client{Timeout: 5 * time.Second},
 		nil,
 	)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	_, err := c.SendEAP(context.Background(), "auth-ctx-session", []byte{9, 8, 7})
 
@@ -160,7 +160,7 @@ func TestSendEAP_PassesXVersionHeader(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -171,7 +171,7 @@ func TestSendEAP_PassesXVersionHeader(t *testing.T) {
 		&http.Client{Timeout: 5 * time.Second},
 		nil,
 	)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	_, err := c.SendEAP(context.Background(), "auth-ctx", []byte{1})
 
