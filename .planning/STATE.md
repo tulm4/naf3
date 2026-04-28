@@ -41,7 +41,7 @@ See: `.planning/PROJECT.md` (updated 2026-04-25)
 | R: 3-Component Refactor | ✅ Done | HTTP GW, Biz Pod, AAA GW |
 | 4: NF Integration & Observability | ✅ Done | 5 plans, 26 tasks, 5 waves — REQ-01 to REQ-19 |
 | 5: Security & Crypto | ✅ Done | TLS, mTLS, KEK/DEK, KeyManager, Vault, SoftHSM |
-| 6: Integration Testing & NRM | ⏳ In Progress | 6 plans — Waves 1-5 |
+| 6: Integration Testing & NRM | ⏳ In Progress | 6 plans — 5/5 done (PLAN-1 through PLAN-5) |
 | 7: Kubernetes Deployment | ⏳ Pending | Helm, Kustomize, ArgoCD |
 | 8: Performance & Load Testing | ⏳ Pending | Load, chaos |
 
@@ -49,9 +49,10 @@ See: `.planning/PROJECT.md` (updated 2026-04-25)
 
 | Commit | Description |
 |--------|-------------|
-| `a5cb6a4` | docs(phase-4): capture NF Integration & Observability context |
-| `9fed8fb` | docs: initialize GSD project structure |
-| `d845ef7` | refactor(rules): align cursor rules with GSD standard structure |
+| `d8bd880` | test(06-PLAN-5): add E2E harness and conformance test suites |
+| `daf5700` | docs: update STATE.md and roadmap for PLAN-2 completion |
+| `ccd80f1` | docs(06-PLAN-2): add PLAN-2 summary |
+| `8799c72` | feat(06-PLAN-2): NRM RESTCONF server and AlarmManager |
 | `...` | (see `git log --oneline`) |
 
 ## Session Notes
@@ -150,7 +151,26 @@ See: `.planning/phases/06-integration-testing-nrm/06-CONTEXT.md`
 
 ---
 
-*Last updated: 2026-04-28*
+### 2026-04-29 — Phase 6 PLAN-5 execution complete
+
+PLAN-5 Wave 5 executed successfully:
+
+- 9 files created: test/e2e/harness.go, nssaa_flow_test.go, reauth_test.go, revocation_test.go, aiw_flow_test.go, test/conformance/ts29526_test.go, rfc3579_test.go, rfc5216_test.go, docs/roadmap/PHASE_6_Testing_NRM.md
+- 21 E2E test cases (8 NSSAA + 4 ReAuth + 3 Revocation + 6 AIW)
+- 65 conformance test cases (27 NSSAA §7.2 + 13 AIW §7.3 + 10 RFC3579 + 10 RFC5216)
+- All builds pass, all conformance tests pass in -short mode
+- Gaps documented (G-01 through G-05): base64 validation, S-NSSAI mismatch, GetSlice handler not implemented, AAA config at handler level
+
+Key decisions:
+- harness.go: docker-compose + binary exec (not container SDK)
+- Conformance: httptest.Server (no infrastructure)
+- Some TC cases document gaps rather than fail (handler options not available)
+
+Commit: `d8bd880`
+
+---
+
+*Last updated: 2026-04-29*
 
 ### Quick Tasks Completed
 
