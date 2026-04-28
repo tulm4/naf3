@@ -49,7 +49,7 @@ type CircuitBreaker struct {
 
 // NewCircuitBreaker creates a circuit breaker with the given thresholds.
 // Default: failureThreshold=5, recoveryTimeout=30s, successThreshold=3.
-func NewCircuitBreaker(failureThreshold int, recoveryTimeout, successThreshold time.Duration) *CircuitBreaker {
+func NewCircuitBreaker(failureThreshold int, recoveryTimeout time.Duration, successThreshold int) *CircuitBreaker {
 	if failureThreshold == 0 {
 		failureThreshold = 5
 	}
@@ -175,7 +175,7 @@ func (r *Registry) Get(key string) *CircuitBreaker {
 	if cb2, ok := r.breakers[key]; ok {
 		return cb2
 	}
-	cb = NewCircuitBreaker(r.defaultFailureThreshold, r.defaultRecoveryTimeout, time.Duration(r.defaultSuccessThreshold))
+	cb = NewCircuitBreaker(r.defaultFailureThreshold, r.defaultRecoveryTimeout, r.defaultSuccessThreshold)
 	r.breakers[key] = cb
 	return cb
 }

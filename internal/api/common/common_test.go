@@ -198,26 +198,28 @@ func TestValidateSUPI(t *testing.T) {
 
 func TestValidateSnssai(t *testing.T) {
 	tests := []struct {
-		name    string
-		sst     int
-		sd      string
-		wantErr bool
+		name     string
+		sst      int
+		sd       string
+		missing  bool
+		wantErr  bool
 	}{
-		{"valid sst only", 1, "", false},
-		{"valid sst 0", 0, "", false},
-		{"valid sst 255", 255, "", false},
-		{"valid sst with sd", 128, "112233", false},
-		{"valid sst with lowercase sd", 1, "aabbcc", false},
-		{"invalid sst negative", -1, "", true},
-		{"invalid sst too high", 256, "", true},
-		{"invalid sd too short", 1, "ABC12", true},
-		{"invalid sd too long", 1, "ABCDEF1", true},
-		{"invalid sd non-hex", 1, "GGGGGG", true},
+		{"valid sst only", 1, "", false, false},
+		{"valid sst 0", 0, "", false, false},
+		{"valid sst 255", 255, "", false, false},
+		{"valid sst with sd", 128, "112233", false, false},
+		{"valid sst with lowercase sd", 1, "aabbcc", false, false},
+		{"invalid sst negative", -1, "", false, true},
+		{"invalid sst too high", 256, "", false, true},
+		{"invalid sd too short", 1, "ABC12", false, true},
+		{"invalid sd too long", 1, "ABCDEF1", false, true},
+		{"invalid sd non-hex", 1, "GGGGGG", false, true},
+		{"missing snssai", 0, "", true, true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateSnssai(tt.sst, tt.sd)
+			err := ValidateSnssai(tt.sst, tt.sd, tt.missing)
 			if tt.wantErr {
 				assert.Error(t, err)
 			} else {
