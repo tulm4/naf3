@@ -46,10 +46,41 @@
 
 ---
 
+**Date:** 2026-04-28 (supplemental)
+**Phase:** 06-integration-testing-nrm
+**Areas discussed:** 3 (directory structure, NRM deployment model, RESTCONF encoding) + 2 (AIW E2E scope, conformance naming) = 5 total
+
+---
+
+## Area 4: AIW E2E Test Scope
+
+||| Option | Description | Selected |
+||--------|-------------|----------|
+|| Full 3-component flow | Verify HTTP GW routing, AAA GW transport, MSK forwarding end-to-end | |
+|| Biz Pod only (mock AAA client) | Faster tests, validate Biz Pod logic in isolation | |
+|| Both | Biz Pod unit tests + separate 3-component E2E tests | ✓ |
+
+**User's choice:** Both
+**Notes:** AIW E2E at two layers: (1) Biz Pod unit tests with mock AAA client for fast feedback; (2) 3-component E2E via `StartAUSFMock()` httptest server + `mock-aaa-s` container. Both layers use the AUSF mock from `test/mocks/ausf.go` (httptest server, matching D-02). Covers all AIW cases from `docs/design/24_test_strategy.md` §5.3: MSK extraction, TTLS inner method, EAP failure, invalid SUPI, AAA not configured.
+
+---
+
+## Area 5: Conformance Test Naming Convention
+
+||| Option | Description | Selected |
+||--------|-------------|----------|
+|| Prefixed (TC-NSSAA-001, TC-RADIUS-001) | Spec reference in function name; matches research doc | |
+|| Table-driven (one function per spec, subtests) | Compact; matches `engine_test.go` pattern | ✓ |
+|| Hybrid — prefixed for conformance, table for unit | Mix approaches | |
+
+**User's choice:** Table-driven
+**Notes:** One function per spec (`TestTS29526`, `TestRFC3579`, `TestRFC5216`) with subtests named by case type (`valid_request`, `missing_gpsi`, etc.). This matches the existing `engine_test.go` pattern and keeps the test file compact. Spec section references added in comments per test case.
+
+---
+
 ## Claude's Discretion
 
 The following remain open for the planner to decide:
-- Naming conventions for conformance test suites
 - Alarm severity thresholds and deduplication policy
 - Exact compose file structure for test isolation
 

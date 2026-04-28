@@ -1,12 +1,12 @@
 # Phase 6: Integration Testing & NRM - Context
 
-**Gathered:** 2026-04-28
+**Gathered:** 2026-04-28 (initial) + 2026-04-28 (supplemental: E2E + conformance)
 **Status:** Ready for planning
 
 <domain>
 ## Phase Boundary
 
-Comprehensive testing (unit, integration, E2E, conformance) plus the NRM/FCAPS management interface for NSSAAF. Unit tests cover every package with >80% line coverage. Integration tests exercise all API endpoints against real PostgreSQL and Redis via docker-compose. E2E tests run the full AMF → HTTP GW → Biz Pod → AAA GW → AAA-S flow. Conformance tests validate TS 29.526 §7.2, RFC 3579, and RFC 5216. NRM implements the YANG model, RESTCONF API, and alarm management per TS 28.541 §5.3.145.
+Comprehensive testing (unit, integration, E2E, conformance) plus the NRM/FCAPS management interface for NSSAAF. Unit tests cover every package with >80% line coverage. Integration tests exercise all API endpoints against real PostgreSQL and Redis via docker-compose. E2E tests run the full AMF → HTTP GW → Biz Pod → AAA GW → AAA-S flow, plus AIW flows (AUSF → HTTP GW → Biz Pod → AAA GW → AAA-S with MSK verification). Conformance tests validate TS 29.526 §7.2, RFC 3579, and RFC 5216. NRM implements the YANG model, RESTCONF API, and alarm management per TS 28.541 §5.3.145.
 
 Not this phase: k6 load tests (Phase 8), chaos testing (Phase 8), Kubernetes manifests (Phase 7).
 
@@ -41,8 +41,14 @@ Not this phase: k6 load tests (Phase 8), chaos testing (Phase 8), Kubernetes man
 ### RESTCONF encoding (D-06)
 - **D-06:** RESTCONF uses **JSON** encoding (RFC 8040 supports both JSON and XML)
 
+### AIW E2E test scope (D-08)
+- **D-08:** AIW E2E tests at **two layers**:
+  - **Biz Pod unit tests** with mock AAA client — fast feedback, validate Biz Pod logic in isolation
+  - **3-component E2E tests** — verify HTTP GW routing, AAA GW transport, and MSK forwarding end-to-end via `StartAUSFMock()` httptest server + `mock-aaa-s` container
+- Both layers use the AUSF mock from `test/mocks/ausf.go` (httptest server, matching D-02)
+- Covers all AIW test cases from `docs/design/24_test_strategy.md` §5.3: MSK extraction, TTLS inner method, EAP failure, invalid SUPI, AAA not configured
+
 ### Claude's Discretion
-- Naming conventions for conformance test suites
 - Alarm severity thresholds and deduplication policy
 - Exact compose file structure for test isolation
 
@@ -55,6 +61,8 @@ Not this phase: k6 load tests (Phase 8), chaos testing (Phase 8), Kubernetes man
 
 ### Testing
 - `docs/design/24_test_strategy.md` — Test pyramid, unit/integration/E2E patterns, conformance test specs, k6 load test (read for structure; load testing is Phase 8)
+  - **§5 E2E Tests** — 3-component E2E flows (NSSAA, re-auth, revocation), AIW E2E flows with AUSF mock (MSK extraction, TTLS, EAP failure, invalid SUPI, AAA not configured)
+  - **§6 Conformance Tests** — TS 29.526 §7.2 (~30 cases), RFC 3579 (~10 cases), RFC 5216 MSK (~10 cases)
 - `docs/design/06_eap_engine.md` — EAP engine internals for unit test coverage
 - `docs/design/07_radius_client.md` — RADIUS encoding for RFC 3579 conformance tests
 - `docs/design/08_diameter_client.md` — Diameter encoding for protocol conformance
