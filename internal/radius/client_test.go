@@ -260,7 +260,7 @@ func TestZeroMessageAuthenticator(t *testing.T) {
 	raw = AddMessageAuthenticator(raw, "secret")
 
 	// Zero out MA field.
-	zeroed := zeroMessageAuthenticator(raw)
+	zeroed := ZeroMessageAuthenticator(raw)
 	assert.NotNil(t, zeroed)
 }
 
@@ -272,7 +272,7 @@ func TestClientRemoveMessageAuthenticator(t *testing.T) {
 	raw := packet.Encode()
 	raw = AddMessageAuthenticator(raw, "secret")
 
-	removed := removeMessageAuthenticator(raw)
+	removed := RemoveMessageAuthenticator(raw)
 	assert.Greater(t, len(raw), len(removed))
 
 	// Verify MA is gone.
@@ -296,7 +296,7 @@ func TestFindMessageAuthenticator(t *testing.T) {
 	raw := packet.Encode()
 	raw = AddMessageAuthenticator(raw, "secret")
 
-	idx := findMessageAuthenticator(raw)
+	idx := FindMessageAuthenticator(raw)
 	assert.Greater(t, idx, 0)
 
 	// Without MA.
@@ -304,7 +304,7 @@ func TestFindMessageAuthenticator(t *testing.T) {
 		MakeStringAttribute(AttrUserName, "nobody"),
 	})
 	raw2 := packet2.Encode()
-	idx2 := findMessageAuthenticator(raw2)
+	idx2 := FindMessageAuthenticator(raw2)
 	assert.Equal(t, -1, idx2)
 }
 

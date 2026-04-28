@@ -40,7 +40,7 @@ func ComputeMessageAuthenticator(packet []byte, secret string) []byte {
 
 	// Zero out the Message-Authenticator attribute value.
 	// We need to find the Message-Authenticator attribute and zero its value.
-	p = zeroMessageAuthenticator(p)
+	p = ZeroMessageAuthenticator(p)
 
 	// Append the shared secret.
 	// The HMAC is computed over: packet + secret
@@ -60,7 +60,7 @@ func ComputeMessageAuthenticator(packet []byte, secret string) []byte {
 // (for Access-Challenge) or a specially computed one (for Access-Accept/Reject).
 func VerifyMessageAuthenticator(packet []byte, secret string) bool {
 	// Find Message-Authenticator in the packet.
-	offset := findMessageAuthenticator(packet)
+	offset := FindMessageAuthenticator(packet)
 	if offset < 0 {
 		return false
 	}
@@ -78,10 +78,10 @@ func VerifyMessageAuthenticator(packet []byte, secret string) bool {
 	return hmac.Equal(received, expected)
 }
 
-// zeroMessageAuthenticator finds the Message-Authenticator attribute in a RADIUS packet
+// ZeroMessageAuthenticator finds the Message-Authenticator attribute in a RADIUS packet
 // and zeros its value (16 bytes after the Type and Length).
-func zeroMessageAuthenticator(packet []byte) []byte {
-	offset := findMessageAuthenticator(packet)
+func ZeroMessageAuthenticator(packet []byte) []byte {
+	offset := FindMessageAuthenticator(packet)
 	if offset < 0 {
 		return packet
 	}
@@ -93,9 +93,9 @@ func zeroMessageAuthenticator(packet []byte) []byte {
 	return packet
 }
 
-// findMessageAuthenticator returns the byte offset of the Message-Authenticator attribute
+// FindMessageAuthenticator returns the byte offset of the Message-Authenticator attribute
 // value within the packet, or -1 if not found.
-func findMessageAuthenticator(packet []byte) int {
+func FindMessageAuthenticator(packet []byte) int {
 	if len(packet) < 20 {
 		return -1
 	}
@@ -146,7 +146,7 @@ func ComputeResponseAuthenticator(code, id uint8, length uint16, requestAuth [16
 // Returns the modified packet.
 func AddMessageAuthenticator(packet []byte, secret string) []byte {
 	// Find existing MA and remove it first (to avoid duplicate).
-	packet = removeMessageAuthenticator(packet)
+	packet = RemoveMessageAuthenticator(packet)
 
 	// Append MA attribute: Type(1) + Length(1) + Value(16) = 18 bytes.
 	maAttr := make([]byte, 18)
@@ -168,8 +168,8 @@ func AddMessageAuthenticator(packet []byte, secret string) []byte {
 	return packet
 }
 
-// removeMessageAuthenticator removes the Message-Authenticator attribute from a packet.
-func removeMessageAuthenticator(packet []byte) []byte {
+// RemoveMessageAuthenticator removes the Message-Authenticator attribute from a packet.
+func RemoveMessageAuthenticator(packet []byte) []byte {
 	if len(packet) < 20 {
 		return packet
 	}

@@ -8,9 +8,11 @@ package nssaa
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -156,8 +158,23 @@ var _ http.Handler = (*Handler)(nil)
 func (h *Handler) CreateSliceAuthenticationContext(w http.ResponseWriter, r *http.Request) {
 	reqID := common.GetRequestID(r.Context())
 
+	// Read body once for both raw presence check and typed decode.
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		common.WriteProblem(w, common.ValidationProblem("body", err.Error()))
+		return
+	}
+
+	// Check whether snssai field is present (detect missing vs zero-value).
+	var raw map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &raw); err != nil {
+		common.WriteProblem(w, common.ValidationProblem("body", err.Error()))
+		return
+	}
+	_, snssaiPresent := raw["snssai"]
+
 	var body nssaanats.SliceAuthInfo
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := json.Unmarshal(bodyBytes, &body); err != nil {
 		common.WriteProblem(w, common.ValidationProblem("body", err.Error()))
 		return
 	}
@@ -174,7 +191,7 @@ func (h *Handler) CreateSliceAuthenticationContext(w http.ResponseWriter, r *htt
 
 	sst := body.Snssai.Sst
 	sd := body.Snssai.Sd
-	if err := common.ValidateSnssai(int(sst), sd); err != nil {
+	if err := common.ValidateSnssai(int(sst), sd, !snssaiPresent); err != nil {
 		var pd *common.ProblemDetails
 		if errors.As(err, &pd) {
 			common.WriteProblem(w, pd)
@@ -189,6 +206,13 @@ func (h *Handler) CreateSliceAuthenticationContext(w http.ResponseWriter, r *htt
 		return
 	}
 
+	// Validate that eapIdRsp is valid base64-encoded data.
+	if _, err := base64.StdEncoding.DecodeString(*body.EapIdRsp); err != nil {
+		common.WriteProblem(w, common.ValidationProblem("eapIdRsp", "eapIdRsp must be valid base64-encoded data"))
+		return
+	}
+
+	// Use sst/sd from body (already checked above).
 	authCtxID := uuid.NewString()
 
 	var amfInstance string
@@ -254,8 +278,23 @@ func (h *Handler) ConfirmSliceAuthentication(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Read body once for both raw presence check and typed decode.
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		common.WriteProblem(w, common.ValidationProblem("body", err.Error()))
+		return
+	}
+
+	// Check whether snssai field is present (detect missing vs zero-value).
+	var raw map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &raw); err != nil {
+		common.WriteProblem(w, common.ValidationProblem("body", err.Error()))
+		return
+	}
+	_, snssaiPresent := raw["snssai"]
+
 	var body nssaanats.SliceAuthConfirmationData
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := json.Unmarshal(bodyBytes, &body); err != nil {
 		common.WriteProblem(w, common.ValidationProblem("body", err.Error()))
 		return
 	}
@@ -272,7 +311,7 @@ func (h *Handler) ConfirmSliceAuthentication(w http.ResponseWriter, r *http.Requ
 
 	sst := body.Snssai.Sst
 	sd := body.Snssai.Sd
-	if err := common.ValidateSnssai(int(sst), sd); err != nil {
+	if err := common.ValidateSnssai(int(sst), sd, !snssaiPresent); err != nil {
 		var pd *common.ProblemDetails
 		if errors.As(err, &pd) {
 			common.WriteProblem(w, pd)
@@ -284,6 +323,12 @@ func (h *Handler) ConfirmSliceAuthentication(w http.ResponseWriter, r *http.Requ
 
 	if body.EapMessage == nil || *body.EapMessage == "" {
 		common.WriteProblem(w, common.ValidationProblem("eapMessage", "eapMessage is required"))
+		return
+	}
+
+	// Validate that eapMessage is valid base64-encoded data.
+	if _, err := base64.StdEncoding.DecodeString(*body.EapMessage); err != nil {
+		common.WriteProblem(w, common.ValidationProblem("eapMessage", "eapMessage must be valid base64-encoded data"))
 		return
 	}
 

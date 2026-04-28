@@ -161,6 +161,8 @@ func (h *Handler) CreateAuthenticationContext(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Note: eapIdRsp is []byte alias in the generated types, so JSON unmarshaling
+	// auto-decodes base64. No explicit base64 validation needed.
 	authCtxID := uuid.NewString()
 
 	authCtx := &AuthContext{
@@ -226,6 +228,8 @@ func (h *Handler) ConfirmAuthentication(w http.ResponseWriter, r *http.Request, 
 		common.WriteProblem(w, common.ValidationProblem("eapMessage", "eapMessage is required"))
 		return
 	}
+
+	// Note: eapMessage is []byte alias in generated types, so JSON auto-decodes base64.
 
 	authCtx, err := h.store.Load(authCtxId)
 	if err != nil {

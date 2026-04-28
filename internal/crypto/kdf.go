@@ -32,10 +32,24 @@ func SessionKEK(masterKey []byte, authCtxID string) ([]byte, error) {
 }
 
 func TLSExporter(masterSecret []byte, label string, context []byte, length int) ([]byte, error) {
+	// Validate inputs
+	if len(masterSecret) == 0 {
+		return nil, errors.New("TLSExporter: masterSecret cannot be empty")
+	}
+	if length <= 0 {
+		return nil, errors.New("TLSExporter: length must be positive")
+	}
 	// RFC 8446 §6.3: TLS-Exporter uses empty salt.
 	prk, err := hkdf.Extract(sha256.New, masterSecret, nil) // nil = empty salt per RFC 8446
 	if err != nil {
 		return nil, errors.New("TLSExporter: extract failed: " + err.Error())
 	}
-	return hkdf.Expand(sha256.New, prk, label, length)
+	// Build info: label + "\0" + context (per RFC 8446 §7.1 for TLS-Exporter)
+	var infoStr string
+	if len(context) > 0 {
+		infoStr = label + "\x00" + string(context)
+	} else {
+		infoStr = label + "\x00"
+	}
+	return hkdf.Expand(sha256.New, prk, infoStr, length)
 }

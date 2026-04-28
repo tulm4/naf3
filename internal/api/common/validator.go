@@ -51,7 +51,11 @@ func ValidateSUPI(supi string) error {
 // ValidateSnssai validates the S-NSSAI (Single Network Slice Selection
 // Assistance Information) components.
 // Spec: TS 23.003 §3.2, TS 29.571 §5.4.4.60
-func ValidateSnssai(sst int, sd string) error {
+// The missing flag should be true when Snssai was not present in the request body.
+func ValidateSnssai(sst int, sd string, missing bool) error {
+	if missing {
+		return ValidationProblem("snssai", "snssai is required (TS 29.526 §7.2.2)")
+	}
 	// SST range: 0–255 (standard values 1–128, operator-specific 129–255)
 	// Spec: TS 23.003 §3.2, TS 29.571 §5.4.4.60
 	if sst < 0 || sst > 255 {
@@ -102,7 +106,7 @@ func ValidateAuthCtxID(id string) error {
 // Returns an aggregated error listing all validation failures.
 // Spec: TS 29.526 §7.2.2, TS 23.502 §4.2.9
 func ValidateNssai(sst int, sd string) error {
-	return ValidateSnssai(sst, sd)
+	return ValidateSnssai(sst, sd, false)
 }
 
 // ValidatePlmnID validates a PLMN ID (MCC + MNC).

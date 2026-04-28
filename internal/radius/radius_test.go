@@ -374,7 +374,7 @@ func TestMessageAuthenticator(t *testing.T) {
 	raw := packet.Encode()
 	raw = AddMessageAuthenticator(raw, secret)
 
-	assert.True(t, hasMessageAuthenticator(raw))
+	assert.True(t, HasMessageAuthenticator(raw))
 	assert.True(t, VerifyMessageAuthenticator(raw, secret))
 	assert.False(t, VerifyMessageAuthenticator(raw, "wrong_secret"))
 }
@@ -391,7 +391,7 @@ func TestAddMessageAuthenticatorNoDuplicate(t *testing.T) {
 	raw = AddMessageAuthenticator(raw, secret)
 	raw = AddMessageAuthenticator(raw, secret)
 
-	assert.True(t, hasMessageAuthenticator(raw))
+	assert.True(t, HasMessageAuthenticator(raw))
 	assert.Equal(t, originalLen+18, len(raw))
 }
 
@@ -411,9 +411,9 @@ func TestRemoveMessageAuthenticator(t *testing.T) {
 	raw = AddMessageAuthenticator(raw, secret)
 	originalLen := len(raw)
 
-	clean := removeMessageAuthenticator(raw)
+	clean := RemoveMessageAuthenticator(raw)
 	assert.Equal(t, originalLen-18, len(clean)) // MA attribute removed
-	assert.False(t, hasMessageAuthenticator(clean))
+	assert.False(t, HasMessageAuthenticator(clean))
 }
 
 func TestHasMessageAuthenticatorFalse(t *testing.T) {
@@ -421,7 +421,7 @@ func TestHasMessageAuthenticatorFalse(t *testing.T) {
 		MakeStringAttribute(AttrUserName, "test"),
 	})
 	raw := packet.Encode()
-	assert.False(t, hasMessageAuthenticator(raw))
+	assert.False(t, HasMessageAuthenticator(raw))
 }
 
 // ============================================================================

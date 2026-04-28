@@ -168,7 +168,7 @@ func (c *Client) validateResponse(data []byte, requestID uint8) error {
 		return fmt.Errorf("radius: unexpected response code: %d", code)
 	}
 
-	if hasMessageAuthenticator(data) {
+	if HasMessageAuthenticator(data) {
 		if !VerifyMessageAuthenticator(data, c.config.SharedSecret) {
 			return ErrInvalidMessageAuth
 		}
@@ -246,7 +246,7 @@ func AssembleEAPMessage(attrs []Attribute) []byte {
 	return payload
 }
 
-// hasMessageAuthenticator checks if a packet contains a Message-Authenticator attribute.
-func hasMessageAuthenticator(data []byte) bool {
-	return findMessageAuthenticator(data) >= 0
+// HasMessageAuthenticator checks if a packet contains a Message-Authenticator attribute.
+func HasMessageAuthenticator(data []byte) bool {
+	return FindMessageAuthenticator(data) >= 0
 }
