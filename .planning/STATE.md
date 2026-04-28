@@ -125,4 +125,18 @@ All 35 packages build and all tests pass.
 
 ---
 
+### 2026-04-28 — Phase 6 discussion
+
+Phase 6 context gathered. Key decisions:
+
+- D-04: Separate `test/` subdirectories (unit, integration, e2e, conformance) — not co-located `*_test.go`
+- D-05: NRM RESTCONF as standalone `cmd/nrm/` binary — separate lifecycle from Biz Pod
+- D-06: RESTCONF uses JSON encoding (RFC 8040)
+
+Not this phase: k6 load tests (Phase 8), chaos testing (Phase 8), K8s manifests for NRM (Phase 7).
+
+See: `.planning/phases/06-integration-testing-nrm/06-CONTEXT.md`
+
+---
+
 *Last updated: 2026-04-28*
