@@ -49,3 +49,6 @@ test/fixtures/secrets*
 tmp/
 temp/
 *.tmp
+*.test
+nrm
+nrm.test
