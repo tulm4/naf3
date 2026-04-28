@@ -27,12 +27,24 @@ Not this phase: k6 load tests (Phase 8), chaos testing (Phase 8), Kubernetes man
 - AAA-S simulator: lightweight Go binary in `test/mocks/aaasim/` or a test helper package; configured via environment variables or config file in the test compose
 - AMF mock also needs to receive re-auth/revocation HTTP POST callbacks from NSSAAF — httptest server handles this for unit/integration; E2E uses the dedicated AMF mock container
 
+### Directory structure (D-04)
+- **D-04:** Separate `test/` subdirectories — `test/unit/`, `test/integration/`, `test/e2e/`, `test/conformance/` — rather than co-located `*_test.go` alongside source
+- Existing 31 co-located `*_test.go` remain in place; new test code goes into `test/`
+- `test/mocks/` for NF mock helpers (NRF, UDM, AMF, AUSF httptest servers)
+- `test/mocks/aaasim/` for the AAA-S simulator (dedicated container)
+
+### NRM RESTCONF deployment (D-05)
+- **D-05:** NRM RESTCONF server as a **standalone binary** — `cmd/nrm/`
+- NOT embedded in Biz Pod, NOT a K8s sidecar — separate process with its own lifecycle
+- Communicates with Biz Pod via internal HTTP callback for alarm state
+
+### RESTCONF encoding (D-06)
+- **D-06:** RESTCONF uses **JSON** encoding (RFC 8040 supports both JSON and XML)
+
 ### Claude's Discretion
-- Exact test directory structure (`test/unit/`, `test/integration/`, `test/e2e/`, `test/conformance/` vs co-located `*_test.go` alongside source)
 - Naming conventions for conformance test suites
-- RESTCONF/NRM server deployment: embedded in Biz Pod, standalone binary, or separate Kubernetes deployment
 - Alarm severity thresholds and deduplication policy
-- Whether RESTCONF uses YAML or JSON encoding
+- Exact compose file structure for test isolation
 
 </decisions>
 

@@ -5,68 +5,54 @@
 
 **Date:** 2026-04-28
 **Phase:** 06-integration-testing-nrm
-**Areas discussed:** Test infrastructure, NF mock strategy
+**Areas discussed:** 3 (directory structure, NRM deployment model, RESTCONF encoding)
 
 ---
 
-## Test Infrastructure
+## Area 1: Test Directory Structure
 
-### Question
-How should integration and E2E tests get PostgreSQL and Redis?
-
-### Options Presented
-
-| Option | Description | Selected |
+|| Option | Description | Selected |
 |--------|-------------|----------|
-| Pure mocks | sqlmock for DB, miniredis for Redis, gock for HTTP. Zero infra dependency, simplest CI. | |
-| Testcontainers | Real PostgreSQL/Redis spun up in-process. Most realistic, but heavy and requires Docker in CI. | |
-| Docker-compose sidecar | Infrastructure started separately (`docker-compose up -d`). Real databases. Familiar pattern. | ✓ |
+| Co-located `*_test.go` alongside source | Existing 31 test files use this pattern; consistent with current codebase | |
+| Separate `test/{unit,integration,e2e,conformance}/` | Design doc proposes this; clearer separation of test types | ✓ |
 
-### User's choice
-C — Docker-compose for real PostgreSQL and Redis (infrastructure started separately, not managed in-process).
-
-### Notes
-- `miniredis` is already in go.mod — covers Redis mocking for unit tests
-- Docker-compose sidecar: tests run against the same stack as local dev
-- CI runs `docker-compose up -d` before integration/E2E test suite
+**User's choice:** Separate `test/` subdirectories
+**Notes:** E2E, integration, conformance, and unit test code all go into `test/`. NF mock helpers go into `test/mocks/`. Existing co-located tests remain in place.
 
 ---
 
-## NF Mock Strategy
+## Area 2: NRM RESTCONF Server Deployment
 
-### Question
-How should NRF, UDM, AMF, AUSF, and AAA-S be mocked for integration/E2E tests?
-
-### Options Presented
-
-| Option | Description | Selected |
+|| Option | Description | Selected |
 |--------|-------------|----------|
-| In-process (httptest) for everything | All NFs as httptest servers in test binary. Simplest CI. | |
-| AAA-S simulator in dedicated container | Rest as httptest, AAA-S gets its own container with real EAP-TLS stack. More realistic for EAP path. | ✓ |
+| Embedded in Biz Pod binary | Single binary, simpler ops | |
+| Standalone binary (`cmd/nrm/`) | Separate process with own lifecycle; cleaner separation of concerns | ✓ |
+| Separate K8s sidecar | Additional K8s complexity | |
 
-### User's choice
-AAA-S simulator in dedicated container.
+**User's choice:** Standalone binary
+**Notes:** NRM RESTCONF server as `cmd/nrm/`, separate from Biz Pod. Communicates with Biz Pod via internal HTTP callback for alarm state.
 
-### Notes
-- NRF, UDM, AMF, AUSF → in-process httptest servers in test binary
-- AAA-S → dedicated container with Go-based EAP-TLS simulator (`test/mocks/aaasim/`)
-- AMF mock receives re-auth/revocation POST callbacks — httptest for unit/integration, container for E2E
-- AAA-S container can test actual TLS certificate chain validation end-to-end
+---
+
+## Area 3: RESTCONF Encoding
+
+|| Option | Description | Selected |
+|--------|-------------|----------|
+| YAML | RFC 8040 supports it; closer to YANG source | |
+| JSON | RFC 8040 supports both; more natural for Go/HTTP ecosystem | ✓ |
+
+**User's choice:** JSON
+**Notes:** RESTCONF uses JSON encoding per RFC 8040.
 
 ---
 
 ## Claude's Discretion
 
-The following areas were deferred to planning/research:
-
-- Exact test directory structure (co-located `*_test.go` vs separate `test/` subdirectories)
+The following remain open for the planner to decide:
 - Naming conventions for conformance test suites
-- RESTCONF/NRM server deployment model
 - Alarm severity thresholds and deduplication policy
-- RESTCONF encoding (YAML vs JSON)
+- Exact compose file structure for test isolation
 
 ## Deferred Ideas
 
-- k6 load testing — belongs in Phase 8
-- Chaos testing — belongs in Phase 8
-- NRM RESTCONF Kubernetes manifests — belongs in Phase 7
+None — all discussion stayed within phase scope.
