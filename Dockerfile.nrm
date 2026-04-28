@@ -1,0 +1,52 @@
+# Dockerfile.nrm — Multi-stage build for NSSAAF NRM RESTCONF Server
+# Spec: TS 28.541 §5.3.145-148 (NRM), RFC 8040 (RESTCONF)
+#
+# The NRM server handles:
+# - NSSAAFFunction NRM IOC (GET /restconf/data/3gpp-nssaaf-nrm:nssaa-function)
+# - Alarm management (GET/POST /restconf/data/3gpp-nssaaf-nrm:alarms)
+# - Fault management event reception from Biz Pod (POST /internal/events)
+#
+# Stage 1: Build
+FROM golang:1.25-alpine AS builder
+
+RUN apk add --no-cache git ca-certificates
+
+WORKDIR /build
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+# Build with symbol table and DWARF stripped for smaller size
+RUN CGO_ENABLED=0 go build \
+    -ldflags="-s -w" \
+    -o nrm ./cmd/nrm/
+
+# Stage 2: Runtime
+FROM alpine:3.19 AS runtime
+
+RUN apk --no-cache add ca-certificates tzdata curl
+
+# Create non-root user for security
+RUN adduser -D -g '' appuser
+
+WORKDIR /app
+
+# Copy binary and configs from builder
+COPY --from=builder /build/nrm .
+COPY --from=builder /build/compose/configs/nrm.yaml /etc/nssAAF/nrm.yaml
+
+RUN chown -R appuser:appuser /app
+
+USER appuser
+
+# Expose RESTCONF port (8081)
+EXPOSE 8081
+
+# Health check: NRM exposes /healthz
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD wget -qO- http://localhost:8081/healthz || exit 1
+
+ENTRYPOINT ["/app/nrm"]
+CMD ["--config", "/etc/nssAAF/nrm.yaml"]

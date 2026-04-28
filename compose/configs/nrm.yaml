@@ -1,0 +1,21 @@
+# NSSAAF NRM RESTCONF Server configuration
+# Phase 6: Integration Testing & NRM
+# Usage: go run ./cmd/nrm/main.go --config=compose/configs/nrm.yaml
+
+component: nrm
+version: "0.1.0"
+
+server:
+  addr: ":8081"
+  readTimeout: 10s
+  writeTimeout: 30s
+  idleTimeout: 120s
+
+nrm:
+  listenAddr: ":8081"
+  alarmThresholds:
+    failureRatePercent: 10.0
+    evaluationWindowSec: 300
+  readTimeout: 10
+  writeTimeout: 30
+  idleTimeout: 120

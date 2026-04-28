@@ -18,6 +18,7 @@ const (
 	ComponentBiz         ComponentType = "biz"
 	ComponentAAAGateway  ComponentType = "aaa-gateway"
 	ComponentHTTPGateway ComponentType = "http-gateway"
+	ComponentNRM         ComponentType = "nrm"
 	keyManagerSoft       string        = "soft"
 )
 
@@ -43,6 +44,7 @@ type Config struct {
 	Biz    *BizConfig    `yaml:"biz,omitempty"`
 	AAAgw  *AAAgwConfig  `yaml:"aaaGateway,omitempty"`
 	HTTPgw *HTTPgwConfig `yaml:"httpGateway,omitempty"`
+	NRM    *NRMConfig    `yaml:"nrm,omitempty"`
 }
 
 // TLSConfig holds TLS certificate configuration.
@@ -216,6 +218,23 @@ type AUSFConfig struct {
 	Timeout time.Duration `yaml:"timeout"`
 }
 
+// NRMConfig holds NRM RESTCONF server settings.
+type NRMConfig struct {
+	ListenAddr string `yaml:"listenAddr"`
+	// AlarmThresholds is serialized separately to allow per-threshold YAML entries.
+	// Use AlarmThresholds slice in YAML, converted to AlarmThresholds* in Go.
+	AlarmThresholds *NRMAlarmThreshold `yaml:"alarmThresholds,omitempty"`
+	ReadTimeout     int                `yaml:"readTimeout"`
+	WriteTimeout    int                `yaml:"writeTimeout"`
+	IdleTimeout     int                `yaml:"idleTimeout"`
+}
+
+// NRMAlarmThreshold defines thresholds for alarm evaluation.
+type NRMAlarmThreshold struct {
+	FailureRatePercent  float64 `yaml:"failureRatePercent"`
+	EvaluationWindowSec int     `yaml:"evaluationWindowSec"`
+}
+
 // Load reads and parses a YAML configuration file.
 // Environment variable placeholders like ${VAR_NAME} are expanded.
 func Load(path string) (*Config, error) {
@@ -292,6 +311,14 @@ func (c *Config) Validate() error {
 			// Currently, AMF/AUSF use JWT tokens (not client certs) for HTTP Gateway mTLS,
 			// so CA verification is optional. If ClientAuth == tls.RequireAndVerifyClientCert,
 			// then c.HTTPgw.TLS.CA must be non-empty.
+		}
+
+	case ComponentNRM:
+		if c.NRM == nil {
+			return fmt.Errorf("config.nrm is required for component=nrm")
+		}
+		if c.NRM.ListenAddr == "" {
+			return fmt.Errorf("config.nrm.listenAddr is required")
 		}
 	}
 
@@ -461,6 +488,22 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.AUSF.Timeout == 0 {
 		cfg.AUSF.Timeout = 10 * time.Second
+	}
+
+	// NRM defaults (Phase 6 — Integration Testing & NRM)
+	if cfg.Component == ComponentNRM {
+		if cfg.NRM != nil && cfg.NRM.ListenAddr == "" {
+			cfg.NRM.ListenAddr = ":8081"
+		}
+		if cfg.NRM != nil && cfg.NRM.ReadTimeout == 0 {
+			cfg.NRM.ReadTimeout = 10
+		}
+		if cfg.NRM != nil && cfg.NRM.WriteTimeout == 0 {
+			cfg.NRM.WriteTimeout = 30
+		}
+		if cfg.NRM != nil && cfg.NRM.IdleTimeout == 0 {
+			cfg.NRM.IdleTimeout = 120
+		}
 	}
 
 	// Crypto defaults (Phase 5 — Security & Crypto)
