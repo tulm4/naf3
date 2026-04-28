@@ -1,6 +1,6 @@
 # Phase 6: Integration Testing & NRM - Context
 
-**Gathered:** 2026-04-28 (initial) + 2026-04-28 (supplemental: E2E + conformance)
+**Gathered:** 2026-04-28 (initial) + 2026-04-28 (supplemental: E2E + conformance) + 2026-04-28 (supplemental: AAA-S Diameter library + SCTP)
 **Status:** Ready for planning
 
 <domain>
@@ -40,6 +40,19 @@ Not this phase: k6 load tests (Phase 8), chaos testing (Phase 8), Kubernetes man
 
 ### RESTCONF encoding (D-06)
 - **D-06:** RESTCONF uses **JSON** encoding (RFC 8040 supports both JSON and XML)
+
+### AAA-S Diameter library (D-09)
+- **D-09:** `test/aaa_sim/diameter.go` uses **`github.com/fiorix/go-diameter/v4`** — same library as production `internal/diameter/`
+- Rationale: RFC 6733-compliant CER/CEA handshake, DWR/DWA watchdog, and connection state management give E2E tests fidelity matching production behavior
+- go-diameter/v4 is already in `go.mod` — no new dependency introduced
+- Import path: `github.com/fiorix/go-diameter/v4/sm` for CER/CEA state machine; keep AVP building and EAP handling in manual code within `test/aaa_sim/`
+
+### AAA-S SCTP support (D-10)
+- **D-10:** `test/aaa_sim/` adds **both SCTP and TCP** transport support for Diameter
+- `mode.go` adds `AAA_SIM_DIAMETER_TRANSPORT` env var: `tcp` (default) or `sctp`
+- SCTP uses `net.Dial("sctp", ...)` / `net.Listen("sctp", ...)` — standard Go `net` package
+- `test/aaa_sim/diameter.go` accepts `net.Listener` from caller, so transport is pluggable
+- go-diameter/v4/sm supports SCTP natively via `sm.Listen` with SCTP listener
 
 ### AIW E2E test scope (D-08)
 - **D-08:** AIW E2E tests at **two layers**:
@@ -81,8 +94,10 @@ Not this phase: k6 load tests (Phase 8), chaos testing (Phase 8), Kubernetes man
 ### 3GPP Specifications
 - TS 29.526 §7.2 — N58 API operations and error codes
 - TS 28.541 §5.3.145-148 — NSSAAFFunction IOC, NRM attributes
+- TS 29.561 Ch.17 — Diameter transport (TCP/SCTP)
 - RFC 3579 — RADIUS EAP extension
 - RFC 5216 — EAP-TLS MSK derivation
+- RFC 6733 — Diameter Base Protocol (CER/CEA, DWR/DWA)
 
 </canonical_refs>
 
@@ -125,4 +140,4 @@ None.
 ---
 
 *Phase: 06-integration-testing-nrm*
-*Context gathered: 2026-04-28*
+*Context gathered: 2026-04-28 (initial + 2 supplemental)*
