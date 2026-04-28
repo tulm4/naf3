@@ -42,10 +42,10 @@ type JWKSEntry struct {
 }
 
 // JWKSFetcher fetches and caches JWKS from NRF.
-// Thread-safe with a single mutex. Supports both RSA and ECDSA keys (ES256/ES384/ES512).
+// Thread-safe with a read-write mutex. Supports both RSA and ECDSA keys (ES256/ES384/ES512).
 // Spec: TS 33.501 §16.3 — RS256, RS384, RS512, ES256, ES384, ES512 accepted.
 type JWKSFetcher struct {
-	mu         sync.Mutex
+	mu         sync.RWMutex
 	jwksURL    string
 	httpClient *http.Client
 	entries    map[string]crypto.PublicKey // kid -> parsed key
@@ -69,11 +69,23 @@ func NewJWKSFetcher(jwksURL string, ttl time.Duration) *JWKSFetcher {
 // GetKey returns the public key for the given kid.
 // Fetches from NRF if cache is empty or expired.
 // Accepts RSA keys (*rsa.PublicKey) and ECDSA keys (*ecdsa.PublicKey).
+//
+// Uses double-checked locking: fast path under read lock (cached key),
+// slow path upgrades to write lock for refresh.
 func (f *JWKSFetcher) GetKey(ctx context.Context, kid string) (crypto.PublicKey, error) {
+	// Fast path: check cache under read lock — no write contention
+	f.mu.RLock()
+	if entry, ok := f.entries[kid]; ok && time.Since(f.fetchedAt) <= f.ttl {
+		f.mu.RUnlock()
+		return entry, nil
+	}
+	f.mu.RUnlock()
+
+	// Slow path: refresh cache under write lock
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	// Check cache under lock — no TOCTOU gap
+	// Double-check after acquiring write lock (another goroutine may have refreshed)
 	if entry, ok := f.entries[kid]; ok && time.Since(f.fetchedAt) <= f.ttl {
 		return entry, nil
 	}
