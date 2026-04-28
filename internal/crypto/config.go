@@ -28,6 +28,9 @@ type VaultConfig struct {
 	AuthMethod string
 	K8sRole    string
 	Token      string
+	// TokenFile is the path to a file containing the Vault token.
+	// Prefer TokenFile over Token to avoid holding the token in process memory.
+	TokenFile string
 }
 
 type SoftHSMConfig struct {
@@ -72,6 +75,7 @@ func Init(cfg *Config) error {
 			authMethod: cfg.Vault.AuthMethod,
 			k8sRole:    cfg.Vault.K8sRole,
 			token:      cfg.Vault.Token,
+			tokenFile:  cfg.Vault.TokenFile,
 			httpClient: &http.Client{Timeout: 10 * time.Second},
 		}
 	case "softhsm":

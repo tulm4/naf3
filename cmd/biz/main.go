@@ -110,6 +110,7 @@ func main() {
 			AuthMethod: cfg.Crypto.VaultConfig.AuthMethod,
 			K8sRole:    cfg.Crypto.VaultConfig.K8sRole,
 			Token:      cfg.Crypto.VaultConfig.Token,
+			TokenFile:  cfg.Crypto.VaultConfig.TokenFile,
 		}
 	}
 	if err := crypto.Init(&crypto.Config{
@@ -231,6 +232,9 @@ func main() {
 
 	// ─── Internal AAA forwarding endpoints (for AAA Gateway) ─────────────────
 	mux := http.NewServeMux()
+	// handleAaaForward: stub endpoint for Biz Pod receiving forwarded requests from AAA GW.
+	// Not implemented in Phase 5 — AAA GW communicates via direct Redis/RADIUS/Diameter.
+	// Registration kept for future extensibility (e.g., AAA GW → Biz direct HTTP).
 	mux.HandleFunc("/aaa/forward", handleAaaForward)
 	mux.HandleFunc("/aaa/server-initiated", handleServerInitiated)
 

@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -109,6 +110,7 @@ type VaultKeyManager struct {
 	authMethod string
 	k8sRole    string
 	token      string
+	tokenFile  string
 	httpClient HTTPDoer
 }
 
@@ -149,6 +151,7 @@ func NewVaultKeyManager(cfg *VaultConfig) *VaultKeyManager {
 		authMethod: cfg.AuthMethod,
 		k8sRole:    cfg.K8sRole,
 		token:      cfg.Token,
+		tokenFile:  cfg.TokenFile,
 		httpClient: &http.Client{Timeout: 10 * time.Second},
 	}
 }
@@ -298,8 +301,23 @@ func (m *VaultKeyManager) setAuthHeader(req *http.Request) error {
 		req.Header.Set("X-Vault-Request", "true")
 		req.Header.Set("Authorization", "Bearer "+string(tokenBytes))
 	case "token":
+		var token string
+		if m.tokenFile != "" {
+			// Read token from file to avoid holding it in memory as a string.
+			// TokenFile takes precedence over Token.
+			data, err := os.ReadFile(m.tokenFile)
+			if err != nil {
+				return fmt.Errorf("read Vault token from %s: %w", m.tokenFile, err)
+			}
+			token = strings.TrimSpace(string(data))
+		} else {
+			token = m.token
+		}
+		if token == "" {
+			return errors.New("vault token is empty (set token or tokenFile)")
+		}
 		req.Header.Set("X-Vault-Request", "true")
-		req.Header.Set("Authorization", "Bearer "+m.token)
+		req.Header.Set("Authorization", "Bearer "+token)
 	default:
 		return errors.New("unsupported auth method: " + m.authMethod)
 	}

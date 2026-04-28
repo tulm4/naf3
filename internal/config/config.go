@@ -78,7 +78,12 @@ type VaultConfig struct {
 	// K8sRole is the Kubernetes SA role (required when authMethod is "kubernetes").
 	K8sRole string `yaml:"k8sRole"`
 	// Token is the Vault token (required when authMethod is "token").
+	// Deprecated: prefer TokenFile to avoid holding the token in memory.
 	Token string `yaml:"token"`
+	// TokenFile is the path to a file containing the Vault token.
+	// If set, the token is read from this file at startup (or refreshed if
+	// the file changes). This avoids keeping the token in process memory.
+	TokenFile string `yaml:"tokenFile"`
 }
 
 // SoftHSMConfig holds SoftHSM2 configuration.
@@ -319,8 +324,8 @@ func (c *Config) Validate() error {
 		if c.Crypto.VaultConfig.AuthMethod == "kubernetes" && c.Crypto.VaultConfig.K8sRole == "" {
 			return fmt.Errorf("config.crypto.vault.k8sRole is required when authMethod is kubernetes")
 		}
-		if c.Crypto.VaultConfig.AuthMethod == "token" && c.Crypto.VaultConfig.Token == "" {
-			return fmt.Errorf("config.crypto.vault.token is required when authMethod is token")
+		if c.Crypto.VaultConfig.AuthMethod == "token" && c.Crypto.VaultConfig.Token == "" && c.Crypto.VaultConfig.TokenFile == "" {
+			return fmt.Errorf("config.crypto.vault.token or config.crypto.vault.tokenFile is required when authMethod is token")
 		}
 	}
 
