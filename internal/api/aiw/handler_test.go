@@ -86,7 +86,7 @@ func TestCreateAuthenticationContext_OK(t *testing.T) {
 
 	body := map[string]interface{}{
 		"supi":     "imu-208046000000001",
-		"eapIdRsp": "dXNlcgBleGFtcGxlLmNvbQ==",
+		"eapIdRsp": "dXNlckBleGFtcGxlLmNvbQ==",
 	}
 
 	rec := doRequest(h, http.MethodPost, "/nnssaaf-aiw/v1/authentications", body)
@@ -109,7 +109,7 @@ func TestCreateAuthenticationContext_WithOptionalFields(t *testing.T) {
 
 	body := map[string]interface{}{
 		"supi":                     "imu-208046000000001",
-		"eapIdRsp":                 "dXNlcgBleGFtcGxlLmNvbQ==",
+		"eapIdRsp":                 "dXNlckBleGFtcGxlLmNvbQ==",
 		"ttlsInnerMethodContainer": "aGVsbG8=", // base64 "hello"
 		"supportedFeatures":        "a1b2c3",
 	}
@@ -130,7 +130,7 @@ func TestCreateAuthenticationContext_InvalidSupi(t *testing.T) {
 
 	body := map[string]interface{}{
 		"supi":     "invalid-supi",
-		"eapIdRsp": "dXNlcgBleGFtcGxlLmNvbQ==",
+		"eapIdRsp": "dXNlckBleGFtcGxlLmNvbQ==",
 	}
 
 	rec := doRequest(h, http.MethodPost, "/nnssaaf-aiw/v1/authentications", body)
