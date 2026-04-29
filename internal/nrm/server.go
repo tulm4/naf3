@@ -116,6 +116,10 @@ func handleEvents(alarmMgr *AlarmManager) http.HandlerFunc {
 			return
 		}
 
+		if alarmMgr == nil {
+			http.Error(w, "alarm manager not initialized", http.StatusServiceUnavailable)
+			return
+		}
 		alarmMgr.Evaluate(&event)
 
 		w.Header().Set("Content-Type", "application/json")
