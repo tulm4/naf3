@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	nssaa_redis "github.com/operator/nssAAF/internal/cache/redis"
 )
 
 // Client lifecycle errors.
@@ -180,9 +182,10 @@ func (c *Client) validateResponse(data []byte, requestID uint8) error {
 // SendEAP forwards an EAP payload within a RADIUS Access-Request.
 // This is the primary method used by the EAP engine.
 func (c *Client) SendEAP(ctx context.Context, gpsi string, eapPayload []byte, snssaiSst uint8, snssaiSd string) ([]byte, error) {
+	// Hash GPSI before transmitting to AAA server per TS 33.501 PII requirements.
+	hashedGpsi := nssaa_redis.HashGPSI(gpsi)
 	attrs := []Attribute{
-		MakeStringAttribute(AttrUserName, gpsi),
-		MakeStringAttribute(AttrCallingStationID, gpsi),
+		MakeStringAttribute(AttrUserName, hashedGpsi),
 		MakeIntegerAttribute(AttrServiceType, ServiceTypeAuthenticateOnly),
 		MakeIntegerAttribute(AttrNASPortType, NASPortTypeVirtual),
 		Make3GPPSNSSAIAttribute(snssaiSst, snssaiSd),
