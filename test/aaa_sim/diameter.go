@@ -115,15 +115,9 @@ func (s *DiameterServer) handleDER(c diam.Conn, m *diam.Message) {
 	// Auth-Request-Type (1 = Authorize_Auth).
 	a.NewAVP(avp.AuthRequestType, avp.Mbit, 0, datatype.Unsigned32(1))
 
-	// EAP-Payload as Vendor-Specific AVP (3GPP).
+	// EAP-Payload AVP (1265) as top-level AVP per TS 29.561 §17.3.
 	if eapPayload != nil {
-		eapGroup := &diam.GroupedAVP{
-			AVP: []*diam.AVP{
-				diam.NewAVP(avp.VendorID, avp.Mbit, 0, datatype.Unsigned32(vendor3GPP)),
-				diam.NewAVP(1265, avp.Mbit, 0, datatype.OctetString(eapPayload)),
-			},
-		}
-		a.NewAVP(avp.VendorSpecificApplicationID, avp.Mbit, 0, eapGroup)
+		a.NewAVP(1265, avp.Mbit, vendor3GPP, datatype.OctetString(eapPayload))
 	}
 
 	if _, err := a.WriteTo(c); err != nil {
