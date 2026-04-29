@@ -51,10 +51,6 @@ func (s *AlarmStore) Save(alarm *Alarm) (string, error) {
 	if alarm.AlarmID == "" {
 		alarm.AlarmID = uuid.New().String()
 	}
-	if alarm.EventTime.IsZero() {
-		alarm.EventTime = time.Now()
-	}
-
 	key := dedupKey{alarmType: alarm.AlarmType, backupObject: alarm.BackupObject}
 
 	s.mu.Lock()
@@ -71,7 +67,6 @@ func (s *AlarmStore) Save(alarm *Alarm) (string, error) {
 		}
 	}
 
-	alarm.EventTime = time.Now()
 	s.alarms[alarm.AlarmID] = alarm
 	s.dedup[key] = &dedupInfo{
 		alarmID:  alarm.AlarmID,
