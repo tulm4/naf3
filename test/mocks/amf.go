@@ -105,10 +105,10 @@ func (m *AMFMock) handleNotification(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate notification type
+	// Validate notification type per TS 23.502 §4.2.9.3.
 	switch notif.NotificationType {
-	case "reauth", "revocation":
-		// valid — matches internal/amf/amf.go NotificationType constants
+	case "SLICE_RE_AUTH", "SLICE_REVOCATION":
+		// valid — matches 3GPP enum values
 	default:
 		http.Error(w, `{"cause":"INVALID_NOTIFICATION_TYPE"}`, http.StatusBadRequest)
 		return
