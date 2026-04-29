@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"math/rand"
 	"net"
+	"sync"
 	"time"
 )
 
@@ -51,6 +52,7 @@ type RadiusServer struct {
 	sharedSecret  []byte
 	logger        *slog.Logger
 	seenChallenge map[string]bool
+	mu            sync.RWMutex // guards seenChallenge
 }
 
 // NewRadiusServer creates a RADIUS server.
@@ -96,12 +98,20 @@ func (s *RadiusServer) handlePacket(clientAddr net.Addr, raw []byte) {
 		return
 	}
 
-	// Validate Message-Authenticator if present.
+	// Validate Message-Authenticator if present (RFC 3579).
 	if hasMessageAuth(raw) {
 		if !verifyMessageAuth(raw, s.sharedSecret) {
 			s.logger.Warn("radius_invalid_message_auth")
 			return
 		}
+	}
+
+	// Validate Request Authenticator presence (RFC 2865 §4).
+	// All Access-Request packets must include a Request Authenticator.
+	// A zero Request Authenticator indicates an invalid or replayed packet.
+	if hasZeroAuth(raw) {
+		s.logger.Warn("radius_missing_request_auth")
+		return
 	}
 
 	sessionID := extractSessionID(raw)
@@ -113,13 +123,20 @@ func (s *RadiusServer) handlePacket(clientAddr net.Addr, raw []byte) {
 		resp := s.buildResponse(raw, radiusAccessReject, sessionID)
 		s.sendResponse(clientAddr, resp)
 	case ModeEAP_TLS_CHALLENGE:
-		if s.seenChallenge[sessionID] {
-			resp := s.buildResponse(raw, radiusAccessAccept, sessionID)
+		s.mu.Lock()
+		seen := s.seenChallenge[sessionID]
+		if seen {
 			delete(s.seenChallenge, sessionID)
+		} else {
+			s.seenChallenge[sessionID] = true
+		}
+		s.mu.Unlock()
+
+		if seen {
+			resp := s.buildResponse(raw, radiusAccessAccept, sessionID)
 			s.sendResponse(clientAddr, resp)
 		} else {
 			resp := s.buildChallengeResponse(raw, sessionID)
-			s.seenChallenge[sessionID] = true
 			s.sendResponse(clientAddr, resp)
 		}
 	}
@@ -177,8 +194,9 @@ func (s *RadiusServer) buildRadiusPacket(req []byte, replyCode uint8, attrs []by
 	packet[1] = req[1]
 	binary.BigEndian.PutUint16(packet[2:4], uint16(totalLen))
 
-	// Response authenticator = MD5(code+id+length+requestAuth+attributes+secret)
-	respAuth := md5Authenticator(packet[:20], req[4:20], attrs, s.sharedSecret)
+	// RFC 2865 §4: Response Authenticator = MD5(Code+ID+Length+RequestAuth+Attributes+Secret)
+	// where Attributes are from the ORIGINAL request (req[20:]), not the response.
+	respAuth := md5Authenticator(packet[:20], req[4:20], req[20:], s.sharedSecret)
 	copy(packet[4:20], respAuth)
 
 	// Copy attributes.
@@ -255,6 +273,18 @@ func computeHMACMD5(data, secret []byte) []byte {
 // hasMessageAuth reports whether the packet contains a Message-Authenticator attribute.
 func hasMessageAuth(data []byte) bool {
 	return findAttr(data, attrMessageAuth) >= 0
+}
+
+// hasZeroAuth reports whether the Request Authenticator (bytes 4-20) is all zeros.
+// RFC 2865 §4: all Access-Request packets must have a non-zero Request Authenticator.
+// A zero Request Authenticator indicates an invalid or replayed packet.
+func hasZeroAuth(data []byte) bool {
+	for _, b := range data[4:20] {
+		if b != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func findAttr(data []byte, attrType uint8) int {
