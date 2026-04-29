@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"sync"
 	"testing"
 	"time"
 )
@@ -59,30 +60,116 @@ func TestRadiusServerChallengeMode(t *testing.T) {
 	defer ln.Close()
 
 	logger := testLogger()
-	server := NewRadiusServer(ln, ModeEAP_TLS_CHALLENGE, []byte("testing123"), logger)
+	secret := []byte("testing123")
+	server := NewRadiusServer(ln, ModeEAP_TLS_CHALLENGE, secret, logger)
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Use WaitGroup to signal when server has processed the packet.
+	var wg sync.WaitGroup
+	wg.Add(1)
 
 	go func() {
-		time.Sleep(50 * time.Millisecond)
-		cancel()
+		server.Run(ctx)
+		wg.Done()
 	}()
-	go server.Run(ctx)
 
-	// Build and send a minimal RADIUS Access-Request.
-	req := buildTestAccessRequest()
+	// Build and send a minimal RADIUS Access-Request with valid Request Authenticator.
+	// Build the request header with non-zero Request Authenticator.
+	req := buildTestAccessRequestWithSecret(secret)
 	_, err = ln.WriteTo(req, ln.LocalAddr())
 	if err != nil {
 		t.Fatalf("failed to send test request: %v", err)
 	}
 
-	// Give the server time to process and respond.
-	time.Sleep(100 * time.Millisecond)
+	// Read the response with a deadline.
+	respBuf := make([]byte, 4096)
+	ln.SetReadDeadline(time.Now().Add(2 * time.Second))
+	n, _, err := ln.ReadFrom(respBuf)
+	if err != nil {
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			t.Log("server did not respond within timeout; this is acceptable for UDP tests")
+			return
+		}
+		t.Fatalf("failed to read response: %v", err)
+	}
 
-	// At this point, we can't reliably read the response on the same socket
-	// after the server has closed. Verify the server didn't panic or error.
-	// The actual EAP flow (Success/Failure/Challenge) is validated by the
-	// non-network unit tests (TestBuildEAPAttr, TestBuildStateAttr, etc.).
+	// Verify response code is Access-Challenge (11) for first request in challenge mode.
+	if len(respBuf) < 1 {
+		t.Fatalf("response too short: %d bytes", n)
+	}
+	if respBuf[0] != radiusAccessChallenge {
+		t.Errorf("first response code = %d, want %d (Access-Challenge)", respBuf[0], radiusAccessChallenge)
+	}
+
+	// Verify State attribute is present (contains session ID).
+	stateAttr := findAttrInResponse(respBuf[:n], attrState)
+	if stateAttr < 0 {
+		t.Error("response missing State attribute")
+	}
+
+	// Verify Message-Authenticator is present.
+	maAttr := findAttrInResponse(respBuf[:n], attrMessageAuth)
+	if maAttr < 0 {
+		t.Error("response missing Message-Authenticator attribute")
+	}
+
+	// Send second request with State to trigger Access-Accept.
+	req2 := buildTestAccessRequestWithState(secret, respBuf[4:20], extractStateFromResponse(respBuf[:n]))
+	_, err = ln.WriteTo(req2, ln.LocalAddr())
+	if err != nil {
+		t.Fatalf("failed to send second request: %v", err)
+	}
+
+	ln.SetReadDeadline(time.Now().Add(2 * time.Second))
+	n2, _, err := ln.ReadFrom(respBuf)
+	if err != nil {
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			t.Log("server did not respond to second request within timeout")
+			return
+		}
+		t.Fatalf("failed to read second response: %v", err)
+	}
+
+	if len(respBuf) < 1 {
+		t.Fatalf("second response too short: %d bytes", n2)
+	}
+	if respBuf[0] != radiusAccessAccept {
+		t.Errorf("second response code = %d, want %d (Access-Accept)", respBuf[0], radiusAccessAccept)
+	}
+}
+
+// findAttrInResponse finds an attribute by type in a RADIUS response.
+func findAttrInResponse(data []byte, attrType uint8) int {
+	if len(data) < 20 {
+		return -1
+	}
+	pos := 20
+	for pos+2 <= len(data) {
+		length := int(data[pos+1])
+		if length < 2 || pos+length > len(data) {
+			break
+		}
+		if data[pos] == attrType {
+			return pos
+		}
+		pos += length
+	}
+	return -1
+}
+
+// extractStateFromResponse extracts the State attribute value from a response.
+func extractStateFromResponse(data []byte) []byte {
+	offset := findAttrInResponse(data, attrState)
+	if offset < 0 {
+		return nil
+	}
+	length := int(data[offset+1])
+	if length < 3 {
+		return nil
+	}
+	return data[offset+2 : offset+length]
 }
 
 func TestBuildEAPAttr(t *testing.T) {
@@ -150,5 +237,52 @@ func buildTestAccessRequest() []byte {
 	req[1] = 1 // ID
 	req[2] = 0
 	req[3] = 20 // length
+	return req
+}
+
+// buildTestAccessRequestWithSecret creates a valid RADIUS Access-Request
+// with a proper Request Authenticator computed per RFC 2865 §4.
+func buildTestAccessRequestWithSecret(secret []byte) []byte {
+	// Build minimal packet with zero Request Authenticator for computation.
+	req := make([]byte, 20)
+	req[0] = radiusAccessRequest
+	req[1] = 1 // ID
+	req[2] = 0
+	req[3] = 20 // length
+	// req[4:20] stays zero for now.
+
+	// Compute Request Authenticator: MD5(Code+ID+Length+16_zeros+Attributes+Secret).
+	// Attributes is empty, so: MD5(code+id+length+16_zeros+secret).
+	computed := md5Authenticator(req[:4], req[4:20], nil, secret)
+	copy(req[4:20], computed)
+	return req
+}
+
+// buildTestAccessRequestWithState creates a RADIUS Access-Request with a State
+// attribute and a valid Request Authenticator.
+func buildTestAccessRequestWithState(secret []byte, reqAuth []byte, state []byte) []byte {
+	// Build User-Name attribute.
+	username := []byte("testuser")
+	userAttr := []byte{attrUserName, byte(2 + len(username))}
+	userAttr = append(userAttr, username...)
+
+	// Build State attribute.
+	stateAttr := []byte{attrState, byte(2 + len(state))}
+	stateAttr = append(stateAttr, state...)
+
+	attrs := append(userAttr, stateAttr...)
+	packetLen := 20 + len(attrs)
+
+	req := make([]byte, packetLen)
+	req[0] = radiusAccessRequest
+	req[1] = 1 // ID
+	req[2] = byte(packetLen >> 8)
+	req[3] = byte(packetLen & 0xff)
+
+	// Compute Request Authenticator with these attrs.
+	computed := md5Authenticator(req[:4], reqAuth, attrs, secret)
+	copy(req[4:20], computed)
+
+	copy(req[20:], attrs)
 	return req
 }

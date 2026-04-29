@@ -80,18 +80,23 @@ func (m *AUSFMock) handleUEAuth(w http.ResponseWriter, r *http.Request) {
 	m.mu.Lock()
 	statusCode, hasError := m.errorCodes[gpsi]
 	authData, hasData := m.authData[gpsi]
-	m.mu.Unlock()
 
 	if hasError {
+		m.mu.Unlock()
 		http.Error(w, fmt.Sprintf(`{"cause":"AUSF_ERROR_%d"}`, statusCode), statusCode)
 		return
 	}
 
 	if !hasData {
+		m.mu.Unlock()
 		http.Error(w, `{"cause":"UE_NOT_FOUND"}`, http.StatusNotFound)
 		return
 	}
 
+	// Copy data before releasing lock.
+	dataCopy := *authData
+	m.mu.Unlock()
+
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(authData)
+	_ = json.NewEncoder(w).Encode(&dataCopy)
 }
