@@ -219,8 +219,15 @@ func (h *Harness) downCompose(ctx context.Context) error {
 	cmd := exec.CommandContext(ctx, "docker-compose", args...)
 	cmd.Dir = projectRoot()
 	cmd.Env = os.Environ()
+	// Create a new process group so that Kill kills both the shell
+	// and the docker-compose child process (IN-04 / CR-07).
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	out, err := cmd.CombinedOutput()
 	h.t.Logf("compose down output:\n%s", out)
+	if ctx.Err() != nil && cmd.Process != nil {
+		// On timeout, kill the entire process group directly.
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
 	return err
 }
 
@@ -258,6 +265,7 @@ func (h *Harness) buildBinaries(ctx context.Context) error {
 		}
 		cmd := exec.CommandContext(ctx, "sh", "-c", fmt.Sprintf(b.cmd, b.bin))
 		cmd.Dir = projectRoot()
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		out, _ := cmd.CombinedOutput()
 		if err := cmd.Wait(); err != nil {
 			return fmt.Errorf("build %s: %v\n%s", b.pkg, err, out)
