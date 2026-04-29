@@ -154,9 +154,14 @@ func handleAckAlarm(alarmMgr AlarmManagerProvider) http.HandlerFunc {
 
 		alarmID := chi.URLParam(r, "alarmId")
 
-		// Acknowledge with "operator" as the acknowledging principal.
-		// In a real deployment this would be extracted from the HTTP client cert or JWT.
-		acked := alarmMgr.AckAlarmInfo(alarmID, "operator")
+		// Acknowledge with the authenticated principal extracted from the request header.
+		// In a real deployment this would come from a client certificate or JWT.
+		// Fall back to a placeholder if the header is not present.
+		ackedBy := r.Header.Get("X-Authenticated-User")
+		if ackedBy == "" {
+			ackedBy = "unknown"
+		}
+		acked := alarmMgr.AckAlarmInfo(alarmID, ackedBy)
 
 		SetJSONHeaders(w)
 		if !acked {
