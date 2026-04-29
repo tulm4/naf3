@@ -62,12 +62,13 @@ func TestE2E_NSSAA_HappyPath(t *testing.T) {
 	// X-Request-ID must be echoed.
 	assert.Equal(t, "test-req-id", resp.Header.Get("X-Request-ID"))
 
-	// Parse authCtxId from response.
+	// Parse response body — must contain authCtxId.
 	var authResp map[string]interface{}
 	err = json.NewDecoder(resp.Body).Decode(&authResp)
 	require.NoError(t, err)
 	authCtxID, ok := authResp["authCtxId"].(string)
-	require.True(t, ok, "authCtxId must be present in response")
+	require.True(t, ok, "authCtxId must be present in response body")
+	assert.NotEmpty(t, authCtxID, "authCtxId must not be empty")
 	_ = authCtxID // used in challenge test
 
 	// 2. Confirm authentication with EAP message.
@@ -87,6 +88,16 @@ func TestE2E_NSSAA_HappyPath(t *testing.T) {
 
 	// Should get 200 OK.
 	assert.Equal(t, http.StatusOK, resp2.StatusCode, "NSSAA confirm should return 200")
+
+	// Verify response body contains expected fields (authResult or eapMessage).
+	var confirmResp map[string]interface{}
+	err = json.NewDecoder(resp2.Body).Decode(&confirmResp)
+	require.NoError(t, err, "confirm response should be valid JSON")
+	// At minimum, the response should have either authResult or eapMessage.
+	hasAuthResult := confirmResp["authResult"] != nil
+	hasEapMessage := confirmResp["eapMessage"] != nil
+	assert.True(t, hasAuthResult || hasEapMessage,
+		"confirm response should contain authResult or eapMessage")
 }
 
 // TestE2E_NSSAA_AuthFailure verifies that an Access-Reject from AAA-S returns HTTP 200
