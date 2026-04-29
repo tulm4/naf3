@@ -132,6 +132,7 @@ func checkComposeHealth(composeFile string) (bool, error) {
 
 	// Parse JSON output (one JSON object per line per service)
 	dec := json.NewDecoder(&stdout)
+	foundValid := false
 	for dec.More() {
 		var svc struct {
 			Service string `json:"Service"`
@@ -141,6 +142,7 @@ func checkComposeHealth(composeFile string) (bool, error) {
 		if err := dec.Decode(&svc); err != nil {
 			continue
 		}
+		foundValid = true
 		// A service is healthy if it has no health or health is "healthy"
 		if svc.Health != "" && svc.Health != "healthy" && svc.Health != "(healthy)" {
 			return false, nil
@@ -148,6 +150,9 @@ func checkComposeHealth(composeFile string) (bool, error) {
 		if svc.State != "running" {
 			return false, nil
 		}
+	}
+	if !foundValid {
+		return false, fmt.Errorf("no valid service entries found in compose ps output")
 	}
 	return true, nil
 }
