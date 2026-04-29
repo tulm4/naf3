@@ -2,6 +2,7 @@
 package nrm
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -73,6 +74,30 @@ func NewAlarmManager(store *AlarmStore, thresholds *AlarmThresholds, logger *slo
 		logger:     logger,
 		cbState:    make(map[string]bool),
 	}
+}
+
+// StartMetricsWindow starts a background goroutine that periodically resets
+// auth metrics to implement the sliding window evaluation period.
+// Must be called after AlarmManager is fully initialized.
+func (m *AlarmManager) StartMetricsWindow(ctx context.Context) {
+	if m.thresholds.EvaluationWindowSec <= 0 {
+		return
+	}
+	window := time.Duration(m.thresholds.EvaluationWindowSec) * time.Second
+	go func() {
+		ticker := time.NewTicker(window)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				m.ResetAuthMetrics()
+				m.logger.Info("auth_metrics_window_reset",
+					"window_sec", m.thresholds.EvaluationWindowSec)
+			}
+		}
+	}()
 }
 
 // RaiseAlarm creates and stores a new alarm with the given parameters.
@@ -223,10 +248,10 @@ func (m *AlarmManager) Evaluate(event *AlarmEvent) {
 		if m.authTotal > 0 {
 			rate := float64(m.authFailures) / float64(m.authTotal) * 100
 			if rate > m.thresholds.FailureRatePercent {
-				// Check if alarm already raised for this condition.
-				alarms := m.store.List()
+				// Take a snapshot of current alarms (releases manager lock during List()).
+				alarmSnapshot := m.takeAlarmSnapshot()
 				raised := false
-				for _, a := range alarms {
+				for _, a := range alarmSnapshot {
 					if a.AlarmType == AlarmHighAuthFailureRate {
 						raised = true
 						break
@@ -243,10 +268,10 @@ func (m *AlarmManager) Evaluate(event *AlarmEvent) {
 
 	case "CIRCUIT_BREAKER_OPEN":
 		m.cbState[event.Target] = true
-		// Raise alarm if not already raised for this server.
-		alarms := m.store.List()
+		// Take a snapshot of current alarms (releases manager lock during List()).
+		alarmSnapshot := m.takeAlarmSnapshot()
 		raised := false
-		for _, a := range alarms {
+		for _, a := range alarmSnapshot {
 			if a.AlarmType == AlarmCircuitBreakerOpen && a.BackupObject == event.Target {
 				raised = true
 				break
@@ -285,6 +310,15 @@ func (m *AlarmManager) ResetAuthMetrics() {
 	defer m.mu.Unlock()
 	m.authTotal = 0
 	m.authFailures = 0
+}
+
+// takeAlarmSnapshot returns a copy of current alarms while releasing the manager lock.
+// This avoids holding AlarmManager.mu during the store.List() call.
+func (m *AlarmManager) takeAlarmSnapshot() []*Alarm {
+	// Note: Caller must hold m.mu before calling. We release and re-acquire to avoid lock-in-lock.
+	m.mu.Unlock()
+	defer m.mu.Lock()
+	return m.store.List()
 }
 
 // probableCause returns the ITU-T X.733 probable cause string for a given alarm type.

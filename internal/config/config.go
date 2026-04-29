@@ -224,9 +224,12 @@ type NRMConfig struct {
 	// AlarmThresholds is serialized separately to allow per-threshold YAML entries.
 	// Use AlarmThresholds slice in YAML, converted to AlarmThresholds* in Go.
 	AlarmThresholds *NRMAlarmThreshold `yaml:"alarmThresholds,omitempty"`
-	ReadTimeout     int                `yaml:"readTimeout"`
-	WriteTimeout    int                `yaml:"writeTimeout"`
-	IdleTimeout     int                `yaml:"idleTimeout"`
+	// NRMURL is the base URL of this NRM server, used by Biz Pod NRMClient
+	// to push events. Set automatically from ListenAddr.
+	NRMURL string `yaml:"-"`
+	ReadTimeout int `yaml:"readTimeout"`
+	WriteTimeout int `yaml:"writeTimeout"`
+	IdleTimeout int `yaml:"idleTimeout"`
 }
 
 // NRMAlarmThreshold defines thresholds for alarm evaluation.

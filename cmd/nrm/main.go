@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -38,6 +39,14 @@ func main() {
 		"listen_addr", cfg.NRM.ListenAddr,
 	)
 
+	// Populate NRMURL from ListenAddr so that Biz Pod NRMClient
+	// can push events to this NRM server.
+	nrmURL := cfg.NRM.ListenAddr
+	if !strings.HasPrefix(nrmURL, "http") {
+		nrmURL = "http://localhost" + nrmURL
+	}
+	cfg.NRM.NRMURL = nrmURL
+
 	// Initialize NRM components.
 	store := nrm.NewAlarmStore()
 
@@ -52,10 +61,16 @@ func main() {
 
 	alarmMgr := nrm.NewAlarmManager(store, thresholds, logger)
 
+	// Start metrics window for sliding window evaluation (WR-12).
+	appCtx, appCancel := context.WithCancel(context.Background())
+	defer appCancel()
+	alarmMgr.StartMetricsWindow(appCtx)
+
 	// Initialize RESTCONF server.
 	server := nrm.NewServer(
 		&nrm.NRMConfig{
 			ListenAddr:     cfg.NRM.ListenAddr,
+			NRMURL:         cfg.NRM.NRMURL,
 			ReadTimeout:    cfg.NRM.ReadTimeout,
 			WriteTimeout:   cfg.NRM.WriteTimeout,
 			IdleTimeout:    cfg.NRM.IdleTimeout,
@@ -81,6 +96,7 @@ func main() {
 		os.Exit(1)
 	case <-signalReceived():
 		slog.Info("shutdown signal received")
+		appCancel() // Stop background goroutines
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_ = server.Shutdown(ctx)
