@@ -3,6 +3,7 @@ package nrm
 
 import (
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -88,6 +89,10 @@ func (s *AlarmStore) List() []*Alarm {
 	for _, a := range s.alarms {
 		alarms = append(alarms, a)
 	}
+	// Sort by EventTime descending as documented.
+	sort.Slice(alarms, func(i, j int) bool {
+		return alarms[i].EventTime.After(alarms[j].EventTime)
+	})
 	return alarms
 }
 
