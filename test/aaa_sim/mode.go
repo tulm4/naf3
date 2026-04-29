@@ -68,6 +68,8 @@ func Run(mode Mode, logger *slog.Logger) {
 	radiusAddr := ":1812"
 	diameterAddr := ":3868"
 	diameterTransport := "tcp"
+	// Test-only: default shared secret for local testing.
+	// Override with AAA_SIM_SECRET environment variable.
 	sharedSecret := []byte("testing123")
 	if v := os.Getenv("AAA_SIM_RADIUS_ADDR"); v != "" {
 		radiusAddr = v

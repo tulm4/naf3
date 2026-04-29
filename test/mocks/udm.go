@@ -103,7 +103,7 @@ func (m *UDMMock) handleRegistration(w http.ResponseWriter, r *http.Request) {
 	supi := strings.TrimSuffix(path, "/registration")
 	supi = strings.Trim(supi, "/")
 
-	if !strings.HasPrefix(supi, "imu-") && !strings.HasPrefix(supi, "5g-") {
+	if !strings.HasPrefix(supi, "imu-") {
 		http.Error(w, `{"cause":"INVALID_SUPI"}`, http.StatusBadRequest)
 		return
 	}
