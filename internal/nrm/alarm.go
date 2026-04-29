@@ -67,6 +67,10 @@ func (s *AlarmStore) Save(alarm *Alarm) (string, error) {
 		}
 	}
 
+	// Set EventTime only if not already set (preserve original timestamp for dedup).
+	if alarm.EventTime.IsZero() {
+		alarm.EventTime = time.Now()
+	}
 	s.alarms[alarm.AlarmID] = alarm
 	s.dedup[key] = &dedupInfo{
 		alarmID:  alarm.AlarmID,

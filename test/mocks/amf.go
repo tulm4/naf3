@@ -93,13 +93,11 @@ func (m *AMFMock) handleNotification(w http.ResponseWriter, r *http.Request) {
 	errCode := m.errorCode
 	if fail {
 		m.failNext = false
-	}
-	m.mu.Unlock()
-
-	if fail {
+		m.mu.Unlock()
 		http.Error(w, `{"cause":"SERVICE_UNAVAILABLE"}`, errCode)
 		return
 	}
+	m.mu.Unlock()
 
 	var notif NssaaNotification
 	if err := json.NewDecoder(r.Body).Decode(&notif); err != nil {
