@@ -180,7 +180,9 @@ func TestE2E_NSSAA_AuthChallenge(t *testing.T) {
 	location := resp.Header.Get("Location")
 
 	// Multiple confirm rounds (simulating multi-step handshake).
-	for i := 0; i < 3; i++ {
+	// Loop until we get a non-200 response (session completed) or max iterations.
+	const maxRounds = 10
+	for i := 0; i < maxRounds; i++ {
 		confirmBody := map[string]interface{}{
 			"gpsi":       "520804600000001",
 			"snssai":     map[string]interface{}{"sst": 1, "sd": "000001"},
@@ -196,9 +198,15 @@ func TestE2E_NSSAA_AuthChallenge(t *testing.T) {
 
 		// Intermediate responses may be 200 with EAP message or final authResult.
 		if resp2.StatusCode != http.StatusOK {
-			// May get 400 for session not found after completion.
+			// Non-200 means session completed or error.
 			break
 		}
+
+		// Verify body has expected fields.
+		var respBody map[string]interface{}
+		err = json.NewDecoder(resp2.Body).Decode(&respBody)
+		require.NoError(t, err, "response body must be valid JSON")
+		assert.Contains(t, respBody, "gpsi", "confirm response must include gpsi")
 	}
 }
 
