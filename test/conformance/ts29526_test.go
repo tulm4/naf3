@@ -266,10 +266,6 @@ func TestTS29526_NSSAA_CreateSlice_EmptyEapIdRsp(t *testing.T) {
 
 // TC-NSSAA-009: Invalid base64 in eapIdRsp → 400.
 // Spec: TS 29.526 §7.2.3
-// Note: The NSSAA handler does not currently validate base64 at the API layer.
-// This test verifies the handler accepts the request and lets the AAA layer handle
-// the payload. The base64 validation is documented as a gap and should be
-// added as a handler validation step.
 func TestTS29526_NSSAA_CreateSlice_InvalidBase64EapIdRsp(t *testing.T) {
 	t.Parallel()
 	store := newNssaaMockStore()
@@ -282,10 +278,8 @@ func TestTS29526_NSSAA_CreateSlice_InvalidBase64EapIdRsp(t *testing.T) {
 	}
 	rec := nssaaRequest(h, http.MethodPost, "/nnssaaf-nssaa/v1/slice-authentications", body)
 
-	// Current behavior: handler does not validate base64 at API layer.
-	// It passes the payload through to the AAA layer.
-	// Future: should return 400 per TS 29.526 §7.2.3.
-	_ = rec
+	// Handler validates base64 at API layer per TS 29.526 §7.2.3.
+	assert.Equal(t, http.StatusBadRequest, rec.Code, "TC-NSSAA-009: Invalid base64 → 400")
 }
 
 // TC-NSSAA-010: AAA not configured for snssai → 404.
@@ -483,7 +477,7 @@ func TestTS29526_NSSAA_ConfirmSlice_MissingEapMessage(t *testing.T) {
 }
 
 // TC-NSSAA-025: Invalid base64 in eapMessage → 400.
-// Note: The handler does not validate base64 format at the API layer.
+// Spec: TS 29.526 §7.2.6
 func TestTS29526_NSSAA_ConfirmSlice_InvalidBase64EapMessage(t *testing.T) {
 	t.Parallel()
 	store := newNssaaMockStore()
@@ -497,8 +491,8 @@ func TestTS29526_NSSAA_ConfirmSlice_InvalidBase64EapMessage(t *testing.T) {
 	}
 	rec := nssaaRequest(h, http.MethodPut, "/nnssaaf-nssaa/v1/slice-authentications/ctx-025", body)
 
-	// Current behavior: handler does not validate base64.
-	_ = rec
+	// Handler validates base64 at API layer per TS 29.526 §7.2.6.
+	assert.Equal(t, http.StatusBadRequest, rec.Code, "TC-NSSAA-025: Invalid base64 → 400")
 }
 
 // TC-NSSAA-026: Session already completed → 409 Conflict.

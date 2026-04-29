@@ -161,8 +161,9 @@ func (h *Handler) CreateAuthenticationContext(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Note: eapIdRsp is []byte alias in the generated types, so JSON unmarshaling
-	// auto-decodes base64. No explicit base64 validation needed.
+	// Note: eapIdRsp is decoded as base64 automatically by JSON unmarshaling
+	// into []byte. Invalid base64 causes JSON decode error above, so no
+	// explicit base64 validation is needed here (unlike NSSAA's string field).
 	authCtxID := uuid.NewString()
 
 	authCtx := &AuthContext{
