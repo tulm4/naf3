@@ -1,6 +1,6 @@
 # Phase 6: Integration Testing & NRM - Context
 
-**Gathered:** 2026-04-28 (initial) + 2026-04-28 (supplemental: E2E + conformance) + 2026-04-28 (supplemental: AAA-S Diameter library + SCTP)
+**Gathered:** 2026-04-28 (initial) + 2026-04-28 (supplemental: E2E + conformance) + 2026-04-28 (supplemental: AAA-S Diameter library + SCTP) + 2026-04-30 (compose/Makefile reorganization)
 **Status:** Ready for planning
 
 <domain>
@@ -62,9 +62,78 @@ Not this phase: k6 load tests (Phase 8), chaos testing (Phase 8), Kubernetes man
 - Covers all AIW test cases from `docs/design/24_test_strategy.md` §5.3: MSK extraction, TTLS inner method, EAP failure, invalid SUPI, AAA not configured
 - **PLAN-6 added** to cover the AIW 3-component E2E gap (test/e2e/aiw_flow_test.go, 6 cases) and AIW conformance gap (test/conformance/aiw_conformance_test.go, 13 cases)
 
+### Harness Docker Compose command (D-11)
+- **D-11:** Use `docker compose` (V2, `go-docker/docker/compose`) throughout — not `docker-compose` (V1, standalone binary)
+- `harness.go`: Change `exec.CommandContext(ctx, "docker-compose", args...)` to `exec.CommandContext(ctx, "docker", "compose", args...)`
+- `Makefile` already uses `docker compose` correctly (lines 234, 238, 242) — no change needed
+- Verify `docker compose version` works; fallback skip if unavailable (existing pattern)
+
+### Compose file layout (D-12)
+- **D-12:** Single `compose/dev.yaml` for all test types — no separate `test.yaml`, no `biz-e2e.yaml`, no `http-gateway-e2e.yaml`, no `aaa-gateway-e2e.yaml`
+- Rationale: Single source of truth for infrastructure topology. Test-specific overrides handled via env vars passed to binary processes, not via compose overlays.
+- Remove: `compose/test.yaml`, `compose/configs/biz-e2e.yaml`, `compose/configs/http-gateway-e2e.yaml`, `compose/configs/aaa-gateway-e2e.yaml`
+- Keep: `compose/dev.yaml` (infra + component containers), `compose/configs/` (dev config files used at runtime by binary processes via env)
+
+### Test infrastructure ports (D-13)
+- **D-13:** Integration and E2E tests use the same infrastructure ports as dev (Redis: 6379, PostgreSQL: 5432)
+- No separate test ports (5433, 6380) — test DB/Redis are the same as dev DB/Redis
+- Rationale: Single compose file means single port scheme. Test isolation is at the process level (binaries started by harness), not at the network level.
+
+### Harness config externalization (D-14)
+- **D-14:** All harness hardcoded values externalized as env vars — `getEnv(key, default)` pattern in `harness.go`
+- Key env vars (all with defaults matching dev.yaml):
+  - `TEST_BIZ_LISTEN` (default: `:8080`)
+  - `TEST_HTTPGW_LISTEN` (default: `:8443`)
+  - `TEST_AAAGW_LISTEN` (default: `:9090`)
+  - `TEST_BIZ_PG_URL` (default: `postgres://nssaa:nssaa@localhost:5432/nssaa?sslmode=disable`)
+  - `TEST_BIZ_REDIS_URL` (default: `redis://localhost:6379`)
+  - `TEST_BIZ_AAA_GW_URL` (default: `http://localhost:9090`)
+  - `TEST_BIZ_NRM_URL` (default: `http://localhost:8081`)
+  - `TEST_HTTP_GW_BIZ_URL` (default: `http://localhost:8080`)
+  - `TEST_AAAGW_RADIUS_PORT` (default: `1812`)
+  - `TEST_AAAGW_DIAMETER_PORT` (default: `3868`)
+  - `TEST_DOCKER_COMPOSE` (default: `-f compose/dev.yaml`)
+  - `TEST_BINARY_DIR` (default: `.`)
+- Env vars set by harness itself (not sourced from shell) via `os.Setenv` before `exec.CommandContext`
+- Rationale: No extra config files needed. Easy to override per-machine or per-CI-run.
+
+### Integration test Docker Compose infrastructure (D-15)
+- **D-15:** Integration tests (`test/integration/`) use Docker Compose for real PostgreSQL and Redis — not in-process mocks
+- `NewHarness()` is NOT used by integration tests (no binary processes needed)
+- Instead: a lightweight `infra` package in `test/` with `InfraUp(ctx)`, `InfraDown(ctx)`, `WaitReady(ctx)` functions
+- `InfraUp` runs `docker compose -f compose/dev.yaml up -d postgres redis mock-aaa-s`
+- `InfraDown` runs `docker compose -f compose/dev.yaml down`
+- Integration tests call `infra.InfraUp(t)` in `TestMain` (or per-test setup) and `infra.InfraDown(t)` in teardown
+- DB migration: `internal/storage/postgres.Migrator` (already exists in `internal/storage/postgres/migrate.go`, used via `NewMigrator(pool).Migrate(ctx)`)
+- Real Redis: use `github.com/redis/go-redis/v9` client, connect to `localhost:6379`
+
+### Makefile test targets (D-16)
+- **D-16:** Separate `make` targets per test layer — each manages its own infra lifecycle:
+
+```
+make test-unit          # go test ./test/unit/... — no infra
+make test-integration   # docker compose up -d → go test ./test/integration/... → docker compose down
+make test-e2e          # build binaries → docker compose up -d → go test ./test/e2e/... → docker compose down
+make test-conformance   # go test ./test/conformance/... — no infra (httptest only)
+make test-all          # test-unit + test-integration + test-e2e + test-conformance
+```
+
+- `test-integration` and `test-e2e` both run `docker compose -f compose/dev.yaml up -d` (same infra)
+- `test-integration` does NOT start component binaries — just infra (postgres, redis, mock-aaa-s)
+- `test-e2e` starts component binaries via harness
+- Both tear down with `docker compose -f compose/dev.yaml down`
+- DB migration handled inside `test/integration` setup (via `postgres.Migrator`)
+- NRM binary: built separately, started by harness on `nrmURL` (port 8081)
+
+### Binary management in harness (D-17)
+- **D-17:** Harness builds binaries on first run, reuses on subsequent runs — existing behavior preserved
+- `buildBinaries()` checks `os.Stat(bin)`; only runs `go build` if binary is missing
+- Users can force rebuild by deleting the binary or setting `FORCE_REBUILD=1` env var
+- Harness logs: "reusing existing binary" vs "building binary"
+
 ### Claude's Discretion
 - Alarm severity thresholds and deduplication policy
-- Exact compose file structure for test isolation
+- NRM startup timing (wait for RESTCONF ready before running E2E tests)
 
 </decisions>
 
@@ -85,10 +154,19 @@ Not this phase: k6 load tests (Phase 8), chaos testing (Phase 8), Kubernetes man
 - `docs/design/18_nrm_fcaps.md` — YANG model (3gpp-nssaaf-nrm), alarm types, RESTCONF API, FCAPS implementation patterns
 
 ### Existing Code
+- `test/e2e/harness.go` — E2E harness (CURRENT: uses `docker-compose` V1, hardcoded env vars, `compose/dev.yaml` + `compose/test.yaml`)
+- `compose/dev.yaml` — Infrastructure compose (postgres, redis, mock-aaa-s, biz, http-gw, aaa-gw containers)
+- `compose/test.yaml` — **REMOVE** — test port overrides (postgres_test:5433, redis_test:6380)
+- `compose/configs/biz-e2e.yaml` — **REMOVE** — hardcoded test ports (to be replaced by env vars)
+- `compose/configs/http-gateway-e2e.yaml` — **REMOVE**
+- `compose/configs/aaa-gateway-e2e.yaml` — **REMOVE**
+- `cmd/nrm/main.go` — NRM standalone binary (to be started by harness)
+- `internal/storage/postgres/migrate.go` — `Migrator` struct with `Migrate(ctx)` method; used by integration test setup
 - `internal/eap/engine_test.go` — Existing test patterns: mockAAAClient, testify assertions, in-process mocks
 - `internal/api/aiw/handler_test.go` — API handler test patterns: mockStore, httptest, doRequest helper
 - `cmd/biz/main_test.go` — Main test patterns: httptest server, JSON request helpers
-- `compose/configs/biz.yaml` — Existing docker-compose config (reference for test compose)
+- `compose/configs/biz.yaml` — Dev config for Biz Pod binary
+- `Makefile` — Build targets (lines 232-243: `compose-up`, `compose-down`, `compose-logs` using `docker compose` V2)
 - `go.mod` — Existing test dependencies: testify, miniredis/v2
 
 ### 3GPP Specifications
@@ -118,8 +196,8 @@ Not this phase: k6 load tests (Phase 8), chaos testing (Phase 8), Kubernetes man
 
 ### Integration Points
 - `test/` directory: organize into `test/unit/`, `test/integration/`, `test/e2e/`, `test/conformance/` (or use `*_test.go` co-located with source)
-- `compose.yaml` + `compose/configs/` — test compose extends existing dev compose
-- `internal/nrm/` does not exist yet — new package needed for RESTCONF server and alarm manager
+- `compose/dev.yaml` — Single compose file for both integration and E2E infra (updated per D-12)
+- `internal/nrm/` — RESTCONF server and alarm manager (already exists in `cmd/nrm/`)
 - All 21 existing `*_test.go` files already cover core paths — Phase 6 fills gaps and adds NRM
 - `test/mocks/` directory: `test/mocks/aaasim/` for the AAA-S simulator (dedicated container); `test/mocks/` for NRF/UDM/AMF/AUSF httptest helpers
 
