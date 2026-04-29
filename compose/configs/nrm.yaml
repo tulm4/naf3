@@ -5,12 +5,6 @@
 component: nrm
 version: "0.1.0"
 
-server:
-  addr: ":8081"
-  readTimeout: 10s
-  writeTimeout: 30s
-  idleTimeout: 120s
-
 nrm:
   listenAddr: ":8081"
   alarmThresholds:
