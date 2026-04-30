@@ -13,9 +13,10 @@ services:
   nrmUrl: "http://localhost:8081"
 
 binaries:
-  biz: "${BIZ_BINARY:-./bin/biz}"
-  httpGateway: "${HTTPGW_BINARY:-./bin/http-gateway}"
-  aaaGateway: "${AAAGW_BINARY:-./bin/aaa-gateway}"
+  # No longer used when E2E_DOCKER_MANAGED=1; kept for reference only.
+  biz: "${BIZ_BINARY:-}"
+  httpGateway: "${HTTPGW_BINARY:-}"
+  aaaGateway: "${AAAGW_BINARY:-}"
 
 tls:
   caCert: "${E2E_TLS_CA:-/tmp/e2e-tls/server.crt}"

@@ -1,3 +1,6 @@
+//go:build e2e
+// +build e2e
+
 // Package e2e provides end-to-end integration tests for the NSSAAF system.
 package e2e
 
@@ -6,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -175,4 +179,17 @@ func splitFields(s string) []string {
 		out = append(out, string(word))
 	}
 	return out
+}
+
+// projectRoot returns the module root (where go.mod lives) by walking up from cwd.
+func projectRoot() string {
+	if cwd, err := os.Getwd(); err == nil {
+		for dir := cwd; dir != "/"; dir = filepath.Dir(dir) {
+			if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+				return dir
+			}
+		}
+		return cwd
+	}
+	return "."
 }

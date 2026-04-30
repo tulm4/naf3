@@ -1,3 +1,6 @@
+//go:build e2e
+// +build e2e
+
 // Package e2e provides an end-to-end test harness for the 3-component
 // NSSAAF architecture: HTTP Gateway, Biz Pod, and AAA Gateway.
 //
@@ -408,17 +411,4 @@ func (h *Harness) waitHealthy(ctx context.Context, timeout time.Duration) error 
 func ofThisFile() string {
 	_, file, _, _ := runtime.Caller(1)
 	return filepath.Dir(file)
-}
-
-// projectRoot returns the module root (where go.mod lives) by walking up from cwd.
-func projectRoot() string {
-	if cwd, err := os.Getwd(); err == nil {
-		for dir := cwd; dir != "/"; dir = filepath.Dir(dir) {
-			if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-				return dir
-			}
-		}
-		return cwd
-	}
-	return "."
 }
