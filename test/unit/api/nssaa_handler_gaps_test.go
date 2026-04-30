@@ -356,19 +356,26 @@ func TestConfirmSliceAuth_AuthCtxIDEmpty(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
-// TestCreateSliceAuth_MissingSnssai verifies that a missing snssai returns HTTP 400.
+// TestCreateSliceAuth_MissingSnssai verifies that an absent snssai field
+// is rejected with HTTP 400 per TS 29.526 §7.2.2.
 func TestCreateSliceAuth_MissingSnssai(t *testing.T) {
 	store := newMockStoreNssaa()
 	h := nssaa.NewHandler(store, nssaa.WithAPIRoot("https://nssAAF.example.com"))
 
 	body := map[string]interface{}{
 		"gpsi":     "520804600000001",
-		"eapIdRsp": "dXNlcgBleGFtcGxlLmNvbQ==",
+		"supi":    "imu-208930000000001",
+		"supiKind": "SUCI",
+		"eapIdRsp": "dGVzdA==",
 		// snssai missing
 	}
 
-	rec := doRequestNssaa(h, http.MethodPost, "/nnssaaf-nssaa/v1/slice-authentications", body)
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	rec := doRequestNssaa(h, http.MethodPost,
+		"/nnssaaf-nssaa/v1/slice-authentications", body)
+	assert.Equal(t, http.StatusBadRequest, rec.Code,
+		"missing snssai should return 400, got %d", rec.Code)
+	assert.Contains(t, rec.Body.String(), "snssai",
+		"error should mention snssai field")
 }
 
 // TestCreateSliceAuth_InvalidSnssaiSST verifies that SST out of range returns HTTP 400.
@@ -393,7 +400,7 @@ func TestCreateSliceAuth_InvalidSnssaiSD(t *testing.T) {
 
 	body := map[string]interface{}{
 		"gpsi":     "520804600000001",
-		"snssai":   map[string]interface{}{"sst": 1, "sd": "INVALID"}, // not 6 hex chars
+		"snssai":   map[string]interface{}{"sst": 1, "sd": "INVALID"},
 		"eapIdRsp": "dXNlcgBleGFtcGxlLmNvbQ==",
 	}
 
@@ -441,4 +448,54 @@ func TestConfirmSliceAuth_InvalidSnssaiSST(t *testing.T) {
 	rec := doRequestNssaa(h, http.MethodPut,
 		"/nnssaaf-nssaa/v1/slice-authentications/ctx-sst", body)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+// TestCreateSliceAuth_EmptySnssai verifies that an empty snssai object
+// is rejected with HTTP 400 per TS 29.526 §7.2.2.
+func TestCreateSliceAuth_EmptySnssai(t *testing.T) {
+	store := newMockStoreNssaa()
+	h := nssaa.NewHandler(store, nssaa.WithAPIRoot("https://nssAAF.example.com"))
+
+	body := map[string]interface{}{
+		"gpsi":      "520804600000001",
+		"snssai":    map[string]interface{}{},
+		"supi":      "imu-208930000000001",
+		"supiKind":  "SUCI",
+		"eapIdRsp":  "dGVzdA==",
+	}
+
+	rec := doRequestNssaa(h, http.MethodPost,
+		"/nnssaaf-nssaa/v1/slice-authentications", body)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code,
+		"empty snssai {} should return 400, got %d: %s", rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "snssai",
+		"error should mention snssai field")
+}
+
+// TestConfirmSliceAuth_EmptySnssai verifies that an empty snssai object
+// in PUT request is rejected with HTTP 400.
+func TestConfirmSliceAuth_EmptySnssai(t *testing.T) {
+	store := newMockStoreNssaa()
+	store.data["ctx-empty"] = &nssaa.AuthCtx{
+		AuthCtxID: "ctx-empty",
+		GPSI:      "520804600000001",
+		SnssaiSST: 1,
+		SnssaiSD:  "000001",
+	}
+	h := nssaa.NewHandler(store, nssaa.WithAPIRoot("https://nssAAF.example.com"))
+
+	body := map[string]interface{}{
+		"gpsi":      "520804600000001",
+		"snssai":    map[string]interface{}{},
+		"eapMessage": "dGVzdA==",
+	}
+
+	rec := doRequestNssaa(h, http.MethodPut,
+		"/nnssaaf-nssaa/v1/slice-authentications/ctx-empty", body)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code,
+		"empty snssai {} in PUT should return 400, got %d: %s", rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "snssai",
+		"error should mention snssai field")
 }

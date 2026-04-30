@@ -193,8 +193,10 @@ func TestTS29526_NSSAA_CreateSlice_MissingSnssai(t *testing.T) {
 	}
 	rec := nssaaRequest(h, http.MethodPost, "/nnssaaf-nssaa/v1/slice-authentications", body)
 
-	// Current behavior: missing snssai is not rejected at the API layer.
-	_ = rec
+	assert.Equal(t, http.StatusBadRequest, rec.Code,
+		"TC-NSSAA-018: missing snssai should return 400, got %d", rec.Code)
+	assert.Contains(t, rec.Body.String(), "snssai",
+		"TC-NSSAA-018: error response should mention snssai field")
 }
 
 // TC-NSSAA-005: snssai.sst out of range (0-255) → 400.
@@ -374,6 +376,28 @@ func TestTS29526_NSSAA_CreateSlice_NoAmfInstanceId(t *testing.T) {
 	rec := nssaaRequest(h, http.MethodPost, "/nnssaaf-nssaa/v1/slice-authentications", body)
 
 	assert.Equal(t, http.StatusCreated, rec.Code, "TC-NSSAA-014: No AMF ID → 201 with warning")
+}
+
+// TC-NSSAA-019: Empty snssai object → 400 Bad Request per TS 29.526 §7.2.2.
+// Covers Gap E2E-01 fix.
+func TestTS29526_NSSAA_CreateSlice_EmptySnssai(t *testing.T) {
+	t.Parallel()
+	store := newNssaaMockStore()
+	h := nssaaHandlerFromStore(store, nssaa.WithAPIRoot("http://test"))
+
+	body := map[string]interface{}{
+		"gpsi":      "520804600000001",
+		"snssai":    map[string]interface{}{},
+		"supi":      "imu-208930000000001",
+		"supiKind":  "SUCI",
+		"eapIdRsp":  "dGVzdA==",
+	}
+	rec := nssaaRequest(h, http.MethodPost, "/nnssaaf-nssaa/v1/slice-authentications", body)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code,
+		"TC-NSSAA-019: empty snssai {} should return 400, got %d", rec.Code)
+	assert.Contains(t, rec.Body.String(), "snssai",
+		"TC-NSSAA-019: error response should mention snssai field")
 }
 
 // ─── NSSAA §7.2: ConfirmSliceAuthenticationContext ──────────────────────────
