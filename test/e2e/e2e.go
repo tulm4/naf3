@@ -21,11 +21,11 @@ var sharedHarness *Harness
 
 // TestMain coordinates the shared lifecycle for the entire E2E test suite:
 //
-//   1. (if E2E_DOCKER_MANAGED not set) docker compose up — managed by Makefile
-//   2. build + start binaries + wait healthy  (sharedHarness)
-//   3. each test: NewHarnessForTest() → run
-//   4. Close() sharedHarness (kill binaries only)
-//   5. (if E2E_DOCKER_MANAGED not set) docker compose down — managed by Makefile
+//  1. (if E2E_DOCKER_MANAGED not set) docker compose up — managed by Makefile
+//  2. build + start binaries + wait healthy  (sharedHarness)
+//  3. each test: NewHarnessForTest() → run
+//  4. Close() sharedHarness (kill binaries only)
+//  5. (if E2E_DOCKER_MANAGED not set) docker compose down — managed by Makefile
 //
 // This avoids the O(n) compose cycle cost where each test case would
 // independently start and tear down the infrastructure.
@@ -58,7 +58,7 @@ func TestMain(m *testing.M) {
 	// 2. Create the shared Harness (starts binaries, connects to infra).
 	// This harness is closed once by the defer below, after all tests finish.
 	// Individual tests must call h.ResetState() to get a clean slate.
-	sharedHarness = NewHarness(&testing.T{}) // T is not used for assertions here
+	sharedHarness = NewHarnessForTest(&testing.T{}) // T is not used for assertions here
 	defer func() {
 		if sharedHarness != nil {
 			sharedHarness.Close()

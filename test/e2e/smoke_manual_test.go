@@ -1,60 +1,108 @@
+//go:build e2e
 // +build e2e
 
-// Package e2e provides manual E2E smoke tests against the running 3-component NSSAAF stack.
+// Package e2e provides manual E2E smoke tests against the running NSSAAF stack
+// via docker compose containers managed by `make test-e2e`.
+//
 // Run with: go test -tags=e2e -count=1 ./test/e2e/
 //
 // Prerequisites:
-//   - Docker containers: postgres_test, redis_test, mock-aaa-s (from compose/dev.yaml + compose/test.yaml)
-//   - Binary running: NRM (localhost:8081)
-//   - Binary running: Biz Pod (localhost:8080)
-//   - Binary running: AAA Gateway (localhost:9091)
-//   - Binary running: HTTP Gateway (localhost:8443)
+//   - Docker compose services running: postgres, redis, mock-aaa-s, aaa-gateway, biz, nrm, http-gateway
 //
-// For the HTTP Gateway, these tests use HTTP (not HTTPS). Ensure http-gateway-e2e.yaml is loaded
-// (or TLS is disabled) before running.
+// For HTTPS requests to the HTTP Gateway, a TLS client is initialized from E2E_TLS_CA.
 package e2e
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 )
 
-const (
-	httpGWURL = "http://localhost:8443"
-	bizURL    = "http://localhost:8080"
-	nrmURL    = "http://localhost:8081"
-)
+// tlsClient is the shared HTTPS client for smoke tests.
+// Initialized lazily from E2E_TLS_CA on first use.
+var tlsClient *http.Client
+
+// initTLSClient lazily initializes tlsClient from E2E_TLS_CA.
+// If the CA cert is not found, tlsClient remains nil and tests skip.
+func initTLSClient() {
+	if tlsClient != nil {
+		return
+	}
+	caPath := os.Getenv("E2E_TLS_CA")
+	if caPath == "" {
+		caPath = "/tmp/e2e-tls/server.crt"
+	}
+	caCert, err := os.ReadFile(caPath)
+	if err != nil {
+		return
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(caCert) {
+		return
+	}
+	tlsClient = &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{RootCAs: pool},
+		},
+	}
+}
 
 func skipIfServicesNotUp(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	client := &http.Client{Timeout: 5 * time.Second}
 
 	for _, svc := range []struct {
-		name string
-		url  string
+		name   string
+		url    string
+		useTLS bool
 	}{
-		{"HTTP Gateway", httpGWURL + "/healthz/"},
-		{"Biz Pod", bizURL + "/healthz/live"},
-		{"NRM", nrmURL + "/healthz"},
+		{"HTTP Gateway", "https://localhost:8443/healthz/", true},
+		{"Biz Pod", "http://localhost:8080/healthz/live", false},
+		{"NRM", "http://localhost:8081/healthz", false},
 	} {
+		initTLSClient()
+		var client *http.Client
+		if svc.useTLS && tlsClient != nil {
+			client = tlsClient
+		} else if svc.useTLS {
+			t.Skipf("TLS client not initialized; skip HTTP Gateway health check")
+			return
+		} else {
+			client = &http.Client{Timeout: 5 * time.Second}
+		}
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, svc.url, nil)
 		resp, err := client.Do(req)
-		if err != nil || resp.StatusCode >= 500 {
+		if err != nil || (resp != nil && resp.StatusCode >= 500) {
 			t.Skipf("service %s (%s) not available: %v", svc.name, svc.url, err)
 		}
-		resp.Body.Close()
+		if resp != nil {
+			resp.Body.Close()
+		}
 	}
 }
 
 func doRequest(t *testing.T, method, url string, body interface{}) *http.Response {
-	client := &http.Client{Timeout: 30 * time.Second}
+	initTLSClient()
+
+	var client *http.Client
+	if strings.HasPrefix(url, "https://") {
+		if tlsClient == nil {
+			t.Skip("TLS client not initialized; cannot make HTTPS request")
+			return nil
+		}
+		client = tlsClient
+	} else {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+
 	var bodyReader *strings.Reader
 	if body != nil {
 		bs, _ := json.Marshal(body)
@@ -77,31 +125,39 @@ func TestE2E_00_AllServicesHealthy(t *testing.T) {
 	skipIfServicesNotUp(t)
 
 	// HTTP Gateway health
-	resp := doRequest(t, http.MethodGet, httpGWURL+"/healthz/", nil)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("HTTP Gateway health check failed: %d", resp.StatusCode)
+	resp := doRequest(t, http.MethodGet, "https://localhost:8443/healthz/", nil)
+	if resp != nil {
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("HTTP Gateway health check failed: %d", resp.StatusCode)
+		}
 	}
 
 	// Biz Pod liveness
-	resp = doRequest(t, http.MethodGet, bizURL+"/healthz/live", nil)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("Biz Pod liveness failed: %d", resp.StatusCode)
+	resp = doRequest(t, http.MethodGet, "http://localhost:8080/healthz/live", nil)
+	if resp != nil {
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("Biz Pod liveness failed: %d", resp.StatusCode)
+		}
 	}
 
 	// Biz Pod readiness
-	resp = doRequest(t, http.MethodGet, bizURL+"/healthz/ready", nil)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusServiceUnavailable {
-		t.Errorf("Biz Pod readiness unexpected: %d", resp.StatusCode)
+	resp = doRequest(t, http.MethodGet, "http://localhost:8080/healthz/ready", nil)
+	if resp != nil {
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusServiceUnavailable {
+			t.Errorf("Biz Pod readiness unexpected: %d", resp.StatusCode)
+		}
 	}
 
 	// NRM health
-	resp = doRequest(t, http.MethodGet, nrmURL+"/healthz", nil)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("NRM health check failed: %d", resp.StatusCode)
+	resp = doRequest(t, http.MethodGet, "http://localhost:8081/healthz", nil)
+	if resp != nil {
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("NRM health check failed: %d", resp.StatusCode)
+		}
 	}
 }
 
@@ -116,7 +172,10 @@ func TestE2E_01_NSSAA_CreateSession_viaHTTPGW(t *testing.T) {
 		"eapIdRsp": "dGVzdA==",
 	}
 
-	resp := doRequest(t, http.MethodPost, httpGWURL+"/nnssaaf-nssaa/v1/slice-authentications", body)
+	resp := doRequest(t, http.MethodPost, "https://localhost:8443/nnssaaf-nssaa/v1/slice-authentications", body)
+	if resp == nil {
+		return
+	}
 	defer resp.Body.Close()
 
 	// Auth middleware: HTTP 401 without token. Check if auth is enabled.
@@ -167,7 +226,10 @@ func TestE2E_02_NSSAA_CreateSession_viaBizDirect(t *testing.T) {
 		"eapIdRsp": "dXNlcjE=",
 	}
 
-	resp := doRequest(t, http.MethodPost, bizURL+"/nnssaaf-nssaa/v1/slice-authentications", body)
+	resp := doRequest(t, http.MethodPost, "http://localhost:8080/nnssaaf-nssaa/v1/slice-authentications", body)
+	if resp == nil {
+		return
+	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated {
@@ -194,7 +256,7 @@ func TestE2E_02_NSSAA_CreateSession_viaBizDirect(t *testing.T) {
 		// The Location header is now a full URL: http://localhost:8080/nnssaaf-nssaa/v1/slice-authentications/...
 		// Use bizURL + path directly.
 		relativePath := "/nnssaaf-nssaa/v1/slice-authentications/" + authCtxID
-		confirmURL := bizURL + relativePath
+		confirmURL := "http://localhost:8080" + relativePath
 		t.Logf("CreateSession via Biz: authCtxID=%s, confirmURL=%s", authCtxID, confirmURL)
 
 		confirmBody := map[string]interface{}{
@@ -203,6 +265,9 @@ func TestE2E_02_NSSAA_CreateSession_viaBizDirect(t *testing.T) {
 			"eapMessage": "dGVzdA==",
 		}
 		resp2 := doRequest(t, http.MethodPut, confirmURL, confirmBody)
+		if resp2 == nil {
+			return
+		}
 		defer resp2.Body.Close()
 
 		if resp2.StatusCode != http.StatusOK {
@@ -227,7 +292,10 @@ func TestE2E_03_NSSAA_InvalidGPSI(t *testing.T) {
 		"eapIdRsp": "dGVzdA==",
 	}
 
-	resp := doRequest(t, http.MethodPost, bizURL+"/nnssaaf-nssaa/v1/slice-authentications", body)
+	resp := doRequest(t, http.MethodPost, "http://localhost:8080/nnssaaf-nssaa/v1/slice-authentications", body)
+	if resp == nil {
+		return
+	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusBadRequest {
@@ -259,7 +327,10 @@ func TestE2E_04_NSSAA_InvalidSnssai(t *testing.T) {
 				"snssai":   tc.snssai,
 				"eapIdRsp": "dGVzdA==",
 			}
-			resp := doRequest(t, http.MethodPost, bizURL+"/nnssaaf-nssaa/v1/slice-authentications", body)
+			resp := doRequest(t, http.MethodPost, "http://localhost:8080/nnssaaf-nssaa/v1/slice-authentications", body)
+			if resp == nil {
+				return
+			}
 			defer resp.Body.Close()
 
 			if tc.name == "Missing SST" && resp.StatusCode == http.StatusCreated {
@@ -284,7 +355,10 @@ func TestE2E_05_AIW_CreateSession(t *testing.T) {
 		"eapIdRsp": "dGVzdA==",
 	}
 
-	resp := doRequest(t, http.MethodPost, bizURL+"/nnssaaf-aiw/v1/authentications", body)
+	resp := doRequest(t, http.MethodPost, "http://localhost:8080/nnssaaf-aiw/v1/authentications", body)
+	if resp == nil {
+		return
+	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated {
@@ -319,7 +393,10 @@ func TestE2E_06_AIW_InvalidSupi(t *testing.T) {
 				"supi":     tc.supi,
 				"eapIdRsp": "dGVzdA==",
 			}
-			resp := doRequest(t, http.MethodPost, bizURL+"/nnssaaf-aiw/v1/authentications", body)
+			resp := doRequest(t, http.MethodPost, "http://localhost:8080/nnssaaf-aiw/v1/authentications", body)
+			if resp == nil {
+				return
+			}
 			defer resp.Body.Close()
 			if resp.StatusCode != http.StatusBadRequest {
 				t.Errorf("expected 400 for %s (%q), got %d", tc.name, tc.supi, resp.StatusCode)
@@ -332,7 +409,10 @@ func TestE2E_06_AIW_InvalidSupi(t *testing.T) {
 func TestE2E_07_NRM_RESTCONF_GET(t *testing.T) {
 	skipIfServicesNotUp(t)
 
-	resp := doRequest(t, http.MethodGet, nrmURL+"/restconf/data/3gpp-nssaaf-nrm:nssaa-function", nil)
+	resp := doRequest(t, http.MethodGet, "http://localhost:8081/restconf/data/3gpp-nssaaf-nrm:nssaa-function", nil)
+	if resp == nil {
+		return
+	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -352,7 +432,10 @@ func TestE2E_07_NRM_RESTCONF_GET(t *testing.T) {
 func TestE2E_08_NRM_RESTCONF_Alarms(t *testing.T) {
 	skipIfServicesNotUp(t)
 
-	resp := doRequest(t, http.MethodGet, nrmURL+"/restconf/data/3gpp-nssaaf-nrm:alarms", nil)
+	resp := doRequest(t, http.MethodGet, "http://localhost:8081/restconf/data/3gpp-nssaaf-nrm:alarms", nil)
+	if resp == nil {
+		return
+	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -376,7 +459,14 @@ func TestE2E_09_ConcurrentSessions(t *testing.T) {
 	}
 	results := make([]result, n)
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	initTLSClient()
+	var client *http.Client
+	if tlsClient != nil {
+		client = tlsClient
+	} else {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+
 	var wg sync.WaitGroup
 	for i := 0; i < n; i++ {
 		wg.Add(1)
@@ -390,7 +480,7 @@ func TestE2E_09_ConcurrentSessions(t *testing.T) {
 			}
 			payloadBytes, _ := json.Marshal(payload)
 			req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost,
-				bizURL+"/nnssaaf-nssaa/v1/slice-authentications",
+				"http://localhost:8080/nnssaaf-nssaa/v1/slice-authentications",
 				strings.NewReader(string(payloadBytes)))
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("X-Request-ID", fmt.Sprintf("concurrent-%d", idx))
@@ -399,8 +489,8 @@ func TestE2E_09_ConcurrentSessions(t *testing.T) {
 				results[idx] = result{0, err.Error()}
 				return
 			}
-			body, _ := json.MarshalIndent(map[string]interface{}{}, "", "  ")
-			results[idx] = result{resp.StatusCode, string(body)}
+			_, _ = json.MarshalIndent(map[string]interface{}{}, "", "  ")
+			results[idx] = result{resp.StatusCode, ""}
 			resp.Body.Close()
 		}(i)
 	}

@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -113,10 +114,19 @@ func (c *httpAAAClient) SendEAP(ctx context.Context, authCtxID string, eapPayloa
 
 // subscribeResponses listens to nssaa:aaa-response and dispatches to pending channels.
 func (c *httpAAAClient) subscribeResponses(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Warn("subscribeResponses recovered from panic", "panic", r)
+		}
+	}()
 	if c.redis == nil {
 		return
 	}
 	ch := c.redis.PSubscribe(ctx, proto.AaaResponseChannel)
+	if ch == nil {
+		slog.Warn("subscribeResponses: PSubscribe returned nil")
+		return
+	}
 	defer func() { _ = ch.Close() }()
 
 	for {
@@ -124,8 +134,12 @@ func (c *httpAAAClient) subscribeResponses(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case msg := <-ch.Channel():
+			if msg == nil {
+				return // Channel closed
+			}
 			var event proto.AaaResponseEvent
 			if err := json.Unmarshal([]byte(msg.Payload), &event); err != nil {
+				slog.Debug("subscribeResponses: failed to unmarshal event", "error", err)
 				continue
 			}
 
