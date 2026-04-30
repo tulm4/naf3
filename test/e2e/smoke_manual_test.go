@@ -191,7 +191,7 @@ func TestE2E_01_NSSAA_CreateSession_viaHTTPGW(t *testing.T) {
 
 	resp := doRequest(t, http.MethodPost, "https://localhost:8443/nnssaaf-nssaa/v1/slice-authentications", body)
 	if resp == nil {
-		return
+		t.Fatal("doRequest returned nil")
 	}
 	defer resp.Body.Close()
 
