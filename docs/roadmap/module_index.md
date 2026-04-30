@@ -31,10 +31,10 @@
 | `internal/tracing/` | `docs/roadmap/PHASE_4_NFIntegration_Observability.md` | 4 | READY |
 | `internal/auth/` | `docs/design/15_sbi_security.md`, `docs/design/16_aaa_security.md`, `docs/roadmap/PHASE_5_Security_Crypto.md` | 5 | READY |
 | `internal/crypto/` | `docs/design/17_crypto.md`, `docs/roadmap/PHASE_5_Security_Crypto.md` | 5 | READY |
-| `internal/nrm/` | `docs/design/18_nrm_fcaps.md`, `docs/roadmap/PHASE_6_Testing_NRM.md` | 6 | TBD |
+| `internal/nrm/` | `docs/design/18_nrm_fcaps.md`, `docs/roadmap/PHASE_6_Testing_NRM.md` | 6 | READY |
 | *(cross-cutting)* | `docs/design/19_observability.md` | 4 | READY |
 | *(cross-cutting)* | `docs/design/20_config_management.md` | ALL | TBD |
-| *(cross-cutting)* | `docs/design/24_test_strategy.md` | 6 | TBD |
+| *(cross-cutting)* | `docs/design/24_test_strategy.md` | 6 | READY |
 | `deployments/helm/nssaa-http-gateway/` | `docs/roadmap/PHASE_7_K8s.md` | 7 | TBD |
 | `deployments/helm/nssaa-biz/` | `docs/roadmap/PHASE_7_K8s.md` | 7 | TBD |
 | `deployments/helm/nssaa-aaa-gateway/` | `docs/roadmap/PHASE_7_K8s.md` | 7 | TBD |
@@ -170,7 +170,7 @@ These modules span multiple phases and are referenced by all components.
 | `internal/tracing/` | OpenTelemetry distributed tracing | 4 | READY |
 | `internal/auth/` | OAuth2/JWT validation, mTLS | 5 | TBD |
 | `internal/crypto/` | AES-256-GCM, KEK/DEK hierarchy | 5 | TBD |
-| `internal/nrm/` | NRM/FCAPS management | 6 | TBD |
+| `internal/nrm/` | NRM/FCAPS management | 6 | READY |
 | `internal/config/` | Configuration management | 1 | READY |
 
 ---

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -316,7 +317,9 @@ func TestIntegration_AIW_ConcurrentSessions(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			supi := fmt.Sprintf("imu-208%015d", idx)
+			// SUPI pattern: ^imu-[0-9]{15}$ (exactly 15 digits after "imu-").
+			// "208" (3 digits) + 12 zero-padded digits = 15 total digits.
+			supi := fmt.Sprintf("imu-208%012d", idx)
 			body := map[string]interface{}{
 				"supi":     supi,
 				"eapIdRsp": "dGVzdA==",
@@ -331,6 +334,8 @@ func TestIntegration_AIW_ConcurrentSessions(t *testing.T) {
 	for i := 0; i < n; i++ {
 		if results[i] != nil && results[i].Code == http.StatusCreated {
 			successes++
+		} else if results[i] != nil {
+			log.Printf("DEBUG AIW: request %d: status=%d body=%s", i, results[i].Code, results[i].Body.String())
 		}
 	}
 	assert.Equal(t, n, successes, "all %d concurrent creates should succeed", n)

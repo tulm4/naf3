@@ -16,9 +16,9 @@ import (
 //
 // Spec: ITU-T X.733 §8.2 (alarm deduplication); TS 28.541 §5.3.
 type AlarmStore struct {
-	mu      sync.RWMutex
-	alarms  map[string]*Alarm       // alarmID -> Alarm
-	dedup   map[dedupKey]*dedupInfo // (AlarmType, BackupObject) -> dedup info
+	mu     sync.RWMutex
+	alarms map[string]*Alarm      // alarmID -> Alarm
+	dedup  map[dedupKey]dedupInfo // (AlarmType, BackupObject) -> dedup info (read mostly)
 }
 
 type dedupKey struct {
@@ -35,7 +35,7 @@ type dedupInfo struct {
 func NewAlarmStore() *AlarmStore {
 	return &AlarmStore{
 		alarms: make(map[string]*Alarm),
-		dedup:  make(map[dedupKey]*dedupInfo),
+		dedup:  make(map[dedupKey]dedupInfo),
 	}
 }
 
@@ -54,29 +54,40 @@ func (s *AlarmStore) Save(alarm *Alarm) (string, error) {
 	}
 	key := dedupKey{alarmType: alarm.AlarmType, backupObject: alarm.BackupObject}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// Deduplication: skip if same (AlarmType, BackupObject) within window.
+	// Fast path: check dedup without lock.
 	if key.backupObject != "" {
-		if existing, ok := s.dedup[key]; ok {
-			if time.Now().Before(existing.deadline) {
-				return existing.alarmID, nil
-			}
-			// Expired: remove stale dedup entry.
-			delete(s.dedup, key)
+		s.mu.RLock()
+		existing, ok := s.dedup[key]
+		s.mu.RUnlock()
+		if ok && time.Now().Before(existing.deadline) {
+			return existing.alarmID, nil
 		}
 	}
 
+	// Slow path: acquire write lock to update store.
+	s.mu.Lock()
+	// Re-check after acquiring lock (TOCTOU guard).
+	if key.backupObject != "" {
+		if existing, ok := s.dedup[key]; ok {
+			if time.Now().Before(existing.deadline) {
+				s.mu.Unlock()
+				return existing.alarmID, nil
+			}
+			// Expired: remove stale dedup entry and old alarm atomically.
+			delete(s.dedup, key)
+			delete(s.alarms, existing.alarmID)
+		}
+	}
 	// Set EventTime only if not already set (preserve original timestamp for dedup).
 	if alarm.EventTime.IsZero() {
 		alarm.EventTime = time.Now()
 	}
 	s.alarms[alarm.AlarmID] = alarm
-	s.dedup[key] = &dedupInfo{
+	s.dedup[key] = dedupInfo{
 		alarmID:  alarm.AlarmID,
 		deadline: alarm.EventTime.Add(5 * time.Minute),
 	}
+	s.mu.Unlock()
 	return alarm.AlarmID, nil
 }
 

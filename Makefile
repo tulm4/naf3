@@ -114,9 +114,7 @@ build-debug-aaa-gateway:
 # =============================================================================
 
 .PHONY: test
-test: ## Run all unit tests with race detector and coverage
-	@echo "$(YELLOW)Running tests...$(NC)"
-	$(GOTEST) -race -coverprofile=$(COVERAGE_FILE) -covermode=atomic ./...
+test: test-unit ## Run unit tests (alias for test-unit; use test-all to run all layers)
 
 .PHONY: test-short
 test-short: ## Run tests without coverage (fast mode)
@@ -126,6 +124,42 @@ test-short: ## Run tests without coverage (fast mode)
 test-html: test ## Generate HTML coverage report
 	$(GOCMD) tool cover -html=$(COVERAGE_FILE) -o $(COVERAGE_HTML)
 	@echo "$(GREEN)Coverage report: $(COVERAGE_HTML)$(NC)"
+
+# =============================================================================
+# Layered test targets
+# Each target manages its own infra lifecycle independently.
+# Spec: D-16 decision — "Separate targets" per test layer.
+# =============================================================================
+
+.PHONY: test-unit
+test-unit: ## Run unit tests only (fast, no infra required)
+	@echo "$(YELLOW)Running unit tests...$(NC)"
+	$(GOTEST) -race -coverprofile=$(COVERAGE_FILE) -covermode=atomic ./internal/... ./test/unit/...
+
+.PHONY: test-integration
+test-integration: ## Run integration tests against real PostgreSQL and Redis via docker compose
+	@echo "$(YELLOW)Starting test infrastructure...$(NC)"
+	docker compose -f compose/dev.yaml up -d --quiet-pull
+	@echo "$(YELLOW)Waiting for infrastructure to be healthy...$(NC)"
+	@sleep 5
+	@$(GOTEST) -race -v ./test/integration/... || { docker compose -f compose/dev.yaml down; exit 1; }
+	@echo "$(YELLOW)Tearing down test infrastructure...$(NC)"
+	docker compose -f compose/dev.yaml down
+	@echo "$(GREEN)Integration tests complete$(NC)"
+
+.PHONY: test-e2e
+test-e2e: ## Run E2E tests — full stack: docker compose infra + binary processes
+	@echo "$(YELLOW)Running E2E tests (full stack)...$(NC)"
+	$(GOTEST) -v ./test/e2e/...
+
+.PHONY: test-conformance
+test-conformance: ## Run 3GPP conformance tests against live services
+	@echo "$(YELLOW)Running conformance tests...$(NC)"
+	$(GOTEST) -race -v ./test/conformance/...
+
+.PHONY: test-all
+test-all: test-unit test-integration test-e2e test-conformance ## Run all test layers in sequence
+	@echo "$(GREEN)All tests passed$(NC)"
 
 # =============================================================================
 # Lint targets

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/operator/nssAAF/internal/restconf"
@@ -40,9 +41,29 @@ func NewServer(
 	// Build the HTTP handler.
 	mux := http.NewServeMux()
 
-	// RESTCONF routes.
+	// RESTCONF routes — register chi handler for /restconf prefix.
 	restconfHandler := restconf.NewRouter(restconf.RouterConfig{AlarmMgr: alarmMgr})
-	mux.Handle("/restconf/", restconfHandler)
+	// Strip "/restconf" prefix so chi routes like "/data/..." match correctly.
+	mux.Handle("/restconf/", http.StripPrefix("/restconf", restconfHandler))
+
+	// Alarm acknowledgment: chi's {path:.+} pattern doesn't match multi-segment
+	// paths with POST (chi#704), so we register the ack handler directly on the mux.
+	// RFC 8040 uses "=" as the list key separator: /restconf/data/3gpp-nssaaf-nrm:alarms={id}/ack
+	ackHandler := restconf.NewAlarmAckHandler(alarmMgr)
+	mux.HandleFunc("POST /restconf/data/", func(w http.ResponseWriter, r *http.Request) {
+		// Only handle /restconf/data/3gpp-nssaaf-nrm:alarms={id}/ack patterns
+		path := r.URL.Path
+		const alarmsPrefix = "/restconf/data/3gpp-nssaaf-nrm:alarms="
+		if strings.HasPrefix(path, alarmsPrefix) {
+			rest := path[len(alarmsPrefix):] // strip prefix to get "{alarmId}[/more]"
+			if strings.HasSuffix(rest, "/ack") {
+				alarmID := rest[:len(rest)-4] // strip "/ack"
+				ackHandler.HandleAck(w, r, alarmID)
+				return
+			}
+		}
+		http.NotFound(w, r)
+	})
 
 	// Internal event endpoint for Biz Pod push.
 	mux.HandleFunc("POST /internal/events", handleEvents(alarmMgr))
@@ -111,7 +132,7 @@ func handleEvents(alarmMgr *AlarmManager) http.HandlerFunc {
 		}
 
 		var event AlarmEvent
-		if err := decodeJSON(w, r, &event); err != nil {
+		if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -133,9 +154,4 @@ func handleHealthz(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(`{"status":"ok"}`))
-}
-
-// decodeJSON is a helper to decode JSON with error handling.
-func decodeJSON(w http.ResponseWriter, r *http.Request, v interface{}) error {
-	return json.NewDecoder(r.Body).Decode(v)
 }

@@ -239,8 +239,12 @@ func main() {
 	mux.HandleFunc("/aaa/server-initiated", handleServerInitiated)
 
 	// ─── Compose with N58/N60 handlers ────────────────────────────────────
-	mux.Handle("/nnssaaf-nssaa/", http.StripPrefix("/nnssaaf-nssaa", nssaaRouter))
-	mux.Handle("/nnssaaf-aiw/", http.StripPrefix("/nnssaaf-aiw", aiwRouter))
+	// Do NOT use http.StripPrefix here. The chi routers (nssaaRouter, aiwRouter)
+	// are registered with chi at /nnssaaf-nssaa/v1 and /nnssaaf-aiw/v1 respectively,
+	// and http.StripPrefix was stripping too much (/nnssaaf-nssaa) causing 404s
+	// when the HTTP Gateway forwards /nnssaaf-nssaa/v1/... unchanged.
+	mux.Handle("/nnssaaf-nssaa/", nssaaRouter)
+	mux.Handle("/nnssaaf-aiw/", aiwRouter)
 
 	// ─── OAM endpoints ─────────────────────────────────────────────────────
 	mux.HandleFunc("/healthz/live", handleLiveness)

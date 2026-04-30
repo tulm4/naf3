@@ -16,42 +16,42 @@ import (
 //
 // Spec: TS 28.541 §5.3; ITU-T X.733.
 const (
-	AlarmAAAUnreachable       = "NSSAA_AAA_SERVER_UNREACHABLE"
-	AlarmSessionTableFull     = "NSSAA_SESSION_TABLE_FULL"
-	AlarmDBUnreachable        = "NSSAA_DB_UNREACHABLE"
-	AlarmRedisUnreachable     = "NSSAA_REDIS_UNREACHABLE"
-	AlarmNRFUnreachable       = "NSSAA_NRF_UNREACHABLE"
-	AlarmHighAuthFailureRate  = "NSSAA_HIGH_AUTH_FAILURE_RATE"  // REQ-33
-	AlarmCircuitBreakerOpen   = "NSSAA_CIRCUIT_BREAKER_OPEN"   // REQ-34
+	AlarmAAAUnreachable      = "NSSAA_AAA_SERVER_UNREACHABLE"
+	AlarmSessionTableFull    = "NSSAA_SESSION_TABLE_FULL"
+	AlarmDBUnreachable       = "NSSAA_DB_UNREACHABLE"
+	AlarmRedisUnreachable    = "NSSAA_REDIS_UNREACHABLE"
+	AlarmNRFUnreachable      = "NSSAA_NRF_UNREACHABLE"
+	AlarmHighAuthFailureRate = "NSSAA_HIGH_AUTH_FAILURE_RATE" // REQ-33
+	AlarmCircuitBreakerOpen  = "NSSAA_CIRCUIT_BREAKER_OPEN"   // REQ-34
 )
 
 // AlarmManager manages alarm lifecycle: raising, clearing, and evaluating.
 // Thread-safe via mutex. Uses AlarmStore for persistence.
 type AlarmManager struct {
-	store     *AlarmStore
+	store      *AlarmStore
 	thresholds *AlarmThresholds
-	logger    *slog.Logger
-	mu        sync.RWMutex
+	logger     *slog.Logger
+	mu         sync.RWMutex
 
 	// Circuit breaker state tracking per AAA server.
 	cbState map[string]bool // server -> isOpen
 
 	// Auth metrics for failure rate evaluation.
-	authTotal   int64
+	authTotal    int64
 	authFailures int64
 }
 
 // AlarmThresholds defines thresholds for alarm evaluation.
 type AlarmThresholds struct {
 	FailureRatePercent  float64 // e.g. 10.0 for 10%
-	EvaluationWindowSec int    // e.g. 300 for 5 minutes
+	EvaluationWindowSec int     // e.g. 300 for 5 minutes
 }
 
 // DefaultAlarmThresholds returns the default alarm thresholds:
 // failure rate > 10% over a 5-minute window.
 func DefaultAlarmThresholds() *AlarmThresholds {
 	return &AlarmThresholds{
-		FailureRatePercent:   10.0,
+		FailureRatePercent:  10.0,
 		EvaluationWindowSec: 300,
 	}
 }
@@ -104,15 +104,15 @@ func (m *AlarmManager) StartMetricsWindow(ctx context.Context) {
 // Returns the generated alarm ID.
 func (m *AlarmManager) RaiseAlarm(eventType, backupObject, specificProblem string, severity string) string {
 	alarm := &Alarm{
-		AlarmID:              uuid.New().String(),
-		AlarmType:            eventType,
-		ProbableCause:        probableCause(eventType),
-		SpecificProblem:      specificProblem,
-		Severity:             severity,
-		PerceivedSeverity:    severity,
-		BackupObject:        backupObject,
+		AlarmID:               uuid.New().String(),
+		AlarmType:             eventType,
+		ProbableCause:         probableCause(eventType),
+		SpecificProblem:       specificProblem,
+		Severity:              severity,
+		PerceivedSeverity:     severity,
+		BackupObject:          backupObject,
 		ProposedRepairActions: proposedRepairAction(eventType),
-		EventTime:           time.Now(),
+		EventTime:             time.Now(),
 	}
 
 	id, err := m.store.Save(alarm)
@@ -172,19 +172,19 @@ func (m *AlarmManager) ListAlarmInfos() []*restconf.AlarmInfo {
 	infos := make([]*restconf.AlarmInfo, len(alarms))
 	for i, a := range alarms {
 		infos[i] = &restconf.AlarmInfo{
-			AlarmID:              a.AlarmID,
-			AlarmType:            a.AlarmType,
-			ProbableCause:        a.ProbableCause,
-			SpecificProblem:      a.SpecificProblem,
-			Severity:             a.Severity,
-			PerceivedSeverity:    a.PerceivedSeverity,
-			BackupObject:         a.BackupObject,
-			CorrelatedAlarms:     a.CorrelatedAlarms,
+			AlarmID:               a.AlarmID,
+			AlarmType:             a.AlarmType,
+			ProbableCause:         a.ProbableCause,
+			SpecificProblem:       a.SpecificProblem,
+			Severity:              a.Severity,
+			PerceivedSeverity:     a.PerceivedSeverity,
+			BackupObject:          a.BackupObject,
+			CorrelatedAlarms:      a.CorrelatedAlarms,
 			ProposedRepairActions: a.ProposedRepairActions,
-			EventTime:            a.EventTime,
-			Acked:               a.Acked,
-			AckedBy:             a.AckedBy,
-			AckedAt:             a.AckedAt,
+			EventTime:             a.EventTime,
+			Acked:                 a.Acked,
+			AckedBy:               a.AckedBy,
+			AckedAt:               a.AckedAt,
 		}
 	}
 	return infos
@@ -199,19 +199,19 @@ func (m *AlarmManager) GetAlarm(id string) *Alarm {
 func (m *AlarmManager) GetAlarmInfo(id string) *restconf.AlarmInfo {
 	if a := m.store.Get(id); a != nil {
 		return &restconf.AlarmInfo{
-			AlarmID:              a.AlarmID,
-			AlarmType:            a.AlarmType,
-			ProbableCause:        a.ProbableCause,
-			SpecificProblem:      a.SpecificProblem,
-			Severity:             a.Severity,
-			PerceivedSeverity:    a.PerceivedSeverity,
-			BackupObject:         a.BackupObject,
-			CorrelatedAlarms:     a.CorrelatedAlarms,
+			AlarmID:               a.AlarmID,
+			AlarmType:             a.AlarmType,
+			ProbableCause:         a.ProbableCause,
+			SpecificProblem:       a.SpecificProblem,
+			Severity:              a.Severity,
+			PerceivedSeverity:     a.PerceivedSeverity,
+			BackupObject:          a.BackupObject,
+			CorrelatedAlarms:      a.CorrelatedAlarms,
 			ProposedRepairActions: a.ProposedRepairActions,
-			EventTime:            a.EventTime,
-			Acked:               a.Acked,
-			AckedBy:             a.AckedBy,
-			AckedAt:             a.AckedAt,
+			EventTime:             a.EventTime,
+			Acked:                 a.Acked,
+			AckedBy:               a.AckedBy,
+			AckedAt:               a.AckedAt,
 		}
 	}
 	return nil

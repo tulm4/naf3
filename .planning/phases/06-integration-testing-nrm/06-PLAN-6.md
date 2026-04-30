@@ -23,7 +23,7 @@ files_modified:
 
 <objective>
 
-Fix three remaining gaps from Phase 6 UAT: (1) remove obsolete separate compose config files and align with D-12 single-dev-yaml decision, (2) add HTTP Gateway auth bypass for E2E tests, and (3) validate empty S-NSSAI objects return HTTP 400 per TS 29.526.
+Fix three remaining gaps from Phase 6 UAT: (1) remove obsolete separate compose config files and align with D-12 single-dev-yaml decision, (2) add HTTP Gateway auth bypass for E2E tests, and (3) validate empty S-NSSAI objects return HTTP 400 per TS 29.526, (4) add layered Makefile test targets per D-16 decision.
 
 </objective>
 
@@ -369,7 +369,105 @@ go test ./test/unit/api/... -v -run "Snssai" -count=1
 
 </tasks>
 
-<verification>
+---
+
+## Task 4 — Makefile Test Targets (D-16)
+
+<read_first>
+- `Makefile` — existing build/test targets (already read)
+- `compose/dev.yaml` — infra compose (postgres, redis, mock-aaa-s)
+- `test/integration/integration.go` — integration test harness
+- `test/e2e/harness.go` — E2E test harness (already read above)
+- `docs/roadmap/PHASE_*.md` — Phase 6 context
+</read_first>
+
+<action>
+The user selected **"Separate targets"** for makefile test organization: each test layer (`test-unit`, `test-integration`, `test-e2e`, `test-conformance`) manages its own infra lifecycle. The existing `make test` target is renamed/repurposed. `test-all` runs all four in sequence.
+
+**Step 1 — Add test-unit target**:
+In `Makefile`, add after the existing `test` section (line 115):
+
+```makefile
+# =============================================================================
+# Layered test targets
+# Each target manages its own infra lifecycle independently.
+# Spec: D-16 decision — "Separate targets" per test layer.
+# =============================================================================
+
+.PHONY: test-unit
+test-unit: ## Run unit tests only (fast, no infra required)
+	@echo "$(YELLOW)Running unit tests...$(NC)"
+	$(GOTEST) -race -coverprofile=$(COVERAGE_FILE) -covermode=atomic ./test/unit/...
+
+.PHONY: test-integration
+test-integration: ## Run integration tests against real PostgreSQL and Redis via docker compose
+	@echo "$(YELLOW)Starting test infrastructure...$(NC)"
+	docker compose -f compose/dev.yaml up -d --quiet-pull
+	@echo "$(YELLOW)Waiting for infrastructure to be healthy...$(NC)"
+	@sleep 5
+	@$(GOTEST) -race -v ./test/integration/... || { docker compose -f compose/dev.yaml down; exit 1; }
+	@echo "$(YELLOW)Tearing down test infrastructure...$(NC)"
+	docker compose -f compose/dev.yaml down
+	@echo "$(GREEN)Integration tests complete$(NC)"
+
+.PHONY: test-e2e
+test-e2e: ## Run E2E tests — full stack: docker compose infra + binary processes
+	@echo "$(YELLOW)Running E2E tests (full stack)...$(NC)"
+	$(GOTEST) -v ./test/e2e/...
+
+.PHONY: test-conformance
+test-conformance: ## Run 3GPP conformance tests against live services
+	@echo "$(YELLOW)Running conformance tests...$(NC)"
+	$(GOTEST) -race -v ./test/conformance/...
+
+.PHONY: test-all
+test-all: test-unit test-integration test-e2e test-conformance ## Run all test layers in sequence
+	@echo "$(GREEN)All tests passed$(NC)"
+```
+
+**Step 2 — Update existing `test` target description**:
+Change the existing `test:` target (line 116) to clarify it is an alias for `test-unit`:
+```makefile
+.PHONY: test
+test: test-unit ## Run unit tests (alias for test-unit)
+```
+
+**Step 3 — Verify no V1 `docker-compose` invocations** (belt-and-suspenders):
+```bash
+grep -rn "docker-compose" Makefile 2>/dev/null && echo "V1 FOUND" || echo "CLEAN"
+```
+
+**Step 4 — Verify all targets parse correctly**:
+```bash
+make -n test-unit && echo "test-unit: OK"
+make -n test-integration && echo "test-integration: OK"
+make -n test-e2e && echo "test-e2e: OK"
+make -n test-conformance && echo "test-conformance: OK"
+make -n test-all && echo "test-all: OK"
+```
+
+**Step 5 — Verify test directories exist**:
+```bash
+test -d test/unit && echo "unit: OK"
+test -d test/integration && echo "integration: OK"
+test -d test/e2e && echo "e2e: OK"
+test -d test/conformance && echo "conformance: OK"
+```
+</action>
+
+<acceptance_criteria>
+- `Makefile` contains `test-unit`, `test-integration`, `test-e2e`, `test-conformance`, `test-all` targets
+- `test-unit` runs only `./test/unit/...`
+- `test-integration` runs `docker compose up` before tests and `docker compose down` after
+- `test-e2e` runs only `./test/e2e/...` (harness manages its own lifecycle)
+- `test-conformance` runs only `./test/conformance/...`
+- `test-all` runs all four in sequence
+- `test` is an alias for `test-unit` with updated description
+- `make -n` dry-run for all five targets parses without errors
+- `grep "docker-compose" Makefile` returns no results
+</acceptance_criteria>
+
+</verification>
 
 ```bash
 # Compose cleanup
@@ -406,6 +504,7 @@ go test ./test/unit/... ./test/conformance/... -short
 - [ ] Empty `snssai: {}` returns HTTP 400 from POST handler
 - [ ] `TestCreateSliceAuth_EmptySnssai` unit test exists and passes
 - [ ] `TestTS29526_CreateSession_EmptySnssai` conformance test exists with assertion body
+- [ ] `test-unit`, `test-integration`, `test-e2e`, `test-conformance`, `test-all` Makefile targets exist and parse
 - [ ] `go build ./...` compiles without errors
 - [ ] `go test ./test/unit/... ./test/conformance/... -short` all pass
 

@@ -200,24 +200,24 @@ func TestIntegration_Redis_DLQ_Consume(t *testing.T) {
 	ctx := context.Background()
 	dlqKey := "nssAAF:dlq:amf-notifications"
 
-	// Pre-populate the DLQ.
+	// Pre-populate the DLQ using LPush (matches DLQ.Publish behavior).
 	payloads := []string{
 		`{"authCtxId":"test-002","reason":"timeout"}`,
 		`{"authCtxId":"test-003","reason":"aaa_unreachable"}`,
 	}
 	for _, p := range payloads {
-		err := client.RPush(ctx, dlqKey, p).Err()
+		err := client.LPush(ctx, dlqKey, p).Err()
 		require.NoError(t, err)
 	}
 
-	// Consume messages (RPOP in FIFO order).
+	// Consume messages using RPop (matches DLQ.Dequeue: LPush head + BRPop tail = LIFO).
 	first, err := client.RPop(ctx, dlqKey).Result()
 	require.NoError(t, err)
-	assert.Contains(t, first, "test-002", "should consume in FIFO order")
+	assert.Contains(t, first, "test-002", "should consume in LIFO order")
 
 	second, err := client.RPop(ctx, dlqKey).Result()
 	require.NoError(t, err)
-	assert.Contains(t, second, "test-003", "should consume in FIFO order")
+	assert.Contains(t, second, "test-003", "should consume in LIFO order")
 
 	// Clean up.
 	_ = client.Del(ctx, dlqKey)
@@ -232,23 +232,26 @@ func TestIntegration_Redis_DLQ_RetryOrder(t *testing.T) {
 	ctx := context.Background()
 	dlqKey := "nssAAF:dlq:amf-notifications-retry"
 
-	// Push in order: 1, 2, 3 using RPush (FIFO queue).
+	// Push in order: 1, 2, 3 using LPush (matches DLQ.Publish).
+	// After LPush x3: [3, 2, 1] where 1 is at tail (BRPop gets 1 first).
 	for i := 1; i <= 3; i++ {
 		payload := fmt.Sprintf(`{"attempt":%d}`, i)
-		err := client.RPush(ctx, dlqKey, payload).Err()
+		err := client.LPush(ctx, dlqKey, payload).Err()
 		require.NoError(t, err)
 	}
 
-	// Repush first item for retry (LPush puts it at front).
-	first, err := client.RPop(ctx, dlqKey).Result()
+	// Repush first item for retry (LPush puts it at head, matches DLQ.Publish retry).
+	// Pop from head with LPop (mirror of DLQ.Dequeue BRPop from tail):
+	head, err := client.LPop(ctx, dlqKey).Result()
 	require.NoError(t, err)
-	err = client.LPush(ctx, dlqKey, first).Err()
+	// After LPop: [3, 2]; re-push with LPush: [attempt:1, 3, 2]
+	err = client.LPush(ctx, dlqKey, head).Err()
 	require.NoError(t, err)
 
-	// Next pop should be the retried item (LPUSH puts it at head, RPOP gets head in FIFO).
+	// Next pop should be the retried item (BRPop from tail gets oldest first).
 	next, err := client.RPop(ctx, dlqKey).Result()
 	require.NoError(t, err)
-	assert.Contains(t, next, `"attempt":1`, "retry item should come first")
+	assert.Contains(t, next, `"attempt":1`, "retried item should come first via RPop from tail")
 
 	// Clean up.
 	_ = client.Del(ctx, dlqKey)

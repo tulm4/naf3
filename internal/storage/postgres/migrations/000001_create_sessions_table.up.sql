@@ -6,16 +6,16 @@ BEGIN;
 
 CREATE TABLE IF NOT EXISTS slice_auth_sessions (
     auth_ctx_id        VARCHAR(64) NOT NULL,
-    gpsi              VARCHAR(32) NOT NULL,
-    supi              VARCHAR(32),
+    gpsi              TEXT NOT NULL,
+    supi              TEXT,
     snssai_sst        INTEGER NOT NULL CHECK (snssai_sst BETWEEN 0 AND 255),
     snssai_sd         VARCHAR(8),
     amf_instance_id    VARCHAR(64),
-    amf_ip            INET,
+    amf_ip            INET NULL,
     amf_region        VARCHAR(16),
     reauth_notif_uri  TEXT,
     revoc_notif_uri   TEXT,
-    aaa_config_id     UUID NOT NULL,
+    aaa_config_id     UUID NULL,
     eap_session_state BYTEA NOT NULL,
     eap_rounds        INTEGER NOT NULL DEFAULT 0,
     max_eap_rounds    INTEGER NOT NULL DEFAULT 20,
@@ -29,21 +29,21 @@ CREATE TABLE IF NOT EXISTS slice_auth_sessions (
     expires_at        TIMESTAMPTZ NOT NULL,
     completed_at      TIMESTAMPTZ,
     terminated_at     TIMESTAMPTZ,
-    PRIMARY KEY (auth_ctx_id)
+    PRIMARY KEY (auth_ctx_id, created_at)
 ) PARTITION BY RANGE (created_at);
 
-CREATE INDEX idx_sessions_gpsi_snssai
-    ON slice_auth_sessions(gpsi, snssai_sst, snssai_sd);
+CREATE INDEX IF NOT EXISTS idx_sessions_gpsi_snssai
+    ON slice_auth_sessions(gpsi_hash, snssai_sst, snssai_sd);
 
-CREATE INDEX idx_sessions_nssaa_status
+CREATE INDEX IF NOT EXISTS idx_sessions_nssaa_status
     ON slice_auth_sessions(nssaa_status)
     WHERE nssaa_status IN ('PENDING', 'NOT_EXECUTED');
 
-CREATE INDEX idx_sessions_expires
+CREATE INDEX IF NOT EXISTS idx_sessions_expires
     ON slice_auth_sessions(expires_at)
     WHERE completed_at IS NULL;
 
-CREATE INDEX idx_sessions_created
+CREATE INDEX IF NOT EXISTS idx_sessions_created
     ON slice_auth_sessions(created_at DESC);
 
 COMMIT;

@@ -9,6 +9,13 @@ Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-s
 
 **Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
 
+---
+
+**IMPORTANT — Go Development Skills:** Before writing or reviewing any Go code, read these skills first:
+
+- **`.cursor/skills/golang-patterns/SKILL.md`** — idiomatic Go patterns, error handling, concurrency, struct design, interface patterns, package organization, and tooling. Read the "Core Principles", "Error Handling Patterns", "Concurrency Patterns", "Interface Design", "Struct Design", and "Anti-Patterns to Avoid" sections before writing Go code.
+- **`.cursor/skills/golang-testing/SKILL.md`** — table-driven tests, subtests, TDD workflow, mocking with interfaces, golden files, benchmarks, fuzzing, and test coverage. Read the "Table-Driven Tests", "Test Helpers", "Mocking with Interfaces", and "Best Practices" sections before writing Go tests or reviewing test code.
+
 ## 1. Think Before Coding
 
 **Don't assume. Don't hide confusion. Surface tradeoffs.**

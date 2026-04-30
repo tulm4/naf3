@@ -1,11 +1,15 @@
 -- 000003_create_audit_log_table.up.sql
--- Immutable append-only audit log
+-- Immutable append-only audit log (partitioned by month)
 -- Spec: TS 28.541 §5.3
 
 BEGIN;
 
-CREATE TABLE IF NOT EXISTS nssaa_audit_log (
-    id              BIGSERIAL PRIMARY KEY,
+-- Drop existing non-partitioned table if any (partial migration recovery)
+DROP TABLE IF EXISTS nssaa_audit_log CASCADE;
+
+-- Main table must be partitioned for PARTITION OF to work
+CREATE TABLE nssaa_audit_log (
+    id              BIGSERIAL,
     auth_ctx_id     VARCHAR(64),
     gpsi_hash       VARCHAR(64) NOT NULL,
     snssai_sst      INTEGER,
@@ -37,20 +41,22 @@ CREATE TABLE IF NOT EXISTS nssaa_audit_log (
     correlation_id  VARCHAR(64),
     client_ip       INET,
     user_agent      TEXT,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (id, created_at)
+) PARTITION BY RANGE (created_at);
 
--- Partition by month (audit logs grow large)
-CREATE TABLE IF NOT EXISTS nssaa_audit_log_default PARTITION OF nssaa_audit_log
+-- Default partition covering 2025-2030
+CREATE TABLE nssaa_audit_log_default PARTITION OF nssaa_audit_log
     FOR VALUES FROM ('2025-01-01') TO ('2030-01-01');
 
-CREATE INDEX idx_audit_gpsi_created
+-- Partial indexes on parent table (propagate to partitions)
+CREATE INDEX IF NOT EXISTS idx_audit_gpsi_created
     ON nssaa_audit_log(gpsi_hash, created_at DESC);
 
-CREATE INDEX idx_audit_ctx_created
+CREATE INDEX IF NOT EXISTS idx_audit_ctx_created
     ON nssaa_audit_log(auth_ctx_id, created_at DESC);
 
-CREATE INDEX idx_audit_action_created
+CREATE INDEX IF NOT EXISTS idx_audit_action_created
     ON nssaa_audit_log(action, created_at DESC);
 
 -- Prevent updates/deletes (immutable)
@@ -61,7 +67,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE TRIGGER audit_immutable
+DROP TRIGGER IF EXISTS audit_immutable ON nssaa_audit_log;
+CREATE TRIGGER audit_immutable
     BEFORE UPDATE OR DELETE ON nssaa_audit_log
     FOR EACH ROW EXECUTE FUNCTION prevent_audit_modification();
 

@@ -65,11 +65,12 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	// GET /restconf/data/3gpp-nssaaf-nrm:alarms — list all active alarms.
 	r.Get("/data/3gpp-nssaaf-nrm:alarms", handleGetAlarms(cfg.AlarmMgr))
 
-	// GET /restconf/data/3gpp-nssaaf-nrm:alarms={alarmId} — get single alarm.
-	r.Get("/data/3gpp-nssaaf-nrm:alarms/{alarmId}", handleGetAlarm(cfg.AlarmMgr))
-
-	// POST /restconf/data/3gpp-nssaaf-nrm:alarms={alarmId}/ack — acknowledge alarm.
-	r.Post("/data/3gpp-nssaaf-nrm:alarms/{alarmId}/ack", handleAckAlarm(cfg.AlarmMgr))
+	// For /restconf/data/3gpp-nssaaf-nrm:alarms={alarmId} URLs (RFC 8040 uses "=" as
+	// the list key separator), chi can't match the "=" literally in the route pattern,
+	// so we use wildcard patterns and parse the path in the handler.
+	// The pattern ".+" captures everything after "alarms/" including any "/" segments.
+	r.Get("/data/3gpp-nssaaf-nrm:alarms/{path:.+}", handleGetAlarm(cfg.AlarmMgr))
+	r.Post("/data/3gpp-nssaaf-nrm:alarms/{path:.+}", handleAckAlarm(cfg.AlarmMgr))
 
 	// ─── RFC 8040 §3.1: OPTIONS pre-flight for /restconf/data and subpaths ─────────
 	// Use wildcard pattern to catch OPTIONS requests to any /data/* subpath.

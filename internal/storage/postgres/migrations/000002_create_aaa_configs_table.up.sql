@@ -25,11 +25,11 @@ CREATE TABLE IF NOT EXISTS aaa_server_configs (
     UNIQUE (snssai_sst, snssai_sd)
 );
 
-CREATE INDEX idx_aaa_config_snssai
+CREATE INDEX IF NOT EXISTS idx_aaa_config_snssai
     ON aaa_server_configs(snssai_sst, snssai_sd, enabled)
     WHERE enabled = TRUE;
 
-CREATE INDEX idx_aaa_config_priority
+CREATE INDEX IF NOT EXISTS idx_aaa_config_priority
     ON aaa_server_configs(priority, weight)
     WHERE enabled = TRUE;
 

@@ -59,7 +59,7 @@ make run-aaa-gateway  # AAA GW on :9090
 | **Phase R: 3-Component Refactor** | ✅ DONE | `internal/proto/`, `cmd/biz/`, `cmd/http-gateway/`, `cmd/aaa-gateway/`, `internal/aaa/gateway/` |
 | Phase 4: NF Integration & Observability | ✅ DONE | `internal/nrf/` (NRF client wired, startup registration, heartbeat), `internal/udm/` (Nudm_UECM_Get wired to N58 handler, UpdateAuthContext), `internal/amf/` (AMF notifier wired, Re-Auth/Revocation POSTs), `internal/ausf/` (AUSF N60 client, MSK forwarding), `internal/resilience/` (circuit breaker, retry), `internal/metrics/` (Prometheus metrics), `internal/logging/` (structured JSON logging), `internal/tracing/` (OpenTelemetry), `cmd/biz/main.go` (full NF wiring) |
 | Phase 5: Security & Crypto | ✅ DONE | `internal/auth/` (JWT validation, JWKS cache, scope enforcement), `internal/crypto/` (AES-256-GCM, KEK/DEK, KeyManager, VaultKeyManager, SoftHSMKeyManager, secret encryption) |
-| Phase 6: Integration Testing & NRM | 🔄 IN PROGRESS | `test/`, `internal/nrm/` (Wave 2: NRM RESTCONF + AlarmManager — DONE) |
+| Phase 6: Integration Testing & NRM | ✅ DONE | `test/`, `internal/nrm/` (NRM RESTCONF + AlarmManager — COMPLETE, 15/15 UAT tests PASS) |
 | Phase 7: Kubernetes Deployment | ⏳ PENDING | `deployments/helm/`, `deployments/kustomize/`, `deployments/argo/` |
 | Phase 8: Performance & Load Testing | ⏳ PENDING | `test/load/`, chaos testing |
 
@@ -99,7 +99,7 @@ make run-aaa-gateway  # AAA GW on :9090
 | `internal/nrm/` | `docs/design/18_nrm_fcaps.md`, `docs/roadmap/PHASE_6_Testing_NRM.md` | 6 | READY — NRM RESTCONF + AlarmManager (Wave 2) |
 | *(cross-cutting)* | `docs/design/19_observability.md` | 4 | TBD |
 | *(cross-cutting)* | `docs/design/20_config_management.md` | ALL | TBD |
-| *(cross-cutting)* | `docs/design/24_test_strategy.md` | 6 | TBD |
+| *(cross-cutting)* | `docs/design/24_test_strategy.md` | 6 | READY |
 | `deployments/helm/nssaa-http-gateway/` | `docs/roadmap/PHASE_7_K8s.md` | 7 | TBD |
 | `deployments/helm/nssaa-biz/` | `docs/roadmap/PHASE_7_K8s.md` | 7 | TBD |
 | `deployments/helm/nssaa-aaa-gateway/` | `docs/roadmap/PHASE_7_K8s.md` | 7 | TBD |
@@ -144,16 +144,16 @@ make run-aaa-gateway  # AAA GW on :9090
 - [x] golangci-lint: 0 issues on phase 5 packages
 
 ### Phase 6: Integration Testing & NRM
+- [x] Integration tests for all APIs
+- [x] TS 29.526 §7.2 API conformance (~30 test cases)
+- [x] RFC 3579 RADIUS EAP conformance
+- [x] RFC 5216 EAP-TLS MSK derivation
+- [x] NSSAAFFunction IOC via RESTCONF
+- [x] Alarm raised on failure rate >10%
+- [x] Alarm raised on circuit breaker open
 - [ ] Unit test coverage >80% overall
-- [ ] Integration tests for all APIs
 - [ ] E2E tests: AMF → HTTP GW → Biz → AAA GW → AAA-S
-- [ ] TS 29.526 §7.2 API conformance (~30 test cases)
 - [ ] TS 23.502 §4.2.9 procedure flows (~15 test cases)
-- [ ] RFC 3579 RADIUS EAP conformance
-- [ ] RFC 5216 EAP-TLS MSK derivation
-- [ ] NSSAAFFunction IOC via RESTCONF
-- [ ] Alarm raised on failure rate >10%
-- [ ] Alarm raised on circuit breaker open
 
 ### Phase 7: Kubernetes Deployment
 - [ ] `helm lint` passes for all 3 charts

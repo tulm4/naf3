@@ -350,6 +350,14 @@ func (h *Handler) ConfirmSliceAuthentication(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Validate S-NSSAI matches the original session (TS 29.526 §7.2.3).
+	// The AMF sends the same S-NSSAI used during CreateSession.
+	if authCtx.SnssaiSST != body.Snssai.Sst || authCtx.SnssaiSD != body.Snssai.Sd {
+		common.WriteProblem(w, common.ValidationProblem("snssai",
+			"S-NSSAI does not match the original session"))
+		return
+	}
+
 	eapPayload := []byte(*body.EapMessage)
 
 	// Store the Phase 2 EAP payload so it survives across round-trips.

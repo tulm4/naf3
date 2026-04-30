@@ -96,7 +96,12 @@ func TokenHash(token string) string {
 	return hex.EncodeToString(h[:8])
 }
 
-// MiddlewareOption configures the AuthMiddleware.
+// Middleware is a convenience alias for NewAuthMiddleware with an empty Config
+// (no auth bypass, no scope enforcement).
+func Middleware(requiredScope string) func(http.Handler) http.Handler {
+	return NewAuthMiddleware(Config{})
+}
+
 type MiddlewareOption func(*middlewareConfig)
 
 type middlewareConfig struct {

@@ -3,9 +3,11 @@ package integration
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -45,10 +47,8 @@ func testRedisURL() string {
 }
 
 func skipIfNoDB(t *testing.T) {
-	if os.Getenv("TEST_DATABASE_URL") == "" && os.Getenv("TEST_DATABASE_URL") == "" {
-		if _, present := os.LookupEnv("TEST_DATABASE_URL"); !present {
-			t.Skip("TEST_DATABASE_URL not set — skipping integration test")
-		}
+	if os.Getenv("TEST_DATABASE_URL") == "" || os.Getenv("TEST_REDIS_URL") == "" {
+		t.Skip("TEST_DATABASE_URL or TEST_REDIS_URL not set — skipping integration test")
 	}
 }
 
@@ -222,7 +222,9 @@ func TestIntegration_NSSAA_CreateSession_GPSIStoredEncrypted(t *testing.T) {
 	assert.NotEmpty(t, storedGPSI)
 
 	// Verify the stored value can be decrypted back to the original GPSI.
-	decrypted, err := enc.Decrypt([]byte(storedGPSI))
+	ciphertext, err := base64.StdEncoding.DecodeString(storedGPSI)
+	require.NoError(t, err, "stored GPSI should be base64-encoded ciphertext")
+	decrypted, err := enc.Decrypt(ciphertext)
 	require.NoError(t, err)
 	assert.Equal(t, gpsi, string(decrypted), "encrypted GPSI should decrypt back to original value")
 }
@@ -484,7 +486,9 @@ func TestIntegration_NSSAA_ConcurrentSessions(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			gpsi := fmt.Sprintf("520%014d", idx)
+			// GPSI pattern: ^5[0-9]{8,14}$ (9-15 total digits starting with 5).
+			// Use "52080460" (8 digits) + 2-digit suffix = 10 digits total.
+			gpsi := fmt.Sprintf("52080460%02d", idx)
 			body := map[string]interface{}{
 				"gpsi":     gpsi,
 				"snssai":   map[string]interface{}{"sst": 1, "sd": "000001"},
@@ -500,6 +504,10 @@ func TestIntegration_NSSAA_ConcurrentSessions(t *testing.T) {
 	for i := 0; i < n; i++ {
 		if results[i] != nil && results[i].Code == http.StatusCreated {
 			successes++
+		} else if results[i] != nil {
+			log.Printf("DEBUG: request %d: status=%d body=%s", i, results[i].Code, results[i].Body.String())
+		} else {
+			log.Printf("DEBUG: request %d: nil response", i)
 		}
 	}
 	assert.Equal(t, n, successes, "all %d concurrent creates should succeed", n)

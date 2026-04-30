@@ -106,6 +106,8 @@ After `/gsd-transition`, these files must be updated:
 
 ## Code Template
 
+> **Skill:** See `.cursor/skills/golang-patterns/SKILL.md` for idiomatic Go patterns, error handling, concurrency, interface design, and struct design to apply alongside this template.
+
 ### API Handler Template
 
 ```go
@@ -160,6 +162,8 @@ func (h *Handler) [Method](w http.ResponseWriter, r *http.Request) {
 - [ ] Unit test for each public function
 - [ ] Validate error cases
 - [ ] Mock external dependencies
+
+> **Skill:** See `.cursor/skills/golang-testing/SKILL.md` for table-driven test patterns, interface-based mocking, golden files, benchmarks, and TDD workflow.
 
 ## Critical Spec References
 

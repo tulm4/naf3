@@ -17,11 +17,11 @@ CREATE TABLE IF NOT EXISTS supi_ranges (
     UNIQUE (start_supi, end_supi)
 );
 
-CREATE INDEX idx_supi_ranges_plmn
+CREATE INDEX IF NOT EXISTS idx_supi_ranges_plmn
     ON supi_ranges(plmn_mcc, plmn_mnc)
     WHERE enabled = TRUE;
 
-CREATE INDEX idx_supi_ranges_enabled
+CREATE INDEX IF NOT EXISTS idx_supi_ranges_enabled
     ON supi_ranges(enabled)
     WHERE enabled = TRUE;
 

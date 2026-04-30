@@ -16,17 +16,18 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestEncryptorNew(t *testing.T) {
-	// Valid key sizes.
-	for _, size := range []int{16, 24, 32} {
-		key := bytes.Repeat([]byte{byte(size)}, size)
-		enc, err := NewEncryptor(key)
-		assert.NoError(t, err, "size %d", size)
-		assert.NotNil(t, enc)
-	}
+	// AES-256 requires exactly 32-byte key.
+	key := bytes.Repeat([]byte{0xAB}, 32)
+	enc, err := NewEncryptor(key)
+	assert.NoError(t, err)
+	assert.NotNil(t, enc)
 
-	// Invalid key size.
-	_, err := NewEncryptor([]byte("short"))
-	assert.Error(t, err)
+	// Invalid key sizes.
+	for _, size := range []int{16, 24, 33} {
+		key := bytes.Repeat([]byte{byte(size)}, size)
+		_, err := NewEncryptor(key)
+		assert.Error(t, err, "size %d should be rejected", size)
+	}
 }
 
 func TestEncryptorRoundTrip(t *testing.T) {

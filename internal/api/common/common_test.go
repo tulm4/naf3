@@ -205,7 +205,8 @@ func TestValidateSnssai(t *testing.T) {
 		wantErr  bool
 	}{
 		{"valid sst only", 1, "", false, false},
-		{"valid sst 0", 0, "", false, false},
+		{"valid sst 0 with sd", 0, "000001", false, false},
+		{"empty snssai object sst_0_sd_empty", 0, "", false, true},
 		{"valid sst 255", 255, "", false, false},
 		{"valid sst with sd", 128, "112233", false, false},
 		{"valid sst with lowercase sd", 1, "aabbcc", false, false},

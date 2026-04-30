@@ -154,7 +154,7 @@ func (m *NRFMock) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	var instances []map[string]interface{}
+	instances := make([]map[string]interface{}, 0, len(m.nfStatus))
 	for id, status := range m.nfStatus {
 		match := false
 		for _, p := range prefixes {

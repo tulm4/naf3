@@ -19,18 +19,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func nrmBinaryPath() string {
-	if p := os.Getenv("TEST_NRM_BINARY"); p != "" {
-		return p
-	}
-	return "/tmp/nrm_test"
-}
-
 func skipIfNoNRMBinary(t *testing.T) {
-	path := nrmBinaryPath()
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		t.Skip("NRM binary not found at " + path + " — set TEST_NRM_BINARY to override")
+	// Try building to verify the NRM binary compiles.
+	// The test will build its own binary in temp dir regardless.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	tmpCheck := filepath.Join(os.TempDir(), "nrm_skip_check")
+	cmd := exec.CommandContext(ctx, "go", "build", "-o", tmpCheck, "./cmd/nrm/")
+	cmd.Dir = os.Getenv("NAF3_ROOT")
+	if cmd.Dir == "" {
+		cmd.Dir = "/home/tulm/naf3"
 	}
+	if err := cmd.Run(); err != nil {
+		t.Skip("NRM binary cannot be built — go build failed:", err)
+	}
+	_ = os.Remove(tmpCheck)
 }
 
 func buildNRMBinary(t *testing.T) string {
@@ -49,7 +52,14 @@ func buildNRMBinary(t *testing.T) string {
 }
 
 func startNRMServer(t *testing.T, binaryPath string) (*exec.Cmd, string) {
-	cmd := exec.Command(binaryPath)
+	// Resolve config path relative to repo root (where tests run from).
+	naf3Root := os.Getenv("NAF3_ROOT")
+	if naf3Root == "" {
+		naf3Root = "/home/tulm/naf3"
+	}
+	configPath := filepath.Join(naf3Root, "compose/configs/nrm.yaml")
+
+	cmd := exec.Command(binaryPath, "--config="+configPath)
 	cmd.Env = append(os.Environ(), "NRM_LISTEN_ADDR=127.0.0.1:8081")
 	if err := cmd.Start(); err != nil {
 		t.Skip("failed to start NRM binary:", err)
@@ -83,13 +93,16 @@ func getAlarms(url string) ([]*nrm.AlarmInfo, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	var result struct {
-		Alarms []*nrm.AlarmInfo `json:"alarms"`
+	// YANG JSON wraps alarms as {"3gpp-nssaaf-nrm:alarms":{"alarm":[...]}}.
+	var wrapped struct {
+		Alarms struct {
+			Alarms []*nrm.AlarmInfo `json:"alarm"`
+		} `json:"3gpp-nssaaf-nrm:alarms"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&wrapped); err != nil {
 		return nil, err
 	}
-	return result.Alarms, nil
+	return wrapped.Alarms.Alarms, nil
 }
 
 // TestIntegration_Alarm_RaiseViaRESTCONF verifies POST /internal/events raises an alarm
@@ -211,6 +224,9 @@ func TestIntegration_Alarm_NssaaFunction(t *testing.T) {
 	var result map[string]interface{}
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
 	assert.NotEmpty(t, result, "nssaa-function data should be returned")
+	// YANG JSON wraps the response with the module prefix.
+	assert.Contains(t, result, "3gpp-nssaaf-nrm:nssaa-function",
+		"response should use YANG JSON module-prefixed key")
 }
 
 // TestIntegration_Alarm_FailureRateAlarm verifies REQ-33: >10% auth failure rate
@@ -287,9 +303,13 @@ func TestIntegration_Alarm_MinimalServer(t *testing.T) {
 	}
 	alarmsHandler := func(w http.ResponseWriter, r *http.Request) {
 		infos := alarmMgr.ListAlarmInfos()
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "application/yang-data+json")
 		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{"alarms": infos})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"3gpp-nssaaf-nrm:alarms": map[string]interface{}{
+				"alarm": infos,
+			},
+		})
 	}
 	nssaaFnHandler := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

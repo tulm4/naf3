@@ -11,19 +11,19 @@ const mediaType = "application/yang.data+json"
 
 // AlarmInfo represents an alarm for the RESTCONF API.
 type AlarmInfo struct {
-	AlarmID              string    `json:"alarm-id"`
-	AlarmType            string    `json:"alarm-type"`
-	ProbableCause        string    `json:"probable-cause"`
-	SpecificProblem      string    `json:"specific-problem,omitempty"`
-	Severity             string    `json:"severity"`
-	PerceivedSeverity    string    `json:"perceived-severity,omitempty"`
-	BackupObject         string    `json:"backup-object,omitempty"`
-	CorrelatedAlarms     []string  `json:"correlated-alarms,omitempty"`
-	ProposedRepairActions string   `json:"proposed-repair-actions,omitempty"`
-	EventTime            time.Time `json:"event-time"`
-	Acked               bool      `json:"acked,omitempty"`
-	AckedBy             string    `json:"acked-by,omitempty"`
-	AckedAt             *time.Time `json:"acked-at,omitempty"`
+	AlarmID               string     `json:"alarm-id"`
+	AlarmType             string     `json:"alarm-type"`
+	ProbableCause         string     `json:"probable-cause"`
+	SpecificProblem       string     `json:"specific-problem,omitempty"`
+	Severity              string     `json:"severity"`
+	PerceivedSeverity     string     `json:"perceived-severity,omitempty"`
+	BackupObject          string     `json:"backup-object,omitempty"`
+	CorrelatedAlarms      []string   `json:"correlated-alarms,omitempty"`
+	ProposedRepairActions string     `json:"proposed-repair-actions,omitempty"`
+	EventTime             time.Time  `json:"event-time"`
+	Acked                 bool       `json:"acked,omitempty"`
+	AckedBy               string     `json:"acked-by,omitempty"`
+	AckedAt               *time.Time `json:"acked-at,omitempty"`
 }
 
 // SetJSONHeaders sets the RFC 8040 required Content-Type header.
@@ -43,16 +43,16 @@ func WrapWithModule(data interface{}, modulePrefix, container string) map[string
 // NssaaFunctionEntry represents a single NSSAAFFunction instance.
 // Fields match the YANG model in internal/nrm/model.go.
 type NssaaFunctionEntry struct {
-	ManagedElementID      string          `json:"managed-element-id"`
-	ManagedElementTypeID  string          `json:"managed-element-type-id,omitempty"`
-	UserDefinedData      string          `json:"user-defined-data,omitempty"`
-	PLMNInfoList         []string        `json:"p-l-m-n-info-list,omitempty"`
-	SBIFQDN              string          `json:"s-b-i-f-q-d-n,omitempty"`
-	CNSIIdList           []string        `json:"c-n-s-i-id-list,omitempty"`
-	CommModelList        []string        `json:"comm-model-list,omitempty"`
-	NssaaInfo            *NssaaInfo      `json:"nssaa-info,omitempty"`
-	EpN58                []EndpointN58   `json:"ep-n58,omitempty"`
-	EpN59                []EndpointN59   `json:"ep-n59,omitempty"`
+	ManagedElementID     string        `json:"managed-element-id"`
+	ManagedElementTypeID string        `json:"managed-element-type-id,omitempty"`
+	UserDefinedData      string        `json:"user-defined-data,omitempty"`
+	PLMNInfoList         []string      `json:"p-l-m-n-info-list,omitempty"`
+	SBIFQDN              string        `json:"s-b-i-f-q-d-n,omitempty"`
+	CNSIIdList           []string      `json:"c-n-s-i-id-list,omitempty"`
+	CommModelList        []string      `json:"comm-model-list,omitempty"`
+	NssaaInfo            *NssaaInfo    `json:"nssaa-info,omitempty"`
+	EpN58                []EndpointN58 `json:"ep-n58,omitempty"`
+	EpN59                []EndpointN59 `json:"ep-n59,omitempty"`
 }
 
 // NssaaInfo holds NSSAAF-specific information.
@@ -160,15 +160,6 @@ func tagFromStatus(status int) string {
 }
 
 // severityFromStatus maps HTTP status to error-severity.
-func severityFromStatus(status int) string {
-	switch status {
-	case http.StatusBadRequest, http.StatusNotFound, http.StatusMethodNotAllowed,
-		http.StatusNotAcceptable, http.StatusUnsupportedMediaType:
-		return "error"
-	case http.StatusInternalServerError, http.StatusServiceUnavailable,
-		http.StatusGatewayTimeout:
-		return "error"
-	default:
-		return "error"
-	}
+func severityFromStatus(_ int) string {
+	return "error"
 }
