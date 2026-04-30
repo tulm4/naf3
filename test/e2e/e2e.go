@@ -11,7 +11,7 @@ import (
 func TestMain(m *testing.M) {
 	// E2E test main.
 	// Future waves will add:
-	// - docker-compose lifecycle (via test/mocks/compose.go)
+	// - docker compose lifecycle (via test/mocks/compose.go)
 	// - 3-component E2E with real components
 	m.Run()
 }

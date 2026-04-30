@@ -68,11 +68,11 @@ func ComposeUp(ctx context.Context, composeFile string, logger *slog.Logger) err
 	}
 
 	// Start services
-	cmd := exec.CommandContext(ctx, "docker-compose", "-f", composeFile, "up", "-d")
+	cmd := exec.CommandContext(ctx, "docker", "compose", "-f", composeFile, "up", "-d")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("docker-compose up: %w: %s", err, stderr.String())
+		return fmt.Errorf("docker compose up: %w: %s", err, stderr.String())
 	}
 
 	// Wait for healthy
@@ -90,11 +90,11 @@ func ComposeDown(ctx context.Context, composeFile string, logger *slog.Logger) e
 		logger = slog.Default()
 	}
 
-	cmd := exec.CommandContext(ctx, "docker-compose", "-f", composeFile, "down", "--remove-orphans")
+	cmd := exec.CommandContext(ctx, "docker", "compose", "-f", composeFile, "down", "--remove-orphans")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("docker-compose down: %w: %s", err, stderr.String())
+		return fmt.Errorf("docker compose down: %w: %s", err, stderr.String())
 	}
 
 	logger.Info("compose_down_complete", "compose_file", composeFile)
@@ -121,9 +121,9 @@ func WaitForComposeHealthy(ctx context.Context, composeFile string, timeout time
 	}
 }
 
-// checkComposeHealth uses docker-compose ps to check service health.
+// checkComposeHealth uses docker compose ps to check service health.
 func checkComposeHealth(composeFile string) (bool, error) {
-	cmd := exec.Command("docker-compose", "-f", composeFile, "ps", "--format", "json")
+	cmd := exec.Command("docker", "compose", "-f", composeFile, "ps", "--format", "json")
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	if err := cmd.Run(); err != nil {
@@ -185,15 +185,15 @@ func WaitForHealthy(ctx context.Context, host string, port int, timeout time.Dur
 	}
 }
 
-// GetServiceAddr reads the published port for a service from docker-compose ps.
+// GetServiceAddr reads the published port for a service from docker compose ps.
 func GetServiceAddr(service string, composeFile string) (host string, port int, _ error) {
-	cmd := exec.Command("docker-compose", "-f", composeFile, "port", service, "0")
+	cmd := exec.Command("docker", "compose", "-f", composeFile, "port", service, "0")
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return "", 0, fmt.Errorf("docker-compose port: %w: %s", err, stderr.String())
+		return "", 0, fmt.Errorf("docker compose port: %w: %s", err, stderr.String())
 	}
 
 	addr := strings.TrimSpace(stdout.String())

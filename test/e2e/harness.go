@@ -1,7 +1,7 @@
 // Package e2e provides an end-to-end test harness for the 3-component
 // NSSAAF architecture: HTTP Gateway, Biz Pod, and AAA Gateway.
 //
-// The harness starts the full docker-compose stack (PostgreSQL, Redis,
+// The harness starts the full docker compose stack (PostgreSQL, Redis,
 // mock-aaa-s) and the three binary components, then provides helper
 // methods for E2E test execution.
 //
@@ -16,7 +16,7 @@
 //	BIZ_BINARY      path to the Biz Pod binary (default: ./nssAAF-biz)
 //	HTTPGW_BINARY  path to the HTTP Gateway binary (default: ./nssAAF-http-gw)
 //	AAAGW_BINARY   path to the AAA Gateway binary (default: ./nssAAF-aaa-gw)
-//	DOCKER_COMPOSE files to pass to docker-compose (default: -f compose/dev.yaml -f compose/test.yaml)
+//	DOCKER_COMPOSE files to pass to docker compose (default: -f compose/dev.yaml)
 package e2e
 
 import (
@@ -60,7 +60,7 @@ type Harness struct {
 	clean bool
 }
 
-// NewHarness starts the full docker-compose stack, builds and starts the
+// NewHarness starts the full docker compose stack, builds and starts the
 // three binary components, waits for all services to be healthy, and
 // returns a Harness with all connection URLs.
 //
@@ -68,15 +68,15 @@ type Harness struct {
 func NewHarness(t *testing.T) *Harness {
 	t.Helper()
 
-	// Check if docker-compose is available; skip if not.
-	if _, err := exec.LookPath("docker-compose"); err != nil {
-		t.Skip("docker-compose not found in $PATH; E2E tests require Docker. Skipping.")
+	// Check if docker compose V2 is available; skip if not.
+	if err := exec.CommandContext(context.Background(), "docker", "compose", "version").Run(); err != nil {
+		t.Skip("docker compose V2 not available; E2E tests require Docker. Skipping.")
 		return &Harness{t: t, mu: sync.Mutex{}}
 	}
 
 	h := &Harness{
 		t:            t,
-		composeFile:  getEnv("DOCKER_COMPOSE", "-f compose/dev.yaml -f compose/test.yaml"),
+		composeFile:  getEnv("DOCKER_COMPOSE", "-f compose/dev.yaml"),
 		httpGWBin:    getEnv("HTTPGW_BINARY", "./nssAAF-http-gw"),
 		bizBin:       getEnv("BIZ_BINARY", "./nssAAF-biz"),
 		aaagwBin:     getEnv("AAAGW_BINARY", "./nssAAF-aaa-gw"),
@@ -89,7 +89,7 @@ func NewHarness(t *testing.T) *Harness {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	// 1. Start docker-compose stack.
+	// 1. Start docker compose stack.
 	if err := h.upCompose(ctx); err != nil {
 		h.cleanup()
 		t.Fatalf("compose up failed: %v", err)
@@ -205,8 +205,7 @@ func (h *Harness) StartAMFMock() *httptest.Server {
 // ─── Internal helpers ───────────────────────────────────────────────────────
 
 func (h *Harness) upCompose(ctx context.Context) error {
-	args := []string{"-f", "compose/dev.yaml", "-f", "compose/test.yaml", "up", "-d"}
-	cmd := exec.CommandContext(ctx, "docker-compose", args...)
+	cmd := exec.CommandContext(ctx, "docker", "compose", "-f", "compose/dev.yaml", "up", "-d")
 	cmd.Dir = projectRoot()
 	cmd.Env = os.Environ()
 	out, err := cmd.CombinedOutput()
@@ -215,12 +214,11 @@ func (h *Harness) upCompose(ctx context.Context) error {
 }
 
 func (h *Harness) downCompose(ctx context.Context) error {
-	args := []string{"-f", "compose/dev.yaml", "-f", "compose/test.yaml", "down"}
-	cmd := exec.CommandContext(ctx, "docker-compose", args...)
+	cmd := exec.CommandContext(ctx, "docker", "compose", "-f", "compose/dev.yaml", "down")
 	cmd.Dir = projectRoot()
 	cmd.Env = os.Environ()
 	// Create a new process group so that Kill kills both the shell
-	// and the docker-compose child process (IN-04 / CR-07).
+	// and the docker compose child process (IN-04 / CR-07).
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	out, err := cmd.CombinedOutput()
 	h.t.Logf("compose down output:\n%s", out)

@@ -9,13 +9,13 @@ server:
   idleTimeout: 120s
 
 redis:
-  addr: "redis:6379"
+  addr: "localhost:6380"
   password: ""
   db: 0
   poolSize: 50
 
 aaaGateway:
-  bizServiceUrl: "http://biz:8080"
+  bizServiceUrl: "http://localhost:8080"
   listenRadius: ":1812"
   listenDiameter: ":3868"
   diameterProtocol: "tcp"
@@ -38,3 +38,8 @@ logging:
 metrics:
   enabled: true
   path: "/metrics"
+
+# Required by config.Validate() even though AAA Gateway doesn't use crypto.
+crypto:
+  keyManager: "soft"
+  masterKeyHex: "0102030405060708091011121314151617181920212223242526272829303132"

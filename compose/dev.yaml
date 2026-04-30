@@ -41,7 +41,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.mock-aaa-s
-    image: nssAAF-mock-aaa-s:latest
+    image: nssaaf-mock-aaa-s:latest
     ports: ["1812:1812/udp", "3868:3868"]
     networks:
       - backend

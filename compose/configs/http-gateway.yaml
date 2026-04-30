@@ -5,17 +5,17 @@ component: http-gateway
 version: "0.1.0"
 
 server:
-  addr: ":443"
+  addr: ":8443"
   readTimeout: 10s
   writeTimeout: 30s
   idleTimeout: 120s
 
 httpGateway:
-  bizServiceUrl: "http://biz:8080"
+  bizServiceUrl: "http://localhost:8080"
   tls:
-    cert: "/etc/nssAAF/tls/server.crt"
-    key: "/etc/nssAAF/tls/server.key"
-    ca: "/etc/nssAAF/tls/ca.crt"
+    cert: "/tmp/e2e-tls/server.crt"
+    key: "/tmp/e2e-tls/server.key"
+    ca: "/tmp/e2e-tls/server.crt"
 
 logging:
   level: "info"
@@ -24,6 +24,10 @@ logging:
 metrics:
   enabled: true
   path: "/metrics"
+
+crypto:
+  keyManager: "soft"
+  masterKeyHex: "0102030405060708091011121314151617181920212223242526272829303132"
 
 env:
   ISTIO_MTLS: "0"
