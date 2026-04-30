@@ -3,9 +3,10 @@
 //
 // Lifecycle model (Phase 4.1 refactor):
 //   - docker compose up/down is managed once by TestMain in e2e.go (via Makefile)
-//   - NewHarness connects to the pre-started stack; it does NOT manage compose
+//   - NewHarness connects to the pre-started docker compose stack; it does NOT
+//     start any binary processes
 //   - Each test gets a clean slate via h.ResetState() (TRUNCATE tables + Redis FLUSHDB)
-//   - Close() only kills the binary processes, it does NOT tear down compose
+//   - Close() only cleans up harness state; it does NOT tear down compose
 //
 // Usage (shared harness pattern):
 //
@@ -16,10 +17,9 @@
 //
 // Environment variable overrides:
 //
-//	BIZ_BINARY      path to the Biz Pod binary (default: ./nssAAF-biz)
-//	HTTPGW_BINARY  path to the HTTP Gateway binary (default: ./nssAAF-http-gw)
-//	AAAGW_BINARY   path to the AAA Gateway binary (default: ./nssAAF-aaa-gw)
-//	DOCKER_COMPOSE files to pass to docker compose (default: -f compose/dev.yaml)
+//	BIZ_PG_URL     postgres connection URL
+//	BIZ_REDIS_URL  redis connection URL
+//	E2E_TLS_CA     path to CA certificate for HTTPS health checks
 package e2e
 
 import (
@@ -31,12 +31,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -46,24 +44,17 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Harness holds connections to all components started by NewHarness.
+// Harness holds connections to all docker compose containers started by Makefile.
+// It does NOT start any binary processes — it only connects to pre-started containers.
 type Harness struct {
-	t            *testing.T
-	config       *HarnessConfig
-	httpClient   *http.Client
-
-	httpGWBin    string
-	bizBin       string
-	aaagwBin     string
+	t          *testing.T
+	config     *HarnessConfig
+	httpClient *http.Client
 
 	httpGWURL string
 	bizURL    string
 	aaagwURL  string
 	nrmURL    string
-
-	httpGWProcess *os.Process
-	bizProcess    *os.Process
-	aaagwProcess  *os.Process
 
 	ausfMock *mocks.AUSFMock
 	amfMock  *mocks.AMFMock
@@ -78,11 +69,11 @@ type Harness struct {
 // HarnessConfig holds all infrastructure configuration loaded from harness.yaml.
 // All values are expanded from environment variables at load time.
 type HarnessConfig struct {
-	Infra     InfraConfig     `yaml:"infra"`
-	Services  ServicesConfig `yaml:"services"`
-	Binaries  BinariesConfig  `yaml:"binaries"`
-	TLS       TLSConfig       `yaml:"tls"`
-	Timeouts  TimeoutsConfig  `yaml:"timeouts"`
+	Infra    InfraConfig    `yaml:"infra"`
+	Services ServicesConfig `yaml:"services"`
+	Binaries BinariesConfig `yaml:"binaries"`
+	TLS      TLSConfig      `yaml:"tls"`
+	Timeouts TimeoutsConfig `yaml:"timeouts"`
 }
 
 type InfraConfig struct {
@@ -108,9 +99,9 @@ type TLSConfig struct {
 }
 
 type TimeoutsConfig struct {
-	Startup        string `yaml:"startup"`
-	HealthCheck    string `yaml:"healthCheck"`
-	ShutdownGrace  string `yaml:"shutdownGrace"`
+	Startup       string `yaml:"startup"`
+	HealthCheck   string `yaml:"healthCheck"`
+	ShutdownGrace string `yaml:"shutdownGrace"`
 }
 
 // expandEnvVars replaces ${VAR} and ${VAR:-default} patterns in s with
@@ -181,9 +172,9 @@ func LoadHarnessConfig(path string) (*HarnessConfig, error) {
 	return &cfg, nil
 }
 
-// NewHarness connects to a pre-started docker compose stack and launches the
-// three binary components. It does NOT start or stop docker compose — that is
-// managed once by TestMain in e2e.go (via `make test-e2e`).
+// NewHarness connects to a pre-started docker compose stack. It does NOT
+// start or stop docker compose — that is managed once by TestMain in e2e.go
+// (via `make test-e2e`). It also does NOT start any binary processes.
 //
 // The caller must call h.Close() when done.
 // Each test case MUST call h.ResetState() before running to ensure a clean DB
@@ -199,15 +190,12 @@ func NewHarness(t *testing.T) *Harness {
 	}
 
 	h := &Harness{
-		t:          t,
-		config:     cfg,
-		httpGWBin:  cfg.Binaries.HTTPGateway,
-		bizBin:     cfg.Binaries.Biz,
-		aaagwBin:   cfg.Binaries.AAAGateway,
-		httpGWURL:  cfg.Services.HTTPGatewayUrl,
-		bizURL:     cfg.Services.BizPodUrl,
-		aaagwURL:   cfg.Services.AAAGatewayUrl,
-		nrmURL:     cfg.Services.NRMUrl,
+		t:         t,
+		config:    cfg,
+		httpGWURL: cfg.Services.HTTPGatewayUrl,
+		bizURL:    cfg.Services.BizPodUrl,
+		aaagwURL:  cfg.Services.AAAGatewayUrl,
+		nrmURL:    cfg.Services.NRMUrl,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -215,42 +203,16 @@ func NewHarness(t *testing.T) *Harness {
 
 	// Initialize custom TLS client for HTTPS health checks.
 	if err := h.initTLS(h.config.TLS.CACert); err != nil {
-		h.cleanup()
 		t.Fatalf("init TLS: %v", err)
 	}
 
-	// 1. Establish direct connections to PG and Redis (used by ResetState).
+	// Establish direct connections to PG and Redis (used by ResetState).
 	if err := h.initDBAndRedis(ctx); err != nil {
 		t.Fatalf("init DB/Redis: %v", err)
 	}
 
-	// 2. Build binaries if not found.
-	if err := h.buildBinaries(ctx); err != nil {
-		h.cleanup()
-		t.Fatalf("build binaries: %v", err)
-	}
-
-	// 3. Start AAA Gateway.
-	if err := h.startAAAGateway(ctx); err != nil {
-		h.cleanup()
-		t.Fatalf("start aaa-gateway: %v", err)
-	}
-
-	// 4. Start Biz Pod.
-	if err := h.startBizPod(ctx); err != nil {
-		h.cleanup()
-		t.Fatalf("start biz pod: %v", err)
-	}
-
-	// 5. Start HTTP Gateway.
-	if err := h.startHTTPGateway(ctx); err != nil {
-		h.cleanup()
-		t.Fatalf("start http-gateway: %v", err)
-	}
-
-	// 6. Wait for all services to be healthy.
+	// Wait for all docker compose services to be healthy.
 	if err := h.waitHealthy(ctx, 2*time.Minute); err != nil {
-		h.cleanup()
 		t.Fatalf("services not healthy: %v", err)
 	}
 
@@ -321,12 +283,8 @@ func (h *Harness) ResetState() {
 	}
 }
 
-// Close gracefully shuts down all services started by the harness.
+// Close cleans up harness state. It does NOT stop docker compose containers.
 func (h *Harness) Close() {
-	h.cleanup()
-}
-
-func (h *Harness) cleanup() {
 	h.mu.Lock()
 	if h.clean {
 		h.mu.Unlock()
@@ -334,21 +292,6 @@ func (h *Harness) cleanup() {
 	}
 	h.clean = true
 	h.mu.Unlock()
-
-	var wg sync.WaitGroup
-	if h.httpGWProcess != nil {
-		wg.Add(1)
-		go func() { _ = killProcess(h.httpGWProcess, 10*time.Second); wg.Done() }()
-	}
-	if h.bizProcess != nil {
-		wg.Add(1)
-		go func() { _ = killProcess(h.bizProcess, 10*time.Second); wg.Done() }()
-	}
-	if h.aaagwProcess != nil {
-		wg.Add(1)
-		go func() { _ = killProcess(h.aaagwProcess, 10*time.Second); wg.Done() }()
-	}
-	wg.Wait()
 
 	if h.ausfMock != nil {
 		h.ausfMock.Close()
@@ -394,85 +337,6 @@ func (h *Harness) StartAMFMock() *httptest.Server {
 
 // ─── Internal helpers ───────────────────────────────────────────────────────
 
-func (h *Harness) buildBinaries(ctx context.Context) error {
-	binaries := []struct {
-		bin  string
-		cmd  string
-		pkg  string
-	}{
-		{h.aaagwBin, "go build -o %s ./cmd/aaa-gateway/", "aaa-gateway"},
-		{h.bizBin, "go build -o %s ./cmd/biz/", "biz"},
-		{h.httpGWBin, "go build -o %s ./cmd/http-gateway/", "http-gateway"},
-	}
-
-	for _, b := range binaries {
-		if _, err := os.Stat(b.bin); err == nil {
-			continue
-		}
-		cmd := exec.CommandContext(ctx, "sh", "-c", fmt.Sprintf(b.cmd, b.bin))
-		cmd.Dir = projectRoot()
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			return fmt.Errorf("build %s: %v\n%s", b.pkg, err, out)
-		}
-		h.t.Logf("built %s", b.bin)
-	}
-	return nil
-}
-
-func (h *Harness) startAAAGateway(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, h.aaagwBin)
-	cmd.Dir = projectRoot()
-	cmd.Env = append(os.Environ(),
-		"AAA_GW_LISTEN=:9090",
-		"AAA_GW_RADIUS_PORT=1812",
-		"AAA_GW_DIAMETER_PORT=3868",
-	)
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	h.aaagwProcess = cmd.Process
-	return nil
-}
-
-func (h *Harness) startBizPod(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, h.bizBin, "-config", "compose/configs/biz.yaml")
-	cmd.Dir = projectRoot()
-	cmd.Env = append(os.Environ(),
-		"BIZ_LISTEN=:8080",
-		"BIZ_AAA_GW_URL=http://localhost:9090",
-		"BIZ_REDIS_URL="+h.config.Infra.RedisUrl,
-		"BIZ_PG_URL="+h.config.Infra.PostgresUrl,
-		"BIZ_NRM_URL=http://localhost:8081",
-		// SoftKeyManager for E2E: 32-byte hex key (Phase 5 D-01)
-		"MASTER_KEY_HEX=6767a7ad0416a19ea174608288761dde35dfabba2a8dda9602fc520b80e1af15",
-	)
-	h.t.Logf("biz: starting %s in %s", h.bizBin, cmd.Dir)
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	h.bizProcess = cmd.Process
-	h.t.Logf("biz: started pid=%d", cmd.Process.Pid)
-	return nil
-}
-
-func (h *Harness) startHTTPGateway(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, h.httpGWBin, "-config", "compose/configs/http-gateway.yaml")
-	cmd.Dir = projectRoot()
-	cmd.Env = append(os.Environ(),
-		"HTTP_GW_LISTEN=:8443",
-		"HTTP_GW_BIZ_URL=http://localhost:8080",
-		"NAF3_AUTH_DISABLED=1", // E2E mode: skip JWT validation
-	)
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	h.httpGWProcess = cmd.Process
-	return nil
-}
-
 // initTLS loads the CA certificate from caPath and builds a custom *http.Client
 // that trusts it. This allows HTTPS health checks against self-signed certs.
 func (h *Harness) initTLS(caPath string) error {
@@ -499,6 +363,7 @@ func (h *Harness) waitHealthy(ctx context.Context, timeout time.Duration) error 
 	}
 	svcs := []service{
 		{"biz", h.bizURL + "/healthz/ready"},
+		{"nrm", h.nrmURL + "/healthz"},
 		{"aaa-gateway", h.aaagwURL + "/health"},
 		{"http-gateway", h.httpGWURL + "/healthz/"},
 	}
@@ -538,8 +403,15 @@ func (h *Harness) waitHealthy(ctx context.Context, timeout time.Duration) error 
 	}
 }
 
+// ofThisFile returns the directory containing the harness.go source file.
+// Used to locate harness.yaml next to the test file.
+func ofThisFile() string {
+	_, file, _, _ := runtime.Caller(1)
+	return filepath.Dir(file)
+}
+
+// projectRoot returns the module root (where go.mod lives) by walking up from cwd.
 func projectRoot() string {
-	// Walk up from the test binary location to find the module root (where go.mod lives).
 	if cwd, err := os.Getwd(); err == nil {
 		for dir := cwd; dir != "/"; dir = filepath.Dir(dir) {
 			if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
@@ -549,29 +421,4 @@ func projectRoot() string {
 		return cwd
 	}
 	return "."
-}
-
-func ofThisFile() string {
-	// Returns the directory containing this source file (harness.go).
-	// Used to locate harness.yaml next to the harness.go file.
-	_, file, _, _ := runtime.Caller(1)
-	return filepath.Dir(file)
-}
-
-func killProcess(p *os.Process, grace time.Duration) error {
-	ctx, cancel := context.WithTimeout(context.Background(), grace)
-	defer cancel()
-
-	if err := p.Signal(syscall.SIGTERM); err != nil {
-		return nil // already dead
-	}
-
-	select {
-	case <-ctx.Done():
-		return p.Kill()
-	default:
-		st, _ := p.Wait()
-		_ = st
-		return nil
-	}
 }
