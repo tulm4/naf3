@@ -31,17 +31,21 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/operator/nssAAF/internal/storage/postgres"
 	"github.com/operator/nssAAF/test/mocks"
 	"github.com/redis/go-redis/v9"
 	"gopkg.in/yaml.v3"
@@ -246,6 +250,11 @@ func (h *Harness) initDBAndRedis(ctx context.Context) error {
 		return fmt.Errorf("ping PG: %w", err)
 	}
 
+	// Run pending migrations to ensure schema is up-to-date.
+	if err := h.runMigrations(ctx); err != nil {
+		return fmt.Errorf("run migrations: %w", err)
+	}
+
 	// BIZ_REDIS_URL may be redis://host:port or just host:port; ParseURL handles both.
 	rOpts, err := redis.ParseURL(h.config.Infra.RedisUrl)
 	if err != nil {
@@ -254,6 +263,38 @@ func (h *Harness) initDBAndRedis(ctx context.Context) error {
 	h.redis = redis.NewClient(rOpts)
 	if err := h.redis.Ping(ctx).Err(); err != nil {
 		return fmt.Errorf("ping Redis: %w", err)
+	}
+	return nil
+}
+
+// runMigrations executes all pending SQL migrations in order.
+func (h *Harness) runMigrations(ctx context.Context) error {
+	entries, err := fs.ReadDir(postgres.MigrationsFS, "migrations")
+	if err != nil {
+		return fmt.Errorf("read migrations dir: %w", err)
+	}
+
+	var filenames []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".up.sql") {
+			filenames = append(filenames, e.Name())
+		}
+	}
+	sort.Strings(filenames)
+
+	for _, name := range filenames {
+		data, err := postgres.MigrationsFS.ReadFile("migrations/" + name)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", name, err)
+		}
+		if _, err := h.pgConn.Exec(ctx, string(data)); err != nil {
+			// Ignore "already exists" errors for idempotent migrations
+			if !strings.Contains(err.Error(), "already exists") &&
+				!strings.Contains(err.Error(), "duplicate key") &&
+				!strings.Contains(err.Error(), "cannot be dropped") {
+				return fmt.Errorf("exec %s: %w", name, err)
+			}
+		}
 	}
 	return nil
 }
