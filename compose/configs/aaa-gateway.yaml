@@ -9,24 +9,24 @@ server:
   idleTimeout: 120s
 
 redis:
-  addr: "localhost:6380"
+  addr: "${REDIS_ADDR:-localhost:6379}"
   password: ""
   db: 0
   poolSize: 50
 
 aaaGateway:
-  bizServiceUrl: "http://localhost:8080"
+  bizServiceUrl: "${BIZ_URL:-http://localhost:8080}"
   listenRadius: ":1812"
   listenDiameter: ":3868"
   diameterProtocol: "tcp"
   # Diameter client-initiated config (see PLAN §2.3.5):
   # Required for DER/DEA forwarding to AAA-S. Without these, DIAMETER transport silently fails.
-  diameterServerAddress: "nss-aaa-server:3868"   # AAA-S address
+  diameterServerAddress: "mock-aaa-s:3868"   # AAA-S address (compose service name)
   diameterRealm: "operator.com"                     # AAA-S realm (Origin-Realm in CER)
   diameterHost: "nssaa-gw.operator.com"            # Origin-Host for CER (AAA Gateway identity)
   # RADIUS client-initiated config:
   # Required for Access-Request forwarding to AAA-S. Disabled if empty.
-  radiusServerAddress: "nss-aaa-server:1812"      # AAA-S RADIUS address
+  radiusServerAddress: "mock-aaa-s:1812"      # AAA-S RADIUS address (compose service name)
   radiusSharedSecret: "secret"                      # Shared secret with AAA-S
   redisMode: "standalone"
   keepalivedStatePath: "/var/run/keepalived/state"

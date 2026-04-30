@@ -19,7 +19,7 @@ func TestE2E_AIW_BasicFlow(t *testing.T) {
 		t.Skip("E2E tests skipped in short mode")
 	}
 
-	h := NewHarness(t)
+	h := NewHarnessForTest(t)
 	defer h.Close()
 
 	// Start AUSF mock for AIW tests.
@@ -97,7 +97,7 @@ func TestE2E_AIW_EAPFailure(t *testing.T) {
 		t.Skip("E2E tests skipped in short mode")
 	}
 
-	h := NewHarness(t)
+	h := NewHarnessForTest(t)
 	defer h.Close()
 
 	// Start AUSF mock.
@@ -156,7 +156,7 @@ func TestE2E_AIW_InvalidSupi(t *testing.T) {
 		t.Skip("E2E tests skipped in short mode")
 	}
 
-	h := NewHarness(t)
+	h := NewHarnessForTest(t)
 	defer h.Close()
 
 	testCases := []struct {
@@ -201,7 +201,7 @@ func TestE2E_AIW_AAA_NotConfigured(t *testing.T) {
 		t.Skip("E2E tests skipped in short mode")
 	}
 
-	h := NewHarness(t)
+	h := NewHarnessForTest(t)
 	defer h.Close()
 
 	// Use a SUPI in an unconfigured range.
@@ -230,7 +230,7 @@ func TestE2E_AIW_TTLS(t *testing.T) {
 		t.Skip("E2E tests skipped in short mode")
 	}
 
-	h := NewHarness(t)
+	h := NewHarnessForTest(t)
 	defer h.Close()
 
 	// Start AUSF mock.

@@ -19,7 +19,7 @@ func TestE2E_ReAuth_HappyPath(t *testing.T) {
 		t.Skip("E2E tests skipped in short mode")
 	}
 
-	h := NewHarness(t)
+	h := NewHarnessForTest(t)
 	defer h.Close()
 
 	// Start AMF mock to receive re-auth notifications.

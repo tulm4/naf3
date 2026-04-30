@@ -5,15 +5,12 @@
 # For local dev, it responds to Access-Request (RADIUS) and DER (Diameter).
 FROM alpine:3.19 AS runtime
 
-RUN apk --no-cache add socat netcat-openbsd
+RUN apk --no-cache add socat
 
-# RADIUS UDP port 1812: discard received packets (mock response)
-# Diameter TCP port 3868: accept connections and discard (mock response)
-#
-# This is a placeholder. Real mock should implement:
-# - RADIUS: Access-Challenge with EAP-Message containing EAP-Request/Identity
-# - Diameter: CER/CEA handshake then DEA with EAP-Payload
+# RADIUS over TCP port 1812: accept connections and discard (mock response).
+# Diameter over TCP port 3868: accept connections and discard (mock response).
+# TCP avoids Docker's AF_UNSPEC/AF_INET6 issues with socat UDP-LISTEN on some kernels.
 
-CMD ["sh", "-c", "socat UDP-LISTEN:1812,fork,reuseaddr /dev/null & \
+CMD ["sh", "-c", "socat TCP-LISTEN:1812,fork,reuseaddr /dev/null & \
        socat TCP-LISTEN:3868,fork,reuseaddr /dev/null & \
        wait"]

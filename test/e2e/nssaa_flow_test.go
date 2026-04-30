@@ -21,7 +21,7 @@ func TestE2E_NSSAA_HappyPath(t *testing.T) {
 		t.Skip("E2E tests skipped in short mode")
 	}
 
-	h := NewHarness(t)
+	h := NewHarnessForTest(t)
 	defer h.Close()
 
 	// Start AMF mock to receive notifications.
@@ -108,7 +108,7 @@ func TestE2E_NSSAA_AuthFailure(t *testing.T) {
 		t.Skip("E2E tests skipped in short mode")
 	}
 
-	h := NewHarness(t)
+	h := NewHarnessForTest(t)
 	defer h.Close()
 
 	// Configure AAA-S mode via env (if supported) or use the failure scenario.
@@ -159,7 +159,7 @@ func TestE2E_NSSAA_AuthChallenge(t *testing.T) {
 		t.Skip("E2E tests skipped in short mode")
 	}
 
-	h := NewHarness(t)
+	h := NewHarnessForTest(t)
 	defer h.Close()
 
 	body := map[string]interface{}{
@@ -217,7 +217,7 @@ func TestE2E_NSSAA_InvalidGPSI(t *testing.T) {
 		t.Skip("E2E tests skipped in short mode")
 	}
 
-	h := NewHarness(t)
+	h := NewHarnessForTest(t)
 	defer h.Close()
 
 	body := map[string]interface{}{
@@ -249,7 +249,7 @@ func TestE2E_NSSAA_InvalidSnssai(t *testing.T) {
 		t.Skip("E2E tests skipped in short mode")
 	}
 
-	h := NewHarness(t)
+	h := NewHarnessForTest(t)
 	defer h.Close()
 
 	tests := []struct {
@@ -290,7 +290,7 @@ func TestE2E_NSSAA_Unauthorized(t *testing.T) {
 		t.Skip("E2E tests skipped in short mode")
 	}
 
-	h := NewHarness(t)
+	h := NewHarnessForTest(t)
 	defer h.Close()
 
 	body := map[string]interface{}{

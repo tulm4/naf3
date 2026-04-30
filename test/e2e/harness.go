@@ -1,15 +1,18 @@
 // Package e2e provides an end-to-end test harness for the 3-component
 // NSSAAF architecture: HTTP Gateway, Biz Pod, and AAA Gateway.
 //
-// The harness starts the full docker compose stack (PostgreSQL, Redis,
-// mock-aaa-s) and the three binary components, then provides helper
-// methods for E2E test execution.
+// Lifecycle model (Phase 4.1 refactor):
+//   - docker compose up/down is managed once by TestMain in e2e.go (via Makefile)
+//   - NewHarness connects to the pre-started stack; it does NOT manage compose
+//   - Each test gets a clean slate via h.ResetState() (TRUNCATE tables + Redis FLUSHDB)
+//   - Close() only kills the binary processes, it does NOT tear down compose
 //
-// Usage:
+// Usage (shared harness pattern):
 //
-//	h := NewHarness(t)
+//	h := NewHarness(t)       // connects to running stack
 //	defer h.Close()
-//	// use h.HTTPGWURL(), h.BizURL(), etc.
+//	h.ResetState()           // clean slate for this test
+//	// run assertions
 //
 // Environment variable overrides:
 //
@@ -20,29 +23,30 @@
 package e2e
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 	"github.com/operator/nssAAF/test/mocks"
 )
 
 // Harness holds connections to all components started by NewHarness.
 type Harness struct {
-	t          *testing.T
-	composeFile string
-
-	httpGWBin string
-	bizBin    string
-	aaagwBin  string
+	t            *testing.T
+	httpGWBin    string
+	bizBin       string
+	aaagwBin     string
 
 	httpGWURL string
 	bizURL    string
@@ -56,67 +60,82 @@ type Harness struct {
 	ausfMock *mocks.AUSFMock
 	amfMock  *mocks.AMFMock
 
+	pgConn *pgxpool.Pool   // direct PG connection for ResetState
+	redis  *redis.Client   // direct Redis connection for ResetState
+
 	mu    sync.Mutex
 	clean bool
 }
 
-// NewHarness starts the full docker compose stack, builds and starts the
-// three binary components, waits for all services to be healthy, and
-// returns a Harness with all connection URLs.
+// pgURL returns the PostgreSQL DSN for direct harness connections.
+func pgURL() string {
+	if v := os.Getenv("BIZ_PG_URL"); v != "" {
+		return v
+	}
+	return "postgres://nssaa:nssaa@localhost:5432/nssaa?sslmode=disable"
+}
+
+// redisURL returns the Redis URL for direct harness connections.
+func redisURL() string {
+	if v := os.Getenv("BIZ_REDIS_URL"); v != "" {
+		return strings.TrimPrefix(v, "redis://")
+	}
+	return "localhost:6379"
+}
+
+// NewHarness connects to a pre-started docker compose stack and launches the
+// three binary components. It does NOT start or stop docker compose — that is
+// managed once by TestMain in e2e.go (via `make test-e2e`).
 //
 // The caller must call h.Close() when done.
+// Each test case MUST call h.ResetState() before running to ensure a clean DB
+// and Redis state.
 func NewHarness(t *testing.T) *Harness {
 	t.Helper()
 
-	// Check if docker compose V2 is available; skip if not.
-	if err := exec.CommandContext(context.Background(), "docker", "compose", "version").Run(); err != nil {
-		t.Skip("docker compose V2 not available; E2E tests require Docker. Skipping.")
-		return &Harness{t: t, mu: sync.Mutex{}}
-	}
-
+	// HTTPS for HTTP Gateway (TLS 1.3 terminates on HTTP GW per D-11 / Phase R).
+	// Plain HTTP for Biz Pod and AAA Gateway (internal mTLS not required in E2E).
 	h := &Harness{
 		t:            t,
-		composeFile:  getEnv("DOCKER_COMPOSE", "-f compose/dev.yaml"),
-		httpGWBin:    getEnv("HTTPGW_BINARY", "./nssAAF-http-gw"),
-		bizBin:       getEnv("BIZ_BINARY", "./nssAAF-biz"),
-		aaagwBin:     getEnv("AAAGW_BINARY", "./nssAAF-aaa-gw"),
-		httpGWURL:    "http://localhost:8443",
+		httpGWBin:    getEnv("HTTPGW_BINARY", "./bin/http-gateway"),
+		bizBin:       getEnv("BIZ_BINARY", "./bin/biz"),
+		aaagwBin:     getEnv("AAAGW_BINARY", "./bin/aaa-gateway"),
+		httpGWURL:    "https://localhost:8443",
 		bizURL:       "http://localhost:8080",
 		aaagwURL:     "http://localhost:9090",
 		nrmURL:       "http://localhost:8081",
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	// 1. Start docker compose stack.
-	if err := h.upCompose(ctx); err != nil {
-		h.cleanup()
-		t.Fatalf("compose up failed: %v", err)
+	// 1. Establish direct connections to PG and Redis (used by ResetState).
+	if err := h.initDBAndRedis(ctx); err != nil {
+		t.Fatalf("init DB/Redis: %v", err)
 	}
 
 	// 2. Build binaries if not found.
 	if err := h.buildBinaries(ctx); err != nil {
 		h.cleanup()
-		t.Fatalf("build binaries failed: %v", err)
+		t.Fatalf("build binaries: %v", err)
 	}
 
 	// 3. Start AAA Gateway.
 	if err := h.startAAAGateway(ctx); err != nil {
 		h.cleanup()
-		t.Fatalf("start aaa-gateway failed: %v", err)
+		t.Fatalf("start aaa-gateway: %v", err)
 	}
 
 	// 4. Start Biz Pod.
 	if err := h.startBizPod(ctx); err != nil {
 		h.cleanup()
-		t.Fatalf("start biz pod failed: %v", err)
+		t.Fatalf("start biz pod: %v", err)
 	}
 
 	// 5. Start HTTP Gateway.
 	if err := h.startHTTPGateway(ctx); err != nil {
 		h.cleanup()
-		t.Fatalf("start http-gateway failed: %v", err)
+		t.Fatalf("start http-gateway: %v", err)
 	}
 
 	// 6. Wait for all services to be healthy.
@@ -133,6 +152,62 @@ func NewHarness(t *testing.T) *Harness {
 	)
 
 	return h
+}
+
+// initDBAndRedis opens a direct pgxpool and Redis client on the harness.
+// These connections survive process restarts and are used only by ResetState.
+func (h *Harness) initDBAndRedis(ctx context.Context) error {
+	pgCfg, err := pgxpool.ParseConfig(pgURL())
+	if err != nil {
+		return fmt.Errorf("parse PG URL: %w", err)
+	}
+	pgCfg.MaxConns = 2
+	pgCfg.MinConns = 1
+	h.pgConn, err = pgxpool.NewWithConfig(ctx, pgCfg)
+	if err != nil {
+		return fmt.Errorf("open PG pool: %w", err)
+	}
+	if err := h.pgConn.Ping(ctx); err != nil {
+		return fmt.Errorf("ping PG: %w", err)
+	}
+
+	rOpts, err := redis.ParseURL("redis://" + redisURL())
+	if err != nil {
+		return fmt.Errorf("parse Redis URL: %w", err)
+	}
+	h.redis = redis.NewClient(rOpts)
+	if err := h.redis.Ping(ctx).Err(); err != nil {
+		return fmt.Errorf("ping Redis: %w", err)
+	}
+	return nil
+}
+
+// ResetState truncates all session tables and flushes Redis, giving each test
+// a clean slate without restarting the process hierarchy. Call this at the
+// start of every test that modifies persistent state.
+func (h *Harness) ResetState() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Truncate known session tables.
+	tables := []string{
+		"slice_auth_sessions",
+		"aiw_auth_sessions",
+		"audit_log",
+	}
+	for _, tbl := range tables {
+		_, err := h.pgConn.Exec(ctx, fmt.Sprintf("TRUNCATE TABLE %s CASCADE", tbl))
+		if err != nil {
+			h.t.Logf("TRUNCATE %s (may not exist): %v", tbl, err)
+		}
+	}
+
+	if err := h.redis.FlushDB(ctx).Err(); err != nil {
+		h.t.Logf("FLUSHDB: %v", err)
+	}
 }
 
 // Close gracefully shuts down all services started by the harness.
@@ -171,9 +246,13 @@ func (h *Harness) cleanup() {
 		h.amfMock.Close()
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	_ = h.downCompose(ctx)
+	// Close direct DB/Redis connections used for state resets.
+	if h.pgConn != nil {
+		h.pgConn.Close()
+	}
+	if h.redis != nil {
+		_ = h.redis.Close()
+	}
 }
 
 // BizURL returns the Biz Pod base URL.
@@ -204,48 +283,6 @@ func (h *Harness) StartAMFMock() *httptest.Server {
 
 // ─── Internal helpers ───────────────────────────────────────────────────────
 
-func (h *Harness) upCompose(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, "docker", "compose", "-f", "compose/dev.yaml", "up", "-d")
-	cmd.Dir = projectRoot()
-	cmd.Env = os.Environ()
-	out, err := cmd.CombinedOutput()
-	h.t.Logf("compose up output:\n%s", out)
-	return err
-}
-
-func (h *Harness) downCompose(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, "docker", "compose", "-f", "compose/dev.yaml", "down")
-	cmd.Dir = projectRoot()
-	cmd.Env = os.Environ()
-	// Create a new process group so that Kill kills both the shell
-	// and the docker compose child process (IN-04 / CR-07).
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	out, err := cmd.CombinedOutput()
-	h.t.Logf("compose down output:\n%s", out)
-	if ctx.Err() != nil && cmd.Process != nil {
-		// On timeout, kill the entire process group directly.
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	}
-	return err
-}
-
-func parseComposeFlags(s string) []string {
-	var args []string
-	var cur string
-	for _, tok := range bytes.Fields([]byte(s)) {
-		t := string(tok)
-		if t == "-f" || t == "--file" {
-			cur = t
-		} else if cur == "-f" || cur == "--file" {
-			args = append(args, cur, t)
-			cur = ""
-		} else {
-			args = append(args, t)
-		}
-	}
-	return args
-}
-
 func (h *Harness) buildBinaries(ctx context.Context) error {
 	binaries := []struct {
 		bin  string
@@ -264,8 +301,8 @@ func (h *Harness) buildBinaries(ctx context.Context) error {
 		cmd := exec.CommandContext(ctx, "sh", "-c", fmt.Sprintf(b.cmd, b.bin))
 		cmd.Dir = projectRoot()
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		out, _ := cmd.CombinedOutput()
-		if err := cmd.Wait(); err != nil {
+		out, err := cmd.CombinedOutput()
+		if err != nil {
 			return fmt.Errorf("build %s: %v\n%s", b.pkg, err, out)
 		}
 		h.t.Logf("built %s", b.bin)
@@ -289,7 +326,7 @@ func (h *Harness) startAAAGateway(ctx context.Context) error {
 }
 
 func (h *Harness) startBizPod(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, h.bizBin)
+	cmd := exec.CommandContext(ctx, h.bizBin, "-config", "compose/configs/biz.yaml")
 	cmd.Dir = projectRoot()
 	cmd.Env = append(os.Environ(),
 		"BIZ_LISTEN=:8080",
@@ -297,16 +334,21 @@ func (h *Harness) startBizPod(ctx context.Context) error {
 		"BIZ_REDIS_URL=redis://localhost:6379",
 		"BIZ_PG_URL=postgres://nssaa:nssaa@localhost:5432/nssaa?sslmode=disable",
 		"BIZ_NRM_URL=http://localhost:8081",
+		// SoftKeyManager for E2E: 32-byte hex key (Phase 5 D-01)
+		"MASTER_KEY_HEX=6767a7ad0416a19ea174608288761dde35dfabba2a8dda9602fc520b80e1af15",
 	)
+	h.t.Logf("biz: starting %s in %s", h.bizBin, cmd.Dir)
+	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		return err
 	}
 	h.bizProcess = cmd.Process
+	h.t.Logf("biz: started pid=%d", cmd.Process.Pid)
 	return nil
 }
 
 func (h *Harness) startHTTPGateway(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, h.httpGWBin)
+	cmd := exec.CommandContext(ctx, h.httpGWBin, "-config", "compose/configs/http-gateway.yaml")
 	cmd.Dir = projectRoot()
 	cmd.Env = append(os.Environ(),
 		"HTTP_GW_LISTEN=:8443",
@@ -326,10 +368,9 @@ func (h *Harness) waitHealthy(ctx context.Context, timeout time.Duration) error 
 		url  string
 	}
 	svcs := []service{
-		{"http-gateway", h.httpGWURL + "/health"},
-		{"biz", h.bizURL + "/health"},
+		{"biz", h.bizURL + "/healthz/ready"},
 		{"aaa-gateway", h.aaagwURL + "/health"},
-		{"nrm", h.nrmURL + "/restconf/data/ietf-yang-library:modules-state"},
+		{"http-gateway", h.httpGWURL + "/healthz/"},
 	}
 
 	deadline, cancel := context.WithTimeout(ctx, timeout)
@@ -356,6 +397,8 @@ func (h *Harness) waitHealthy(ctx context.Context, timeout time.Duration) error 
 					h.t.Logf("%s at %s not healthy (err=%v, status=%d)", s.name, s.url, err, statusCode)
 					allUp = false
 					break
+				} else {
+					h.t.Logf("%s at %s healthy (status=%d)", s.name, s.url, statusCode)
 				}
 			}
 			if allUp {
@@ -366,8 +409,13 @@ func (h *Harness) waitHealthy(ctx context.Context, timeout time.Duration) error 
 }
 
 func projectRoot() string {
-	// Walk up from the test binary location to find the module root.
+	// Walk up from the test binary location to find the module root (where go.mod lives).
 	if cwd, err := os.Getwd(); err == nil {
+		for dir := cwd; dir != "/"; dir = filepath.Dir(dir) {
+			if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+				return dir
+			}
+		}
 		return cwd
 	}
 	return "."

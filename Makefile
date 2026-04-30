@@ -148,9 +148,20 @@ test-integration: ## Run integration tests against real PostgreSQL and Redis via
 	@echo "$(GREEN)Integration tests complete$(NC)"
 
 .PHONY: test-e2e
-test-e2e: ## Run E2E tests — full stack: docker compose infra + binary processes
-	@echo "$(YELLOW)Running E2E tests (full stack)...$(NC)"
-	$(GOTEST) -v ./test/e2e/...
+test-e2e: gen-certs build ## Build binaries then run E2E tests — docker compose infra started/stopped by Makefile
+	@echo "$(YELLOW)Starting docker compose infrastructure...$(NC)"
+	docker compose -f compose/dev.yaml up -d --quiet-pull
+	@sleep 10
+	E2E_DOCKER_MANAGED=1 \
+	BIZ_BINARY=$(BIZ_BINARY) \
+	HTTPGW_BINARY=$(HTTPGW_BINARY) \
+	AAAGW_BINARY=$(AAAGW_BINARY) \
+	$(GOTEST) -v -count=1 \
+		./test/e2e/... \
+		|| { docker compose -f compose/dev.yaml down --remove-orphans; exit 1; }
+	@echo "$(YELLOW)Tearing down docker compose infrastructure...$(NC)"
+	docker compose -f compose/dev.yaml down --remove-orphans
+	@echo "$(GREEN)E2E tests complete$(NC)"
 
 .PHONY: test-conformance
 test-conformance: ## Run 3GPP conformance tests against live services
@@ -296,6 +307,32 @@ vuln: ## Run security vulnerability check
 .PHONY: ci
 ci: lint test build ## Run full CI pipeline (lint + test + build)
 	@echo "$(GREEN)CI pipeline passed$(NC)"
+
+# =============================================================================
+# TLS certificates (for E2E tests and local dev)
+# =============================================================================
+
+E2E_TLS_DIR ?= /tmp/e2e-tls
+
+.PHONY: gen-certs
+gen-certs: ## Generate self-signed TLS certificates for E2E tests
+	@mkdir -p $(E2E_TLS_DIR)
+	@echo "$(YELLOW)Generating TLS certificates in $(E2E_TLS_DIR)...$(NC)"
+	@if [ ! -f $(E2E_TLS_DIR)/server.key ] || [ ! -f $(E2E_TLS_DIR)/server.crt ]; then \
+		openssl req -x509 -nodes -newkey rsa:2048 \
+			-keyout $(E2E_TLS_DIR)/server.key \
+			-out $(E2E_TLS_DIR)/server.crt \
+			-days 365 \
+			-subj "/CN=localhost/O=nssAAF/C=US" \
+			-addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
+			2>/dev/null || \
+		openssl req -x509 -nodes -newkey rsa:2048 \
+			-keyout $(E2E_TLS_DIR)/server.key \
+			-out $(E2E_TLS_DIR)/server.crt \
+			-days 365 \
+			-subj "/CN=localhost/O=nssAAF/C=US"; \
+	fi
+	@echo "$(GREEN)TLS certificates ready: $(E2E_TLS_DIR)/server.{key,crt}$(NC)"
 
 # =============================================================================
 # Cleanup

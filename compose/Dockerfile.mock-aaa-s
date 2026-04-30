@@ -1,11 +1,16 @@
-# Mock AAA-S: lightweight Go binary with RADIUS (UDP/1812) + Diameter (TCP/3868).
-# No external dependencies beyond stdlib.
-FROM golang:1.22-alpine AS builder
-WORKDIR /src
-COPY compose/mock_aaa_s.go .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/mock-aaa-s ./compose/mock_aaa_s.go
+# Dockerfile.mock-aaa-s — Mock AAA Server for local development
+# Simulates both RADIUS and Diameter EAP endpoints.
+#
+# In production, this is replaced by a real AAA Server (e.g., FreeRADIUS, OpenDiameter).
+# For local dev, it responds to Access-Request (RADIUS) and DER (Diameter).
+FROM alpine:3.19 AS runtime
 
-FROM alpine:3.19
-COPY --from=builder /bin/mock-aaa-s /bin/mock-aaa-s
-EXPOSE 1812/udp 3868/tcp
-CMD ["/bin/mock-aaa-s"]
+RUN apk --no-cache add socat
+
+# RADIUS over TCP port 1812: accept connections and discard (mock response).
+# Diameter over TCP port 3868: accept connections and discard (mock response).
+# TCP avoids Docker's AF_UNSPEC/AF_INET6 issues with socat UDP-LISTEN on some kernels.
+
+CMD ["sh", "-c", "socat TCP-LISTEN:1812,fork,reuseaddr /dev/null & \
+       socat TCP-LISTEN:3868,fork,reuseaddr /dev/null & \
+       wait"]
