@@ -153,6 +153,9 @@ test-e2e: gen-certs build ## Build binaries then run E2E tests — docker compos
 	docker compose -f compose/dev.yaml up -d --quiet-pull
 	@sleep 10
 	E2E_DOCKER_MANAGED=1 \
+	E2E_TLS_CA=/tmp/e2e-tls/server.crt \
+	BIZ_PG_URL=postgres://nssaa:nssaa@localhost:5432/nssaa?sslmode=disable \
+	BIZ_REDIS_URL=redis://localhost:6379 \
 	BIZ_BINARY=$(BIZ_BINARY) \
 	HTTPGW_BINARY=$(HTTPGW_BINARY) \
 	AAAGW_BINARY=$(AAAGW_BINARY) \
