@@ -37,7 +37,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -190,7 +189,7 @@ func NewHarness(t *testing.T) *Harness {
 	t.Helper()
 
 	// Load harness config from test/e2e/harness.yaml (next to this file).
-	configPath := filepath.Join(filepath.Dir(ofThisFile()), "harness.yaml")
+	configPath := filepath.Join(ofThisFile(), "harness.yaml")
 	cfg, err := LoadHarnessConfig(configPath)
 	if err != nil {
 		t.Fatalf("load harness config: %v", err)
@@ -328,6 +327,8 @@ func (h *Harness) ResetState() {
 }
 
 // Close cleans up harness state. It does NOT stop docker compose containers.
+// For the shared harness, DB/Redis connections are closed by FinalizeHarness()
+// after all tests finish — NOT by individual test Close() calls.
 func (h *Harness) Close() {
 	h.mu.Lock()
 	if h.clean {
@@ -343,13 +344,29 @@ func (h *Harness) Close() {
 	if h.amfMock != nil {
 		h.amfMock.Close()
 	}
+}
 
-	// Close direct DB/Redis connections used for state resets.
-	if h.pgConn != nil {
-		h.pgConn.Close()
+// FinalizeHarness closes the DB/Redis connections for the shared harness.
+// Call this once from TestMain after all tests finish.
+func FinalizeHarness() {
+	if sharedHarness == nil {
+		return
 	}
-	if h.redis != nil {
-		_ = h.redis.Close()
+	if sharedHarness.pgConn != nil {
+		sharedHarness.pgConn.Close()
+	}
+	if sharedHarness.redis != nil {
+		_ = sharedHarness.redis.Close()
+	}
+}
+
+// TLSClient returns an http.Client configured with the CA certificate from
+// harness.yaml, so it can communicate with services using self-signed certs.
+// A default 30s timeout is applied.
+func (h *Harness) TLSClient() *http.Client {
+	return &http.Client{
+		Transport: h.httpClient.Transport,
+		Timeout:   30 * time.Second,
 	}
 }
 
@@ -447,9 +464,21 @@ func (h *Harness) waitHealthy(ctx context.Context, timeout time.Duration) error 
 	}
 }
 
-// ofThisFile returns the directory containing the harness.go source file.
-// Used to locate harness.yaml next to the test file.
+// ofThisFile returns the absolute path to the test/e2e directory.
+//
+// Since E2E tests are always run from the project root (where go.mod lives),
+// we locate go.mod by walking up from cwd and derive the harness.yaml path
+// relative to it. This avoids the problem where runtime.Caller(1) returns a
+// path inside the Go module cache in compiled test binaries.
 func ofThisFile() string {
-	_, file, _, _ := runtime.Caller(1)
-	return filepath.Dir(file)
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	for dir := cwd; dir != "/"; dir = filepath.Dir(dir) {
+		if _, statErr := os.Stat(filepath.Join(dir, "go.mod")); statErr == nil {
+			return filepath.Join(dir, "test", "e2e")
+		}
+	}
+	return "."
 }

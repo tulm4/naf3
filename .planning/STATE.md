@@ -213,7 +213,8 @@ Key fixes: exec.CommandContext variadic args bug, duplicate test function declar
 | 260430-kt4 | Run make test-e2e and fix all issues, ensure all tests pass | 2026-04-30 | ae073ad | Verified | [260430-kt4-run-make-test-e2e-and-fix-all-issues-ens](./quick/260430-kt4-run-make-test-e2e-and-fix-all-issues-ens/) |
 | 260430-qey | Refactor e2e harness to use YAML config, HTTPS/TLS with CA store, remove hardcoded values | 2026-04-30 | bebeacb | Verified | [260430-qey-refactor-e2e-harness-to-use-docker-compo](./quick/260430-qey-refactor-e2e-harness-to-use-docker-compo/) |
 | 260430-u3c | Remove binary startup from harness, add NRM to dev.yaml, add E2E NRM tests, fix all issues | 2026-04-30 | d4e297d | Verified | [260430-u3c-remove-binary-process-startup-from-harne](./quick/260430-u3c-remove-binary-process-startup-from-harne/) |
+| 260430-vq5 | Fix E2E flow tests: sharedHarness init, TLS, body bugs | 2026-04-30 | | Verified | [260430-vq5-fix-e2e-flow-tests](./quick/260430-vq5-fix-e2e-flow-tests/) |
 
-Last activity: 2026-04-30 — Completed quick task 260430-u3c: binary startup removed, NRM added to compose, make test-e2e passes (10 smoke tests green)
+Last activity: 2026-04-30 — Completed quick task 260430-vq5: fix E2E flow tests (16 pass, 9 skipped)
 
 **Planned Phase:** 06 (integration-testing-nrm) — 6 plans — 2026-04-29T19:14:46.985Z

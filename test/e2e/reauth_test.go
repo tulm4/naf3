@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -40,7 +39,7 @@ func TestE2E_ReAuth_HappyPath(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Request-ID", "reauth-test")
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := h.TLSClient()
 	resp, err := client.Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()

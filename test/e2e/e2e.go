@@ -60,13 +60,12 @@ func TestMain(m *testing.M) {
 	}
 
 	// 2. Create the shared Harness (connects to pre-started compose containers).
-	// This harness is closed once by the defer below, after all tests finish.
+	// This harness is reused across all tests. DB/Redis connections are closed
+	// once by FinalizeHarness() below, after all tests finish.
 	// Individual tests must call NewHarnessForTest() to get a clean slate.
 	sharedHarness = NewHarnessForTest(&testing.T{})
 	defer func() {
-		if sharedHarness != nil {
-			sharedHarness.Close()
-		}
+		FinalizeHarness()
 	}()
 
 	// 3. Run all tests.
@@ -121,6 +120,9 @@ var sharedHarnessMu sync.Mutex
 // NewHarnessForTest returns the shared harness and calls ResetState.
 // Call this at the start of every test case instead of NewHarness(t).
 //
+// On first call, this function creates the shared harness by calling NewHarness.
+// Subsequent calls reuse the same instance.
+//
 // Example:
 //
 //	h := NewHarnessForTest(t)   // shared, resets state
@@ -130,8 +132,10 @@ func NewHarnessForTest(t *testing.T) *Harness {
 	sharedHarnessMu.Lock()
 	defer sharedHarnessMu.Unlock()
 	if sharedHarness == nil {
-		t.Skip("shared harness not available (docker compose failed to start)")
-		return nil
+		// First call: lazily initialize the shared harness.
+		// This calls the real NewHarness which waits for docker compose services.
+		// Pass a fresh *testing.T so fatal errors don't corrupt the caller's test.
+		sharedHarness = NewHarness(&testing.T{})
 	}
 	sharedHarness.t = t
 	sharedHarness.ResetState()
