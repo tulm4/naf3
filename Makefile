@@ -148,7 +148,7 @@ test-integration: ## Run integration tests against real PostgreSQL and Redis via
 	@echo "$(GREEN)Integration tests complete$(NC)"
 
 .PHONY: test-e2e
-test-e2e: gen-certs build ## Build binaries then run E2E tests — docker compose infra started/stopped by Makefile
+test-e2e: gen-certs build ## Build binaries for docker images, then run E2E tests against compose containers
 	@echo "$(YELLOW)Starting docker compose infrastructure...$(NC)"
 	docker compose -f compose/dev.yaml up -d --quiet-pull
 	@sleep 10
@@ -156,9 +156,6 @@ test-e2e: gen-certs build ## Build binaries then run E2E tests — docker compos
 	E2E_TLS_CA=/tmp/e2e-tls/server.crt \
 	BIZ_PG_URL=postgres://nssaa:nssaa@localhost:5432/nssaa?sslmode=disable \
 	BIZ_REDIS_URL=redis://localhost:6379 \
-	BIZ_BINARY=$(BIZ_BINARY) \
-	HTTPGW_BINARY=$(HTTPGW_BINARY) \
-	AAAGW_BINARY=$(AAAGW_BINARY) \
 	$(GOTEST) -v -count=1 \
 		./test/e2e/... \
 		|| { docker compose -f compose/dev.yaml down --remove-orphans; exit 1; }
