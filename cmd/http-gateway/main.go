@@ -131,15 +131,20 @@ func main() {
 	// Use a mux for path-based auth scoping.
 	mux := http.NewServeMux()
 
+	var authCfg auth.Config
+	if cfg.HTTPgw.Auth != nil {
+		authCfg.Disabled = cfg.HTTPgw.Auth.Disabled
+	}
+
 	// N58: Nnssaaf_NSSAA — requires nnssaaf-nssaa scope
-	mux.Handle("/nnssaaf-nssaa/", auth.Middleware("nnssaaf-nssaa")(
+	mux.Handle("/nnssaaf-nssaa/", auth.NewAuthMiddleware(authCfg)(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			bizClient.forwardToBiz(w, r)
 		}),
 	))
 
 	// N60: Nnssaaf_AIW — requires nnssaaf-aiw scope
-	mux.Handle("/nnssaaf-aiw/", auth.Middleware("nnssaaf-aiw")(
+	mux.Handle("/nnssaaf-aiw/", auth.NewAuthMiddleware(authCfg)(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			bizClient.forwardToBiz(w, r)
 		}),

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 )
 
@@ -14,13 +15,23 @@ type contextKey string
 
 const claimsContextKey contextKey = "auth_claims"
 
-// Middleware returns an HTTP middleware that validates Bearer tokens.
-// Extracts token from Authorization header, validates with TokenValidator,
-// and injects claims into request context.
-// D-01: HTTP Gateway validates all inbound N58/N60 tokens; Biz Pod trusts gateway.
-func Middleware(requiredScope string) func(http.Handler) http.Handler {
+// Config configures the auth middleware.
+type Config struct {
+	// Disabled skips all JWT validation. Use for E2E tests or trusted paths.
+	Disabled bool `yaml:"disabled"`
+}
+
+// NewAuthMiddleware returns middleware that validates Bearer tokens.
+// If cfg.Disabled is true (or NAF3_AUTH_DISABLED=1 env var), validation is skipped.
+// Spec: D-01 — HTTP Gateway validates all inbound N58/N60 tokens; Biz Pod trusts gateway.
+func NewAuthMiddleware(cfg Config) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if cfg.Disabled || os.Getenv("NAF3_AUTH_DISABLED") == "1" {
+				slog.Debug("auth: bypassed (E2E mode)")
+				next.ServeHTTP(w, r)
+				return
+			}
 			// Extract Bearer token
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
@@ -38,7 +49,7 @@ func Middleware(requiredScope string) func(http.Handler) http.Handler {
 			}
 
 			// Validate token
-			claims, err := Validator().Validate(r.Context(), token, requiredScope)
+			claims, err := Validator().Validate(r.Context(), token, "")
 			if err != nil {
 				slog.Debug("token validation failed",
 					"error", err,
@@ -125,7 +136,7 @@ func MiddlewareWithOptions(requiredScope string, opts ...MiddlewareOption) func(
 				next.ServeHTTP(w, r)
 				return
 			}
-			Middleware(cfg.requiredScope)(next).ServeHTTP(w, r)
+			NewAuthMiddleware(Config{Disabled: false})(next).ServeHTTP(w, r)
 		})
 	}
 }

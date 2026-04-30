@@ -132,8 +132,15 @@ type AAAgwConfig struct {
 
 // HTTPgwConfig holds HTTP Gateway configuration.
 type HTTPgwConfig struct {
-	BizServiceURL string     `yaml:"bizServiceUrl"` // http://svc-nssaa-biz:8080
-	TLS           *TLSConfig `yaml:"tls,omitempty"`
+	BizServiceURL string      `yaml:"bizServiceUrl"` // http://svc-nssaa-biz:8080
+	Auth          *AuthConfig `yaml:"auth,omitempty"`
+	TLS           *TLSConfig  `yaml:"tls,omitempty"`
+}
+
+// AuthConfig holds JWT authentication settings.
+type AuthConfig struct {
+	// Disabled skips all JWT validation. Use for E2E tests or trusted deployments.
+	Disabled bool `yaml:"disabled"`
 }
 
 // ServerConfig holds HTTP server settings.
@@ -323,6 +330,8 @@ func (c *Config) Validate() error {
 		if c.NRM.ListenAddr == "" {
 			return fmt.Errorf("config.nrm.listenAddr is required")
 		}
+		// NRM does not use crypto — skip crypto validation.
+		return nil
 	}
 
 	if c.Crypto.KeyManager == keyManagerSoft {

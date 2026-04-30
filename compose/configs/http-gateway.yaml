@@ -12,6 +12,10 @@ server:
 
 httpGateway:
   bizServiceUrl: "http://localhost:8080"
+  # Auth bypass for E2E tests: set auth.disabled=true or pass NAF3_AUTH_DISABLED=1.
+  # NEVER enable in production.
+  auth:
+    disabled: false
   tls:
     cert: "/tmp/e2e-tls/server.crt"
     key: "/tmp/e2e-tls/server.key"

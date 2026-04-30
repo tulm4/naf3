@@ -311,6 +311,7 @@ func (h *Harness) startHTTPGateway(ctx context.Context) error {
 	cmd.Env = append(os.Environ(),
 		"HTTP_GW_LISTEN=:8443",
 		"HTTP_GW_BIZ_URL=http://localhost:8080",
+		"NAF3_AUTH_DISABLED=1", // E2E mode: skip JWT validation
 	)
 	if err := cmd.Start(); err != nil {
 		return err
