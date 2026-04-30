@@ -77,6 +77,28 @@ services:
       retries: 3
 
   # ---------------------------------------------------------------------------
+  # NRM — Network Resource Manager / RESTCONF server
+  # ---------------------------------------------------------------------------
+  nrm:
+    build:
+      context: ..
+      dockerfile: Dockerfile.nrm
+    image: nssaaf-nrm:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./configs/nrm.yaml:/etc/nssAAF/nrm.yaml:ro
+    ports: ["8081:8081"]
+    networks:
+      - default
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ---------------------------------------------------------------------------
   # Biz Pod — EAP engine + N58/N60 SBI
   # ---------------------------------------------------------------------------
   biz:
@@ -90,6 +112,8 @@ services:
       postgres:
         condition: service_healthy
       aaa-gateway:
+        condition: service_healthy
+      nrm:
         condition: service_healthy
     volumes:
       - ./configs/biz.yaml:/etc/nssAAF/biz.yaml:ro
