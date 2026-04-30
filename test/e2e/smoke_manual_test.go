@@ -30,8 +30,10 @@ import (
 // Initialized lazily from E2E_TLS_CA on first use.
 var tlsClient *http.Client
 
+// insecureClient is used when TLS CA cert is unavailable.
+var insecureClient *http.Client
+
 // initTLSClient lazily initializes tlsClient from E2E_TLS_CA.
-// If the CA cert is not found, tlsClient remains nil and tests skip.
 func initTLSClient() {
 	if tlsClient != nil {
 		return
@@ -70,11 +72,18 @@ func skipIfServicesNotUp(t *testing.T) {
 	} {
 		initTLSClient()
 		var client *http.Client
-		if svc.useTLS && tlsClient != nil {
-			client = tlsClient
-		} else if svc.useTLS {
-			t.Skipf("TLS client not initialized; skip HTTP Gateway health check")
-			return
+		if svc.useTLS {
+			if tlsClient != nil {
+				client = tlsClient
+			} else {
+				// Fallback: use insecure TLS for smoke tests when CA cert is unavailable.
+				insecureClient = &http.Client{
+					Transport: &http.Transport{
+						TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+					},
+				}
+				client = insecureClient
+			}
 		} else {
 			client = &http.Client{Timeout: 5 * time.Second}
 		}
@@ -94,11 +103,19 @@ func doRequest(t *testing.T, method, url string, body interface{}) *http.Respons
 
 	var client *http.Client
 	if strings.HasPrefix(url, "https://") {
-		if tlsClient == nil {
-			t.Skip("TLS client not initialized; cannot make HTTPS request")
-			return nil
+		if tlsClient != nil {
+			client = tlsClient
+		} else {
+			// Fallback: use insecure TLS for smoke tests when CA cert is unavailable.
+			if insecureClient == nil {
+				insecureClient = &http.Client{
+					Transport: &http.Transport{
+						TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+					},
+				}
+			}
+			client = insecureClient
 		}
-		client = tlsClient
 	} else {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
@@ -189,30 +206,25 @@ func TestE2E_01_NSSAA_CreateSession_viaHTTPGW(t *testing.T) {
 		return
 	}
 
-	// Verify Location header — note: http-gateway may not forward Location header from biz.
-	location := resp.Header.Get("Location")
-	if location == "" {
-		t.Log("Location header not forwarded by http-gateway (known behavior)")
-	} else {
-		t.Logf("CreateSession: authCtxId from location: %s", location)
-	}
-
-	// Verify X-Request-ID echo — note: http-gateway may not forward X-Request-ID from biz.
-	xReqID := resp.Header.Get("X-Request-ID")
-	if xReqID == "" {
-		t.Log("X-Request-ID not echoed by http-gateway (known behavior)")
-	}
-
-	// Verify response body
+	// Verify response body — http-gateway may not forward Location/X-Request-ID headers.
 	var authResp map[string]interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&authResp); err != nil {
 		t.Errorf("invalid JSON response: %v", err)
 		return
 	}
-	if authResp["authCtxId"] == nil {
-		t.Error("authCtxId missing from response")
-	} else {
-		t.Logf("authCtxId: %v", authResp["authCtxId"])
+	authCtxID, ok := authResp["authCtxId"].(string)
+	if !ok || authCtxID == "" {
+		t.Error("authCtxId missing from response body")
+		return
+	}
+	t.Logf("CreateSession via HTTPGW: authCtxId=%s", authCtxID)
+
+	// Log headers if present (informational only — http-gateway may not forward them).
+	if location := resp.Header.Get("Location"); location != "" {
+		t.Logf("Location header: %s", location)
+	}
+	if xReqID := resp.Header.Get("X-Request-ID"); xReqID != "" {
+		t.Logf("X-Request-ID echo: %s", xReqID)
 	}
 }
 
