@@ -58,7 +58,7 @@ func TestMain(m *testing.M) {
 	// 2. Create the shared Harness (connects to pre-started compose containers).
 	// This harness is closed once by the defer below, after all tests finish.
 	// Individual tests must call NewHarnessForTest() to get a clean slate.
-	sharedHarness = NewHarness(&testing.T{})
+	sharedHarness = NewHarnessForTest(&testing.T{})
 	defer func() {
 		if sharedHarness != nil {
 			sharedHarness.Close()
