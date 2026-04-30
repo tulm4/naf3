@@ -24,26 +24,34 @@ package e2e
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
+	"regexp"
+	"runtime"
 	"sync"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/redis/go-redis/v9"
 	"github.com/operator/nssAAF/test/mocks"
+	"github.com/redis/go-redis/v9"
+	"gopkg.in/yaml.v3"
 )
 
 // Harness holds connections to all components started by NewHarness.
 type Harness struct {
 	t            *testing.T
+	config       *HarnessConfig
+	httpClient   *http.Client
+
 	httpGWBin    string
 	bizBin       string
 	aaagwBin     string
@@ -67,20 +75,110 @@ type Harness struct {
 	clean bool
 }
 
-// pgURL returns the PostgreSQL DSN for direct harness connections.
-func pgURL() string {
-	if v := os.Getenv("BIZ_PG_URL"); v != "" {
-		return v
-	}
-	return "postgres://nssaa:nssaa@localhost:5432/nssaa?sslmode=disable"
+// HarnessConfig holds all infrastructure configuration loaded from harness.yaml.
+// All values are expanded from environment variables at load time.
+type HarnessConfig struct {
+	Infra     InfraConfig     `yaml:"infra"`
+	Services  ServicesConfig `yaml:"services"`
+	Binaries  BinariesConfig  `yaml:"binaries"`
+	TLS       TLSConfig       `yaml:"tls"`
+	Timeouts  TimeoutsConfig  `yaml:"timeouts"`
 }
 
-// redisURL returns the Redis URL for direct harness connections.
-func redisURL() string {
-	if v := os.Getenv("BIZ_REDIS_URL"); v != "" {
-		return strings.TrimPrefix(v, "redis://")
+type InfraConfig struct {
+	PostgresUrl string `yaml:"postgresUrl"`
+	RedisUrl    string `yaml:"redisUrl"`
+}
+
+type ServicesConfig struct {
+	HTTPGatewayUrl string `yaml:"httpGatewayUrl"`
+	BizPodUrl      string `yaml:"bizPodUrl"`
+	AAAGatewayUrl  string `yaml:"aaaGatewayUrl"`
+	NRMUrl         string `yaml:"nrmUrl"`
+}
+
+type BinariesConfig struct {
+	Biz         string `yaml:"biz"`
+	HTTPGateway string `yaml:"httpGateway"`
+	AAAGateway  string `yaml:"aaaGateway"`
+}
+
+type TLSConfig struct {
+	CACert string `yaml:"caCert"`
+}
+
+type TimeoutsConfig struct {
+	Startup        string `yaml:"startup"`
+	HealthCheck    string `yaml:"healthCheck"`
+	ShutdownGrace  string `yaml:"shutdownGrace"`
+}
+
+// expandEnvVars replaces ${VAR} and ${VAR:-default} patterns in s with
+// environment variable values. For ${VAR:-default}: uses default if the env
+// var is empty; for ${VAR}: returns the string with the pattern intact if
+// the env var is not set (caller validates non-empty).
+func expandEnvVars(s string) string {
+	// Handle ${VAR:-default} pattern
+	s = reEnvDefault.ReplaceAllStringFunc(s, func(match string) string {
+		parts := reEnvDefault.FindStringSubmatch(match)
+		if len(parts) != 3 {
+			return match
+		}
+		_, varName, defaultVal := parts[0], parts[1], parts[2]
+		if v := os.Getenv(varName); v != "" {
+			return v
+		}
+		return defaultVal
+	})
+
+	// Handle ${VAR} pattern (no default)
+	s = reEnvVar.ReplaceAllStringFunc(s, func(match string) string {
+		parts := reEnvVar.FindStringSubmatch(match)
+		if len(parts) != 2 {
+			return match
+		}
+		varName := parts[1]
+		return os.Getenv(varName)
+	})
+
+	return s
+}
+
+// reEnvDefault matches ${VAR:-default} patterns.
+var reEnvDefault = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*):-([^}]*)\}`)
+
+// reEnvVar matches ${VAR} patterns without a default.
+var reEnvVar = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
+
+// LoadHarnessConfig reads the YAML file at path, expands all environment
+// variable placeholders, unmarshals into a HarnessConfig, and validates that
+// required fields are non-empty.
+func LoadHarnessConfig(path string) (*HarnessConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read harness config %s: %w", path, err)
 	}
-	return "localhost:6379"
+
+	// Expand all env var patterns before unmarshaling.
+	expanded := expandEnvVars(string(data))
+
+	var cfg HarnessConfig
+	if err := yaml.Unmarshal([]byte(expanded), &cfg); err != nil {
+		return nil, fmt.Errorf("parse harness config %s: %w", path, err)
+	}
+
+	// Validate required fields.
+	if cfg.Infra.PostgresUrl == "" {
+		return nil, errors.New("harness config: infra.postgresUrl is required (set BIZ_PG_URL)")
+	}
+	if cfg.Infra.RedisUrl == "" {
+		return nil, errors.New("harness config: infra.redisUrl is required (set BIZ_REDIS_URL)")
+	}
+	if cfg.TLS.CACert == "" {
+		return nil, errors.New("harness config: tls.caCert is required (set E2E_TLS_CA)")
+	}
+
+	return &cfg, nil
 }
 
 // NewHarness connects to a pre-started docker compose stack and launches the
@@ -93,21 +191,33 @@ func redisURL() string {
 func NewHarness(t *testing.T) *Harness {
 	t.Helper()
 
-	// HTTPS for HTTP Gateway (TLS 1.3 terminates on HTTP GW per D-11 / Phase R).
-	// Plain HTTP for Biz Pod and AAA Gateway (internal mTLS not required in E2E).
+	// Load harness config from test/e2e/harness.yaml (next to this file).
+	configPath := filepath.Join(filepath.Dir(ofThisFile()), "harness.yaml")
+	cfg, err := LoadHarnessConfig(configPath)
+	if err != nil {
+		t.Fatalf("load harness config: %v", err)
+	}
+
 	h := &Harness{
-		t:            t,
-		httpGWBin:    getEnv("HTTPGW_BINARY", "./bin/http-gateway"),
-		bizBin:       getEnv("BIZ_BINARY", "./bin/biz"),
-		aaagwBin:     getEnv("AAAGW_BINARY", "./bin/aaa-gateway"),
-		httpGWURL:    "https://localhost:8443",
-		bizURL:       "http://localhost:8080",
-		aaagwURL:     "http://localhost:9090",
-		nrmURL:       "http://localhost:8081",
+		t:          t,
+		config:     cfg,
+		httpGWBin:  cfg.Binaries.HTTPGateway,
+		bizBin:     cfg.Binaries.Biz,
+		aaagwBin:   cfg.Binaries.AAAGateway,
+		httpGWURL:  cfg.Services.HTTPGatewayUrl,
+		bizURL:     cfg.Services.BizPodUrl,
+		aaagwURL:   cfg.Services.AAAGatewayUrl,
+		nrmURL:     cfg.Services.NRMUrl,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
+
+	// Initialize custom TLS client for HTTPS health checks.
+	if err := h.initTLS(h.config.TLS.CACert); err != nil {
+		h.cleanup()
+		t.Fatalf("init TLS: %v", err)
+	}
 
 	// 1. Establish direct connections to PG and Redis (used by ResetState).
 	if err := h.initDBAndRedis(ctx); err != nil {
@@ -157,7 +267,7 @@ func NewHarness(t *testing.T) *Harness {
 // initDBAndRedis opens a direct pgxpool and Redis client on the harness.
 // These connections survive process restarts and are used only by ResetState.
 func (h *Harness) initDBAndRedis(ctx context.Context) error {
-	pgCfg, err := pgxpool.ParseConfig(pgURL())
+	pgCfg, err := pgxpool.ParseConfig(h.config.Infra.PostgresUrl)
 	if err != nil {
 		return fmt.Errorf("parse PG URL: %w", err)
 	}
@@ -171,7 +281,8 @@ func (h *Harness) initDBAndRedis(ctx context.Context) error {
 		return fmt.Errorf("ping PG: %w", err)
 	}
 
-	rOpts, err := redis.ParseURL("redis://" + redisURL())
+	// BIZ_REDIS_URL may be redis://host:port or just host:port; ParseURL handles both.
+	rOpts, err := redis.ParseURL(h.config.Infra.RedisUrl)
 	if err != nil {
 		return fmt.Errorf("parse Redis URL: %w", err)
 	}
@@ -331,8 +442,8 @@ func (h *Harness) startBizPod(ctx context.Context) error {
 	cmd.Env = append(os.Environ(),
 		"BIZ_LISTEN=:8080",
 		"BIZ_AAA_GW_URL=http://localhost:9090",
-		"BIZ_REDIS_URL=redis://localhost:6379",
-		"BIZ_PG_URL=postgres://nssaa:nssaa@localhost:5432/nssaa?sslmode=disable",
+		"BIZ_REDIS_URL="+h.config.Infra.RedisUrl,
+		"BIZ_PG_URL="+h.config.Infra.PostgresUrl,
 		"BIZ_NRM_URL=http://localhost:8081",
 		// SoftKeyManager for E2E: 32-byte hex key (Phase 5 D-01)
 		"MASTER_KEY_HEX=6767a7ad0416a19ea174608288761dde35dfabba2a8dda9602fc520b80e1af15",
@@ -362,6 +473,25 @@ func (h *Harness) startHTTPGateway(ctx context.Context) error {
 	return nil
 }
 
+// initTLS loads the CA certificate from caPath and builds a custom *http.Client
+// that trusts it. This allows HTTPS health checks against self-signed certs.
+func (h *Harness) initTLS(caPath string) error {
+	caCert, err := os.ReadFile(caPath)
+	if err != nil {
+		return fmt.Errorf("read CA cert %s: %w", caPath, err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(caCert) {
+		return errors.New("invalid CA certificate in " + caPath)
+	}
+	h.httpClient = &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{RootCAs: pool},
+		},
+	}
+	return nil
+}
+
 func (h *Harness) waitHealthy(ctx context.Context, timeout time.Duration) error {
 	type service struct {
 		name string
@@ -387,7 +517,7 @@ func (h *Harness) waitHealthy(ctx context.Context, timeout time.Duration) error 
 			allUp := true
 			for _, s := range svcs {
 				req, _ := http.NewRequestWithContext(ctx, http.MethodGet, s.url, nil)
-				resp, err := http.DefaultClient.Do(req)
+				resp, err := h.httpClient.Do(req)
 				statusCode := 0
 				if resp != nil {
 					statusCode = resp.StatusCode
@@ -421,11 +551,11 @@ func projectRoot() string {
 	return "."
 }
 
-func getEnv(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
+func ofThisFile() string {
+	// Returns the directory containing this source file (harness.go).
+	// Used to locate harness.yaml next to the harness.go file.
+	_, file, _, _ := runtime.Caller(1)
+	return filepath.Dir(file)
 }
 
 func killProcess(p *os.Process, grace time.Duration) error {

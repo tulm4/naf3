@@ -1,0 +1,26 @@
+# test/e2e/harness.yaml — E2E test infrastructure configuration
+# All values come from env vars; no hardcoded fallbacks.
+# Missing required env vars cause a fatal error at startup.
+
+infra:
+  postgresUrl: "${BIZ_PG_URL}"
+  redisUrl: "${BIZ_REDIS_URL}"
+
+services:
+  httpGatewayUrl: "https://localhost:8443"
+  bizPodUrl: "http://localhost:8080"
+  aaaGatewayUrl: "http://localhost:9090"
+  nrmUrl: "http://localhost:8081"
+
+binaries:
+  biz: "${BIZ_BINARY:-./bin/biz}"
+  httpGateway: "${HTTPGW_BINARY:-./bin/http-gateway}"
+  aaaGateway: "${AAAGW_BINARY:-./bin/aaa-gateway}"
+
+tls:
+  caCert: "${E2E_TLS_CA:-/tmp/e2e-tls/server.crt}"
+
+timeouts:
+  startup: "2m"
+  healthCheck: "5s"
+  shutdownGrace: "10s"
