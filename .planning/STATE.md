@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: ready_to_plan
-last_updated: "2026-04-29T00:15:00Z"
+status: unknown
+last_updated: "2026-04-30T04:03:28.549Z"
 last_activity: 2026-04-29
 progress:
   total_phases: 10
-  completed_phases: 2
-  total_plans: 7
-  completed_plans: 7
-  percent: 20
+  completed_phases: 1
+  total_plans: 6
+  completed_plans: 11
+  percent: 100
 ---
 
 # State: NSSAAF
@@ -41,7 +41,7 @@ See: `.planning/PROJECT.md` (updated 2026-04-25)
 | R: 3-Component Refactor | ✅ Done | HTTP GW, Biz Pod, AAA GW |
 | 4: NF Integration & Observability | ✅ Done | 5 plans, 26 tasks, 5 waves — REQ-01 to REQ-19 |
 | 5: Security & Crypto | ✅ Done | TLS, mTLS, KEK/DEK, KeyManager, Vault, SoftHSM |
-| 6: Integration Testing & NRM | ✅ Done | 6 plans — PLAN-1 through PLAN-5 complete, PLAN-4 done (9 integration test files) |
+| 6: Integration Testing & NRM | ✅ Done | 6 plans — PLAN-1 through PLAN-6 complete |
 | 7: Kubernetes Deployment | ⏳ Pending | Helm, Kustomize, ArgoCD |
 | 8: Performance & Load Testing | ⏳ Pending | Load, chaos |
 
@@ -49,8 +49,11 @@ See: `.planning/PROJECT.md` (updated 2026-04-25)
 
 | Commit | Description |
 |--------|-------------|
+| `6f54f49` | docs(06-PLAN-6): complete PLAN-6 summary |
+| `aad45fa` | feat(06-PLAN-6): reject empty snssai {} with HTTP 400 per TS 29.526 §7.2.2 |
+| `f8d6eb0` | feat(06-PLAN-6): add HTTP Gateway auth bypass for E2E tests (Gap E2E-02) |
+| `29e172a` | refactor(06-PLAN-6): remove obsolete compose files and migrate to docker compose V2 |
 | `d8bd880` | test(06-PLAN-5): add E2E harness and conformance test suites |
-| `daf5700` | docs: update STATE.md and roadmap for PLAN-2 completion |
 | `ccd80f1` | docs(06-PLAN-2): add PLAN-2 summary |
 | `8799c72` | feat(06-PLAN-2): NRM RESTCONF server and AlarmManager |
 | `...` | (see `git log --oneline`) |
@@ -162,6 +165,7 @@ PLAN-5 Wave 5 executed successfully:
 - Gaps documented (G-01 through G-05): base64 validation, S-NSSAI mismatch, GetSlice handler not implemented, AAA config at handler level
 
 Key decisions:
+
 - harness.go: docker-compose + binary exec (not container SDK)
 - Conformance: httptest.Server (no infrastructure)
 - Some TC cases document gaps rather than fail (handler options not available)
@@ -170,7 +174,36 @@ Commit: `d8bd880`
 
 ---
 
-*Last updated: 2026-04-29*
+### 2026-04-29 — Phase 6 UAT complete
+
+Phase 6 UAT automated testing and issue resolution completed. All 15 tests passed (7 skipped requiring infrastructure).
+
+**7 issues fixed during UAT:**
+
+1. NRM binary missing `--config` flag → added config path resolution in `startNRMServer()`
+2. Config validation required crypto for NRM component → early return in `config.Validate()` for `ComponentNRM`
+3. RESTCONF routing via `http.ServeMux` stripped wrong prefix → changed to `http.StripPrefix("/restconf", ...)`
+4. Chi `{path:.+}` cannot match RFC 8040 `=` list key separator for alarm ack → custom `mux.HandleFunc` with string prefix matching, `AlarmAckHandler` struct
+5. JSON response format mismatch (YANG JSON wrapper) → updated `getAlarms()` helper to parse nested format
+6. Alarm acknowledgment body parsing → `HandleAck()` now extracts `acked-by` from JSON body
+7. Deadlock in `AlarmStore.Save()` → RWMutex fast-path RLock for dedup check, only write lock for actual writes
+
+Updated: module_index.md, roadmap/README.md, 06-UAT.md
+
+---
+
+*Last updated: 2026-04-30*
+
+### 2026-04-30 — Phase 6 PLAN-6 execution complete
+
+PLAN-6 gap fixes executed in 3 tasks across 18 minutes:
+
+- **Task 1 (29e172a):** Compose layout cleanup — delete 4 obsolete compose files, migrate all docker-compose V1 invocations to docker compose V2 in harness.go (4 invocations) and compose.go (4 invocations), update Makefile (already clean)
+- **Task 2 (f8d6eb0):** HTTP Gateway auth bypass — add `auth.Config{Disabled}` and `NewAuthMiddleware`, wire via `NAF3_AUTH_DISABLED=1` env var, update http-gateway main.go and config, add `TestAuthBypass_E2EMode` integration test
+- **Task 3 (aad45fa):** Empty snssai validation — fix `ValidateSnssai` to reject `snssai: {}` with HTTP 400 per TS 29.526 §7.2.2, add 3 unit tests, 2 conformance tests
+
+Key fixes: exec.CommandContext variadic args bug, duplicate test function declarations, auth test structure.
+
 
 ### Quick Tasks Completed
 
@@ -180,4 +213,4 @@ Commit: `d8bd880`
 
 Last activity: 2026-04-29
 
-**Planned Phase:** 06 (Integration Testing & NRM) — 5 plans — 2026-04-28T08:43:16.826Z
+**Planned Phase:** 06 (integration-testing-nrm) — 6 plans — 2026-04-29T19:14:46.985Z
