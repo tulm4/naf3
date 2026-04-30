@@ -1,3 +1,6 @@
+//go:build e2e
+// +build e2e
+
 // Package e2e provides end-to-end integration tests for the NSSAAF system.
 package e2e
 

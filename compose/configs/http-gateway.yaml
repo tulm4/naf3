@@ -11,7 +11,7 @@ server:
   idleTimeout: 120s
 
 httpGateway:
-  bizServiceUrl: "http://localhost:8080"
+  bizServiceUrl: "${BIZ_URL:-http://biz:8080}"
   # Auth bypass for E2E tests: set auth.disabled=true or pass NAF3_AUTH_DISABLED=1.
   # NEVER enable in production.
   auth:

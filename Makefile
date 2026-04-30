@@ -156,7 +156,7 @@ test-e2e: gen-certs build ## Build binaries for docker images, then run E2E test
 	E2E_TLS_CA=/tmp/e2e-tls/server.crt \
 	BIZ_PG_URL=postgres://nssaa:nssaa@localhost:5432/nssaa?sslmode=disable \
 	BIZ_REDIS_URL=redis://localhost:6379 \
-	$(GOTEST) -v -count=1 \
+	$(GOTEST) -tags=e2e -v -count=1 \
 		./test/e2e/... \
 		|| { docker compose -f compose/dev.yaml down --remove-orphans; exit 1; }
 	@echo "$(YELLOW)Tearing down docker compose infrastructure...$(NC)"
