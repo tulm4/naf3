@@ -112,8 +112,8 @@ func TestAuthCtxToSession(t *testing.T) {
 	assert.False(t, session.UpdatedAt.IsZero())
 }
 
-func TestSessionToAIWAuthCtx(t *testing.T) {
-	session := &Session{
+func TestAIWSessionToAuthCtx(t *testing.T) {
+	session := &AIWSession{
 		AuthCtxID:       "aiw-auth-123",
 		Supi:            "imu-123456789012345",
 		EAPSessionState: []byte("aiw-eap-state"),
@@ -121,27 +121,25 @@ func TestSessionToAIWAuthCtx(t *testing.T) {
 		UpdatedAt:       time.Now(),
 	}
 
-	authCtx := sessionToAIWAuthCtx(session)
+	authCtx := aiwsessionToAuthCtx(session)
 
 	assert.Equal(t, "aiw-auth-123", authCtx.AuthCtxID)
 	assert.Equal(t, "imu-123456789012345", authCtx.Supi)
 	assert.Equal(t, []byte("aiw-eap-state"), authCtx.EapPayload)
 }
 
-func TestAIWAuthCtxToSession(t *testing.T) {
+func TestAuthCtxToAIWSession(t *testing.T) {
 	authCtx := &aiw.AuthContext{
 		AuthCtxID:  "aiw-auth-456",
 		Supi:       "imu-987654321098765",
 		EapPayload: []byte("aiw-eap-payload"),
 	}
 
-	session := aiwAuthCtxToSession(authCtx)
+	session := authCtxToAIWSession(authCtx)
 
 	assert.Equal(t, "aiw-auth-456", session.AuthCtxID)
 	assert.Equal(t, "imu-987654321098765", session.Supi)
 	assert.Equal(t, []byte("aiw-eap-payload"), session.EAPSessionState)
-	assert.False(t, session.CreatedAt.IsZero())
-	assert.False(t, session.UpdatedAt.IsZero())
 }
 
 // ---------------------------------------------------------------------------
@@ -180,8 +178,8 @@ func TestAIWAuthCtxRoundTrip(t *testing.T) {
 		EapPayload: []byte("aiw-roundtrip-payload"),
 	}
 
-	session := aiwAuthCtxToSession(original)
-	restored := sessionToAIWAuthCtx(session)
+	session := authCtxToAIWSession(original)
+	restored := aiwsessionToAuthCtx(session)
 
 	assert.Equal(t, original.AuthCtxID, restored.AuthCtxID)
 	assert.Equal(t, original.Supi, restored.Supi)

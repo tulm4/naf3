@@ -308,16 +308,17 @@ func (h *Harness) ResetState() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Truncate known session tables.
+	// Truncate known session tables (silently ignore if table doesn't exist).
 	tables := []string{
 		"slice_auth_sessions",
 		"aiw_auth_sessions",
-		"audit_log",
+		"nssaa_audit_log",
 	}
 	for _, tbl := range tables {
-		_, err := h.pgConn.Exec(ctx, fmt.Sprintf("TRUNCATE TABLE %s CASCADE", tbl))
-		if err != nil {
-			h.t.Logf("TRUNCATE %s (may not exist): %v", tbl, err)
+		var exists bool
+		err := h.pgConn.QueryRow(ctx, "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = $1)", tbl).Scan(&exists)
+		if err == nil && exists {
+			_, _ = h.pgConn.Exec(ctx, fmt.Sprintf("TRUNCATE TABLE %s CASCADE", tbl))
 		}
 	}
 

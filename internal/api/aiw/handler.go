@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/operator/nssAAF/internal/api/common"
@@ -24,11 +25,37 @@ type AAARouter interface {
 }
 
 // AuthContext represents an AIW authentication context.
+// Spec: TS 29.526 §7.3
+// Design: docs/design/04_data_model.md §3.6
 type AuthContext struct {
 	AuthCtxID  string
 	Supi       string
 	EapPayload []byte
 	TtlsInner  []byte
+
+	// MSK: Master Session Key from EAP-TLS (RFC 5216 §2.1.4)
+	// Stored encrypted; NULL if not EAP-TLS or on Failure
+	MSK []byte
+
+	// PvsInfo: Privacy-Violating Servers info from AAA-S (TS 29.526 §7.3.3)
+	// JSON array: [{"serverType":"PROSE","serverId":"pvs-001"},...]
+	PvsInfo []byte // JSONB stored as []byte
+
+	// AusfID: AUSF instance that triggered this authentication
+	AusfID string
+
+	// Supported features echo (from request)
+	SupportedFeatures string
+
+	// Auth result
+	Status     string
+	AuthResult string
+
+	// Session metadata
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+	ExpiresAt  time.Time
+	CompletedAt *time.Time
 }
 
 // AuthCtxStore manages AIW authentication contexts.
