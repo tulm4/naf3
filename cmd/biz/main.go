@@ -100,6 +100,14 @@ func main() {
 	}
 	defer pgPool.Close()
 
+	// ─── Run database migrations ───────────────────────────────────────────
+	// REQ-09: Auto-migrate schema on startup (idempotent - safe to re-run)
+	migrator := postgres.NewMigrator(pgPool)
+	if err := migrator.Migrate(ctx); err != nil {
+		slog.Error("database migration failed", "error", err)
+		os.Exit(1)
+	}
+
 	// Initialize crypto key manager — Phase 5 envelope encryption.
 	// crypto.Init must succeed; session data must not be stored with an empty key.
 	var vaultCfg *crypto.VaultConfig
