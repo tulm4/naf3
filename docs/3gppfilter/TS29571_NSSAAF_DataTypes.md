@@ -90,8 +90,14 @@ Used for AAA server routing and UE identification:
 ```yaml
 Gpsi:
   type: string
-  pattern: '^5[0-9]{8,14}$'  # Example pattern
-  description: External identifier for the subscriber
+  # Pattern from TS 29.571 §5.2.2:
+  # '^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$'
+  pattern: '^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$'
+  description: |
+    String identifying a Gpsi shall contain either an External Id or an MSISDN.
+    - MSISDN-based: "msisdn-" + 5-15 decimal digits
+    - External Identifier-based: "extid-" + <ext-id> + "@" + <realm>
+    - Any other string (catch-all for backwards compatibility)
 ```
 
 ### Supi (Subscription Permanent Identifier)
@@ -113,7 +119,7 @@ Supi:
 
 ```json
 {
-  "gpsi": "5-208046000000001",
+  "gpsi": "msisdn-208046000000001",
   "snssai": {
     "sst": 1,
     "sd": "000001"

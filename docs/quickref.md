@@ -22,7 +22,7 @@ See `docs/design/01_service_model.md` §5.4 for full details.
 
 ```go
 // GPSI: Generic Public Subscriber Identifier
-// Pattern: ^5[0-9]{8,14}$ (required for NSSAA)
+// Pattern: ^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$ (required for NSSAA)
 // Example: "5-208046000000001"
 type Gpsi string
 

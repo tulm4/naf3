@@ -10,11 +10,13 @@ import (
 )
 
 var (
-	// GPSI pattern: 5 followed by 8–14 digits
-	// Spec: TS 23.003 §2.2, TS 29.571 §5.4.4.3
-	gpsiRegex = regexp.MustCompile(`^5[0-9]{8,14}$`)
+	// GPSI pattern per TS 29.571 §5.2.2:
+	// Pattern: '^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$'
+	// Supports MSISDN-based, External Identifier-based, and catch-all formats
+	// Spec: TS 29.571 §5.2.2
+	gpsiRegex = regexp.MustCompile(`^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$`)
 	// SUPI pattern: 'imu-' followed by 15 digits (IMSI)
-	// Spec: TS 23.003 §2.2, TS 29.571 §5.4.4.2
+	// Spec: TS 23.003 §2.2, TS 29.571 §5.2.2
 	supiRegex = regexp.MustCompile(`^imu-[0-9]{15}$`)
 	// SD pattern: exactly 6 hexadecimal characters
 	// Spec: TS 23.003 §3.2, TS 29.571 §5.4.4.60
@@ -22,15 +24,15 @@ var (
 )
 
 // ValidateGPSI validates that the GPSI (Generic Public Subscription Identifier)
-// conforms to TS 29.571 §5.4.4.3.
+// conforms to TS 29.571 §5.2.2.
 // GPSI is required for all NSSAA procedures.
-// Spec: TS 23.502 §4.2.9.1, TS 29.571 §5.4.4.3
+// Spec: TS 23.502 §4.2.9.1, TS 29.571 §5.2.2
 func ValidateGPSI(gpsi string) error {
 	if gpsi == "" {
 		return ValidationProblem("gpsi", "GPSI is required")
 	}
 	if !gpsiRegex.MatchString(gpsi) {
-		return ValidationProblem("gpsi", "must match pattern ^5[0-9]{8,14}$ (TS 29.571 §5.4.4.3)")
+		return ValidationProblem("gpsi", "must match pattern ^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$ (TS 29.571 §5.2.2)")
 	}
 	return nil
 }

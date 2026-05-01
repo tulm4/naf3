@@ -142,17 +142,20 @@ func TestValidateGPSI(t *testing.T) {
 		gpsi    string
 		wantErr bool
 	}{
-		{"valid 9 digits", "512345678", false},
-		{"valid 14 digits", "51234567890123", false},
-		{"valid 15 chars max", "512345678901234", false},
+		// Valid: MSISDN-based GPSI per TS 29.571 §5.2.2
+		{"valid MSISDN min (5 digits)", "msisdn-12345", false},
+		{"valid MSISDN 10 digits", "msisdn-2080460000", false},
+		{"valid MSISDN max (15 digits)", "msisdn-208046000000001", false},
+		// Valid: External Identifier-based GPSI per TS 29.571 §5.2.2
+		{"valid External Identifier", "extid-user@domain.com", false},
+		// Valid: Catch-all (any other string) per TS 29.571 §5.2.2
+		{"valid catch-all (old 5-prefix)", "52080460000001", false},
+		{"valid catch-all (any string)", "any-format-here", false},
+		// Invalid
 		{"empty", "", true},
-		{"too short (7 digits)", "5123456", true},
-		{"starts with 0", "012345678", true},
-		{"starts with 9", "912345678", true},
-		{"non-digit characters", "51234567a", true},
-		{"with spaces", "5123 45678", true},
+		// Note: Invalid MSISDN formats are accepted by catch-all (.+)
+		// because the spec allows any string that doesn't match the first two forms
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := ValidateGPSI(tt.gpsi)

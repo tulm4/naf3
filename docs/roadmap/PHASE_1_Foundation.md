@@ -181,7 +181,7 @@ Wires the chi router, applies global middleware, handles graceful shutdown.
 - [x] `cd oapi-gen && make` generates both packages without errors
 - [x] `go build ./cmd/nssAAF/... ./internal/api/... ./internal/types/... ./internal/config/...`
 - [x] `go test ./internal/api/nssaa/... ./internal/api/aiw/... ./internal/api/common/... ./internal/types/... ./internal/config/...`
-- [x] GPSI regex: `^5[0-9]{8,14}$` (from TS 29.571 §5.4.4.3)
+- [x] GPSI regex: `^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$` (from TS 29.571 §5.2.2)
 - [x] SUPI regex: `^imu-[0-9]{15}$` (from TS 29.571 §5.4.4.2)
 - [x] Snssai SST range: 0-255
 - [x] Snssai SD format: 6 hex chars
@@ -198,7 +198,7 @@ Wires the chi router, applies global middleware, handles graceful shutdown.
 - TS 29.526 §7.2 — Nnssaaf_NSSAA service operations
 - TS 29.526 §7.3 — Nnssaaf_AIW service operations
 - TS 29.571 §5.4.4.60 — NssaaStatus / AuthStatus
-- TS 29.571 §5.4.4.3 — Gpsi
+- TS 29.571 §5.2.2 — Gpsi (corrected from §5.4.4.3)
 - TS 29.571 §5.4.4.2 — Supi
 - TS 23.502 §4.2.9.2 — AMF-triggered NSSAA procedure
 - RFC 7807 — Problem Details for HTTP APIs

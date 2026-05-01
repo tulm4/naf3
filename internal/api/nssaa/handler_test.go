@@ -137,8 +137,9 @@ func TestCreateSliceAuthenticationContext_InvalidGPSI(t *testing.T) {
 	store := newMockStore()
 	h := NewHandler(store, WithAPIRoot("https://nssAAF.example.com"))
 
+	// Empty GPSI is invalid per TS 29.571 §5.2.2
 	body := map[string]interface{}{
-		"gpsi":     "invalid-gpsi",
+		"gpsi":     "",
 		"snssai":   map[string]interface{}{"sst": 1},
 		"eapIdRsp": "dXNlcgBleGFtcGxlLmNvbQ==",
 	}
@@ -238,8 +239,9 @@ func TestCreateSliceAuthenticationContext_InvalidJSON(t *testing.T) {
 }
 
 func TestCreateSliceAuthenticationContext_GPSIWithDash(t *testing.T) {
-	// The common GPSI validator (TS 29.571 §5.4.4.3) uses ^5[0-9]{8,14}$
-	// which does NOT allow a dash separator. Use the dash-free form.
+	// The common GPSI validator (TS 29.571 §5.2.2) uses ^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$
+	// which accepts MSISDN-based, External Identifier-based, and catch-all formats.
+	// GPSI "52080460000001" is valid as catch-all.
 	store := newMockStore()
 	h := NewHandler(store, WithAPIRoot("https://nssAAF.example.com"))
 
@@ -332,8 +334,9 @@ func TestConfirmSliceAuthentication_InvalidGPSI(t *testing.T) {
 	store := newMockStore()
 	h := NewHandler(store, WithAPIRoot("https://nssAAF.example.com"))
 
+	// Empty GPSI is invalid per TS 29.571 §5.2.2
 	body := map[string]interface{}{
-		"gpsi":       "bad-gpsi",
+		"gpsi":       "",
 		"snssai":     map[string]interface{}{"sst": 1},
 		"eapMessage": "dGVzdA==",
 	}

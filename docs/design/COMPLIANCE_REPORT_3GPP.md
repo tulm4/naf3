@@ -25,7 +25,7 @@
 | POST /slice-authentications | PASS | TS 29.526 §7.2.2 |
 | PUT /slice-authentications/{authCtxId} | PASS | TS 29.526 §7.2.2 |
 | NssaaStatus state machine | PASS | TS 29.571 §5.4.4.60 |
-| GPSI pattern `^5[0-9]{8,14}$` | PASS | TS 29.571 §5.4.4.61 |
+| GPSI pattern `^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$` | PASS | TS 29.571 §5.2.2 |
 | Snssai.sst: 0-255 | PASS | TS 29.571 |
 | Error codes (400/403/404/502/503/504) | PASS | TS 29.526 |
 | Re-AuthenticationNotification | PASS | TS 29.526 §7.2.3, TS 23.502 §4.2.9.3 |
@@ -74,13 +74,13 @@
 
 ## 2. MINOR ISSUES
 
-### 2.1 GPSI Regex Optional Dash (`02_nssaa_api.md`)
+### 2.1 GPSI Regex (FIXED)
 
-**Issue:** Line 67 mentions `^5[0-9]{8,14}$` with optional dash per TS 23.003, but the 3GPP filter (`NSSAAF_DataTypes_NRM.md`) only specifies `^5[0-9]{8,14}$`.
+**Issue:** Design doc mentioned `^5[0-9]{8,14}$` with optional dash per TS 23.003, but the 3GPP filter (`NSSAAF_DataTypes_NRM.md`) specifies the correct pattern.
 
-**Spec:** TS 29.571 pattern is `^5[0-9]{8,14}$` (no dash in TS 29.571).
+**Spec:** TS 29.571 §5.2.2 pattern is `^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$`.
 
-**Recommendation:** Match TS 29.571 pattern exactly. If operator requires dash support, document as operator-specific deviation.
+**Fix Applied:** Updated all references to use correct pattern.
 
 ### 2.2 eapMessage Nullable in Response (`02_nssaa_api.md`)
 
@@ -192,7 +192,7 @@ EAP_SUCCESS ──(AAA-S Reauth Request)──→ PENDING
 | 1 | Metadata header present | Frontmatter |
 | 2 | Spec version matches filter | e.g., TS 29.526 v18.7.0 |
 | 3 | Section references correct | §7.2 vs §7.3 |
-| 4 | GPSI regex matches TS 29.571 | `^5[0-9]{8,14}$` |
+| 4 | GPSI regex matches TS 29.571 | `^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$` |
 | 5 | SUPI regex matches TS 29.571 | `^imu-[0-9]{15}$` |
 | 6 | Error codes match TS 29.526 | 400/403/404/502/503/504 |
 | 7 | NssaaStatus enum complete | NOT_EXECUTED/PENDING/EAP_SUCCESS/EAP_FAILURE |

@@ -78,44 +78,59 @@ func TestGpsiValidate(t *testing.T) {
 		gpsi    Gpsi
 		wantErr bool
 	}{
+		// Valid: MSISDN-based GPSI per TS 29.571 §5.2.2
 		{
-			name:    "valid 9 chars",
-			gpsi:    Gpsi("500000001"),
+			name:    "valid MSISDN min (5 digits)",
+			gpsi:    Gpsi("msisdn-12345"),
 			wantErr: false,
 		},
 		{
-			name:    "valid 10 chars",
-			gpsi:    Gpsi("5208046000"),
+			name:    "valid MSISDN 10 digits",
+			gpsi:    Gpsi("msisdn-2080460000"),
 			wantErr: false,
 		},
 		{
-			name:    "valid 15 chars",
+			name:    "valid MSISDN max (15 digits)",
+			gpsi:    Gpsi("msisdn-208046000000001"),
+			wantErr: false,
+		},
+		// Valid: External Identifier-based GPSI per TS 29.571 §5.2.2
+		{
+			name:    "valid External Identifier",
+			gpsi:    Gpsi("extid-user@domain.com"),
+			wantErr: false,
+		},
+		{
+			name:    "valid External Identifier with numbers",
+			gpsi:    Gpsi("extid-123456789@operator.example"),
+			wantErr: false,
+		},
+		// Valid: Catch-all (any other string) per TS 29.571 §5.2.2
+		// The spec allows ANY string that doesn't match the first two forms
+		{
+			name:    "valid catch-all (old 5-prefix format)",
 			gpsi:    Gpsi("52080460000001"),
 			wantErr: false,
 		},
 		{
-			name:    "valid with dash",
-			gpsi:    Gpsi("5-20804600000001"),
+			name:    "valid catch-all (any string)",
+			gpsi:    Gpsi("any-arbitrary-string"),
 			wantErr: false,
 		},
 		{
+			name:    "valid catch-all (simple number)",
+			gpsi:    Gpsi("123456"),
+			wantErr: false,
+		},
+		{
+			name:    "valid catch-all (malformed MSISDN - catch-all accepts it)",
+			gpsi:    Gpsi("msisdn-1234"),
+			wantErr: false,
+		},
+		// Invalid
+		{
 			name:    "invalid empty",
 			gpsi:    Gpsi(""),
-			wantErr: true,
-		},
-		{
-			name:    "invalid too short",
-			gpsi:    Gpsi("512345"),
-			wantErr: true,
-		},
-		{
-			name:    "invalid leading digit",
-			gpsi:    Gpsi("0123456789012"),
-			wantErr: true,
-		},
-		{
-			name:    "invalid with letters",
-			gpsi:    Gpsi("520abcde000001"),
 			wantErr: true,
 		},
 	}
@@ -133,13 +148,13 @@ func TestGpsiValidate(t *testing.T) {
 }
 
 func TestGpsiNormalize(t *testing.T) {
-	// Normalize removes the optional dash separator per TS 23.003
-	result1 := Gpsi("52080460000001").Normalize()
-	assert.Equal(t, "52080460000001", result1)
-	result2 := Gpsi("5-20804600000001").Normalize()
-	assert.Equal(t, "520804600000001", result2)
-	result3 := Gpsi("5-0000001").Normalize()
-	assert.Equal(t, "50000001", result3)
+	// Normalize returns the GPSI as-is per TS 29.571 §5.2.2
+	result1 := Gpsi("msisdn-208046000000001").Normalize()
+	assert.Equal(t, "msisdn-208046000000001", result1)
+	result2 := Gpsi("extid-user@domain.com").Normalize()
+	assert.Equal(t, "extid-user@domain.com", result2)
+	result3 := Gpsi("any-format-here").Normalize()
+	assert.Equal(t, "any-format-here", result3)
 }
 
 func TestSupiValidate(t *testing.T) {

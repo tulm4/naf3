@@ -38,7 +38,7 @@ GET /nudm-uem/v1/{gpsi}/registrations?service-names=namf-comm
 ```
 
 **Path Parameter:**
-- `gpsi`: GPSI của UE (matches `^5[0-9]{8,14}$`)
+- `gpsi`: GPSI của UE (matches `^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$`)
 
 **Query Parameters:**
 - `service-names`: Lọc registration theo service names (e.g., `namf-comm`)

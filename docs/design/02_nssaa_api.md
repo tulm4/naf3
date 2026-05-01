@@ -64,7 +64,7 @@ POST /nnssaaf-nssaa/v1/slice-authentications
 
 | Field | Validation | Error |
 |-------|-----------|-------|
-| gpsi | Required, matches `^5[0-9]{8,14}$` (TS 29.571 §5.4.4.61) | 400 InvalidGpsi |
+| gpsi | Required, matches `^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$` (TS 29.571 §5.2.2) | 400 InvalidGpsi |
 | snssai.sst | Required, 0-255 | 400 InvalidSnssaiSst |
 | snssai.sd | Optional, 6 hex chars `[A-Fa-f0-9]{6}` | 400 InvalidSnssaiSd |
 | eapIdRsp | Required, Base64 encoded, non-empty | 400 MissingEapPayload |
@@ -79,7 +79,7 @@ POST /nnssaaf-nssaa/v1/slice-authentications
    - Reject if token expired or missing scope
 2. Parse SliceAuthInfo JSON
 3. Validate all required fields:
-   - gpsi: regex ^5[0-9]{8,14}$ (TS 29.571 §5.4.4.61)
+   - gpsi: regex ^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$ (TS 29.571 §5.2.2)
    - snssai.sst: 0-255
    - snssai.sd: 6 hex chars or omitted
    - eapIdRsp: non-empty, valid Base64, decodes to valid EAP Response packet
@@ -671,7 +671,7 @@ nssaa:ratelimit:gpsi:{gpsiHash}
 |---|----------|-------------------|
 | AC1 | POST tạo SliceAuthContext với authCtxId UUIDv7 | UUIDv7 for time-sortability |
 | AC2 | PUT advance EAP round, trả về authResult khi done | State machine validation |
-| AC3 | GPSI validation theo pattern `^5[0-9]{8,14}$` | Required field, 400 on invalid |
+| AC3 | GPSI validation theo pattern `^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$` | Required field, 400 on invalid |
 | AC4 | S-NSSAI routing đến đúng AAA config | 3-level match: exact, sst-only, default |
 | AC5 | RADIUS Access-Request chứa 3GPP-S-NSSAI VSA #200 | sst=3 bytes, sd=3 bytes (optional) |
 | AC6 | Idempotent PUT: duplicate request → cached response | Hash(eapMessage) as idempotency key |
