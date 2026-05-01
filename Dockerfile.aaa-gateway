@@ -8,21 +8,21 @@
 # - Uses Redis for session correlation and response routing
 #
 # Stage 1: Build
-FROM golang:1.25-alpine AS builder
+# FROM golang:1.25-alpine AS builder
 
-RUN apk add --no-cache git ca-certificates
+# RUN apk add --no-cache git ca-certificates
 
-WORKDIR /build
+# WORKDIR /build
 
-COPY go.mod go.sum ./
-COPY oapi-gen/ oapi-gen/
-RUN go mod download
+# COPY go.mod go.sum ./
+# COPY oapi-gen/ oapi-gen/
+# RUN go mod download
 
-COPY . .
+# COPY . .
 
-RUN CGO_ENABLED=0 go build \
-    -ldflags="-s -w" \
-    -o aaa-gateway ./cmd/aaa-gateway/
+# RUN CGO_ENABLED=0 go build \
+#     -ldflags="-s -w" \
+#     -o aaa-gateway ./cmd/aaa-gateway/
 
 # Stage 2: Runtime
 FROM alpine:3.19 AS runtime
@@ -33,8 +33,10 @@ RUN adduser -D -g '' appuser
 
 WORKDIR /app
 
-COPY --from=builder /build/aaa-gateway .
-COPY --from=builder /build/compose/configs/aaa-gateway.yaml /etc/nssAAF/aaa-gateway.yaml
+# COPY --from=builder /build/aaa-gateway .
+# COPY --from=builder /build/compose/configs/aaa-gateway.yaml /etc/nssAAF/aaa-gateway.yaml
+COPY bin/aaa-gateway .
+COPY compose/configs/aaa-gateway.yaml /etc/nssAAF/aaa-gateway.yaml
 
 RUN chown -R appuser:appuser /app
 

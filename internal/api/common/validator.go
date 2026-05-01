@@ -11,10 +11,10 @@ import (
 
 var (
 	// GPSI pattern per TS 29.571 §5.2.2:
-	// Pattern: '^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$'
-	// Supports MSISDN-based, External Identifier-based, and catch-all formats
+	// - MSISDN-based: msisdn-{5-15 digits}
+	// - External Identifier: extid-{id}@{realm}
 	// Spec: TS 29.571 §5.2.2
-	gpsiRegex = regexp.MustCompile(`^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$`)
+	gpsiRegex = regexp.MustCompile(`^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+)$`)
 	// SUPI pattern per TS 29.571 §5.4.4.2:
 	// 'imsi-' prefix (IMSI = Identity Mobile Subscriber Identifier)
 	// followed by 5-15 digits (IMSI format: MCC + MNC + MSIN)
@@ -34,7 +34,7 @@ func ValidateGPSI(gpsi string) error {
 		return ValidationProblem("gpsi", "GPSI is required")
 	}
 	if !gpsiRegex.MatchString(gpsi) {
-		return ValidationProblem("gpsi", "must match pattern ^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$ (TS 29.571 §5.2.2)")
+		return ValidationProblem("gpsi", "must match pattern ^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+)$ (TS 29.571 §5.2.2)")
 	}
 	return nil
 }

@@ -7,22 +7,22 @@
 # - HTTP communication with AAA Gateway
 #
 # Stage 1: Build
-FROM golang:1.25-alpine AS builder
+# FROM golang:1.25-alpine AS builder
 
-RUN apk add --no-cache git ca-certificates
+# RUN apk add --no-cache git ca-certificates
 
-WORKDIR /build
+# WORKDIR /build
 
-COPY go.mod go.sum ./
-COPY oapi-gen/ oapi-gen/
-RUN go mod download
+# COPY go.mod go.sum ./
+# COPY oapi-gen/ oapi-gen/
+# RUN go mod download
 
-COPY . .
+# COPY . .
 
-# Build with symbol table and DWARF stripped for smaller size
-RUN CGO_ENABLED=0 go build \
-    -ldflags="-s -w" \
-    -o biz ./cmd/biz/
+# # Build with symbol table and DWARF stripped for smaller size
+# RUN CGO_ENABLED=0 go build \
+#     -ldflags="-s -w" \
+#     -o biz ./cmd/biz/
 
 # Stage 2: Runtime
 FROM alpine:3.19 AS runtime
@@ -35,8 +35,10 @@ RUN adduser -D -g '' appuser
 WORKDIR /app
 
 # Copy binary and configs from builder
-COPY --from=builder /build/biz .
-COPY --from=builder /build/compose/configs/biz.yaml /etc/nssAAF/biz.yaml
+# COPY --from=builder /build/biz .
+# COPY --from=builder /build/compose/configs/biz.yaml /etc/nssAAF/biz.yaml
+COPY bin/biz .
+COPY compose/configs/biz.yaml /etc/nssAAF/biz.yaml
 
 RUN chown -R appuser:appuser /app
 

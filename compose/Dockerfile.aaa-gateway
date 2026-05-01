@@ -1,16 +1,17 @@
 # Build stage: compile the aaa-gateway binary.
-FROM golang:1.25-alpine AS builder
-WORKDIR /src
-COPY go.mod go.sum ./
-COPY oapi-gen/ oapi-gen/
-RUN go mod download
-COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/aaa-gateway ./cmd/aaa-gateway
+# FROM golang:1.25-alpine AS builder
+# WORKDIR /src
+# COPY go.mod go.sum ./
+# COPY oapi-gen/ oapi-gen/
+# RUN go mod download
+# COPY . .
+# RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/aaa-gateway ./cmd/aaa-gateway
 
 # Runtime stage.
 FROM alpine:3.19
 RUN apk add --no-cache ca-certificates
-COPY --from=builder /bin/aaa-gateway /bin/aaa-gateway
+# COPY --from=builder /bin/aaa-gateway /bin/aaa-gateway
+COPY bin/aaa-gateway /bin/aaa-gateway
 COPY configs/ /etc/nssAAF/
 EXPOSE 8080 1812/udp 3868/tcp
 CMD ["/bin/aaa-gateway", "-config", "/etc/nssAAF/aaa-gateway.yaml"]

@@ -1,16 +1,17 @@
 # Build stage: compile the biz binary.
-FROM golang:1.25-alpine AS builder
-WORKDIR /src
-COPY go.mod go.sum ./
-COPY oapi-gen/ oapi-gen/
-RUN go mod download
-COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/biz ./cmd/biz
+# FROM golang:1.25-alpine AS builder
+# WORKDIR /src
+# COPY go.mod go.sum ./
+# COPY oapi-gen/ oapi-gen/
+# RUN go mod download
+# COPY . .
+# RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/biz ./cmd/biz
 
 # Runtime stage.
 FROM alpine:3.19
 RUN apk add --no-cache ca-certificates
-COPY --from=builder /bin/biz /bin/biz
+# COPY --from=builder /bin/biz /bin/biz
+COPY bin/biz /bin/biz
 COPY configs/ /etc/nssAAF/
 EXPOSE 8080
 CMD ["/bin/biz", "-config", "/etc/nssAAF/biz.yaml"]

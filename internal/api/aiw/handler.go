@@ -197,6 +197,7 @@ func (h *Handler) CreateAuthenticationContext(w http.ResponseWriter, r *http.Req
 		AuthCtxID:  authCtxID,
 		Supi:       string(body.Supi),
 		EapPayload: eapPayloadFromPtr(body.EapIdRsp),
+		Status:     "PENDING", // Initial AIW session state per TS 29.526 §7.3
 	}
 
 	if err := h.store.Save(authCtx); err != nil {

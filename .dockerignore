@@ -25,7 +25,7 @@ coverage.html
 .env_local
 
 # Build artifacts
-bin/
+#bin/
 dist/
 
 # Logs

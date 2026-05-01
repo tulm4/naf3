@@ -32,6 +32,8 @@ BINARY_DIR = bin
 BIZ_BINARY = $(BINARY_DIR)/biz
 HTTPGW_BINARY = $(BINARY_DIR)/http-gateway
 AAAGW_BINARY = $(BINARY_DIR)/aaa-gateway
+NRM_BINARY = $(BINARY_DIR)/nrm
+AAASIM_BINARY = $(BINARY_DIR)/aaa-sim
 
 # Linting
 LINTER = golangci-lint
@@ -76,29 +78,43 @@ build: build-all ## Build all 3 component binaries
 	@echo "  biz          → $(BIZ_BINARY)"
 	@echo "  http-gateway → $(HTTPGW_BINARY)"
 	@echo "  aaa-gateway → $(AAAGW_BINARY)"
+	@echo "  nrm → $(NRM_BINARY)"
+	@echo "  aaa-sim → $(AAASIM_BINARY)"
 
-build-all: build-biz build-http-gateway build-aaa-gateway ## Build all 3 binaries
+build-all: build-biz build-http-gateway build-aaa-gateway build-nrm build-aaa-sim ## Build all 3 binaries
 
 .PHONY: build-biz
 build-biz: ## Build Biz Pod binary
 	@echo "$(YELLOW)Building biz...$(NC)"
 	@mkdir -p $(BINARY_DIR)
-	$(GOBUILD) -ldflags="-s -w" -o $(BIZ_BINARY) ./cmd/biz/
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GOBUILD) -ldflags="-s -w" -o $(BIZ_BINARY) ./cmd/biz/
 
 .PHONY: build-http-gateway
 build-http-gateway: ## Build HTTP Gateway binary
 	@echo "$(YELLOW)Building http-gateway...$(NC)"
 	@mkdir -p $(BINARY_DIR)
-	$(GOBUILD) -ldflags="-s -w" -o $(HTTPGW_BINARY) ./cmd/http-gateway/
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GOBUILD) -ldflags="-s -w" -o $(HTTPGW_BINARY) ./cmd/http-gateway/
 
 .PHONY: build-aaa-gateway
 build-aaa-gateway: ## Build AAA Gateway binary
 	@echo "$(YELLOW)Building aaa-gateway...$(NC)"
 	@mkdir -p $(BINARY_DIR)
-	$(GOBUILD) -ldflags="-s -w" -o $(AAAGW_BINARY) ./cmd/aaa-gateway/
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GOBUILD) -ldflags="-s -w" -o $(AAAGW_BINARY) ./cmd/aaa-gateway/
+
+.PHONY: build-nrm
+build-nrm: ## Build NRM binary
+	@echo "$(YELLOW)Building nrm...$(NC)"
+	@mkdir -p $(BINARY_DIR)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GOBUILD) -ldflags="-s -w" -o $(NRM_BINARY) ./cmd/nrm/
+
+.PHONY: build-aaa-sim
+build-aaa-sim: ## Build AAA sim binary
+	@echo "$(YELLOW)Building aaa-sim...$(NC)"
+	@mkdir -p $(BINARY_DIR)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GOBUILD) -ldflags="-s -w" -o $(AAASIM_BINARY) ./cmd/aaa-sim/
 
 .PHONY: build-debug
-build-debug: build-debug-biz build-debug-http-gateway build-debug-aaa-gateway ## Build all with debug symbols
+build-debug: build-debug-biz build-debug-http-gateway build-debug-aaa-gateway build-debug-aaa-sim build-debug-nrm ## Build all with debug symbols
 
 build-debug-biz:
 	$(GOBUILD) -o $(BIZ_BINARY) ./cmd/biz/
@@ -108,6 +124,12 @@ build-debug-http-gateway:
 
 build-debug-aaa-gateway:
 	$(GOBUILD) -o $(AAAGW_BINARY) ./cmd/aaa-gateway/
+
+build-debug-aaa-sim:
+	$(GOBUILD) -o $(AAASIM_BINARY) ./cmd/aaa-sim/
+
+build-debug-nrm:
+	$(GOBUILD) -o $(NRM_BINARY) ./cmd/nrm/
 
 # =============================================================================
 # Test targets

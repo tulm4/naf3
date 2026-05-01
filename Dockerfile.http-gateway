@@ -7,21 +7,21 @@
 # - Handles mutual TLS (mTLS) with AMF
 #
 # Stage 1: Build
-FROM golang:1.25-alpine AS builder
+# FROM golang:1.25-alpine AS builder
 
-RUN apk add --no-cache git ca-certificates
+# RUN apk add --no-cache git ca-certificates
 
-WORKDIR /build
+# WORKDIR /build
 
-COPY go.mod go.sum ./
-COPY oapi-gen/ oapi-gen/
-RUN go mod download
+# COPY go.mod go.sum ./
+# COPY oapi-gen/ oapi-gen/
+# RUN go mod download
 
-COPY . .
+# COPY . .
 
-RUN CGO_ENABLED=0 go build \
-    -ldflags="-s -w" \
-    -o http-gateway ./cmd/http-gateway/
+# RUN CGO_ENABLED=0 go build \
+#     -ldflags="-s -w" \
+#     -o http-gateway ./cmd/http-gateway/
 
 # Stage 2: Runtime
 FROM alpine:3.19 AS runtime
@@ -32,8 +32,10 @@ RUN adduser -D -g '' appuser
 
 WORKDIR /app
 
-COPY --from=builder /build/http-gateway .
-COPY --from=builder /build/compose/configs/http-gateway.yaml /etc/nssAAF/http-gateway.yaml
+# COPY --from=builder /build/http-gateway .
+# COPY --from=builder /build/compose/configs/http-gateway.yaml /etc/nssAAF/http-gateway.yaml
+COPY bin/http-gateway .
+COPY compose/configs/http-gateway.yaml /etc/nssAAF/http-gateway.yaml
 
 RUN chown -R appuser:appuser /app
 
