@@ -65,7 +65,7 @@ X-Request-ID: {uuid}
 **Request Body:**
 ```json
 {
-  "supi": "imu-208046000000001",
+  "supi": "imsi-208046000000001",
   "eapIdRsp": "AG5uZXh0LWlkQHVzZXIuZXhhbXBsZS5jb20=",
   "ttlsInnerMethodContainer": null,
   "supportedFeatures": "3GPP-R18-AIW"
@@ -75,7 +75,7 @@ X-Request-ID: {uuid}
 **Response 201 Created:**
 ```json
 {
-  "supi": "imu-208046000000001",
+  "supi": "imsi-208046000000001",
   "authCtxId": "01fr5xg2e3p4q5r6s7t8u9v0w2",
   "eapMessage": "AG5nZXQtaWQAdXNlckBleGFtcGxlLmNvbQA=",
   "ttlsInnerMethodContainer": null,
@@ -94,7 +94,7 @@ Confirm/advance authentication.
 **Request Body:**
 ```json
 {
-  "supi": "imu-208046000000001",
+  "supi": "imsi-208046000000001",
   "eapMessage": "AG5jaGFsbGVuZ2UAdXNlcjEA",
   "supportedFeatures": "3GPP-R18-AIW"
 }
@@ -103,7 +103,7 @@ Confirm/advance authentication.
 **Response 200 OK (continuing):**
 ```json
 {
-  "supi": "imu-208046000000001",
+  "supi": "imsi-208046000000001",
   "eapMessage": "AG5jaGFsbGVuZ2UAdXNlcjEA",
   "authResult": null,
   "pvsInfo": null,
@@ -115,7 +115,7 @@ Confirm/advance authentication.
 **Response 200 OK (final success):**
 ```json
 {
-  "supi": "imu-208046000000001",
+  "supi": "imsi-208046000000001",
   "eapMessage": "AG5zZXNzaW9uLWtleS1kYXRh",
   "authResult": "EAP_SUCCESS",
   "pvsInfo": [
@@ -132,7 +132,7 @@ Confirm/advance authentication.
 **Response 200 OK (final failure):**
 ```json
 {
-  "supi": "imu-208046000000001",
+  "supi": "imsi-208046000000001",
   "eapMessage": null,
   "authResult": "EAP_FAILURE",
   "pvsInfo": null,
@@ -225,7 +225,7 @@ UE              AUSF              HTTP GW           Biz Pod           AAA GW    
 1. Validate OAuth2 token (scope: `nnssaaf-aiw`)
 2. Parse request body
 3. Extract SUPI from request
-4. Validate SUPI format (`^imu-[0-9]{15}$`)
+4. Validate SUPI format (`^imsi-[0-9]{15}$`)
 5. Forward to NSSAAF
 
 **Biz Pod Actions (NSSAAF):**

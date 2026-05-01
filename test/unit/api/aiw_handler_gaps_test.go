@@ -103,7 +103,7 @@ func TestCreateAuth_InvalidBase64EapIdRsp(t *testing.T) {
 
 	// "not-valid-base64!!!" is not valid base64
 	body := map[string]interface{}{
-		"supi":     "imu-208046000000001",
+		"supi":     "imsi-208046000000001",
 		"eapIdRsp": "not-valid-base64!!!",
 	}
 
@@ -136,7 +136,7 @@ func TestCreateAuth_StoreSaveError(t *testing.T) {
 	h := aiw.NewHandler(store, aiw.WithAPIRoot("https://nssAAF.example.com"))
 
 	body := map[string]interface{}{
-		"supi": "imu-208046000000001",
+		"supi": "imsi-208046000000001",
 	}
 
 	rec := doRequestAIW(h, http.MethodPost, "/nnssaaf-aiw/v1/authentications", body)
@@ -179,7 +179,7 @@ func TestConfirmAuth_SessionNotFound(t *testing.T) {
 	h := aiw.NewHandler(store, aiw.WithAPIRoot("https://nssAAF.example.com"))
 
 	body := map[string]interface{}{
-		"supi":       "imu-208046000000001",
+		"supi":       "imsi-208046000000001",
 		"eapMessage": "dGVzdA==",
 	}
 
@@ -194,13 +194,13 @@ func TestConfirmAuth_SupiMismatchInBody(t *testing.T) {
 	store := newMockStoreAIW()
 	store.data["ctx-supi"] = &aiw.AuthContext{
 		AuthCtxID: "ctx-supi",
-		Supi:      "imu-208046000000001",
+		Supi:      "imsi-208046000000001",
 	}
 	h := aiw.NewHandler(store, aiw.WithAPIRoot("https://nssAAF.example.com"))
 
 	// SUPI in body does not match stored SUPI
 	body := map[string]interface{}{
-		"supi":       "imu-999999999999999",
+		"supi":       "imsi-999999999999999",
 		"eapMessage": "dGVzdA==",
 	}
 
@@ -216,12 +216,12 @@ func TestConfirmAuth_InvalidBase64EapMessage(t *testing.T) {
 	store := newMockStoreAIW()
 	store.data["ctx-eap-valid"] = &aiw.AuthContext{
 		AuthCtxID: "ctx-eap-valid",
-		Supi:      "imu-208046000000001",
+		Supi:      "imsi-208046000000001",
 	}
 	h := aiw.NewHandler(store, aiw.WithAPIRoot("https://nssAAF.example.com"))
 
 	body := map[string]interface{}{
-		"supi":       "imu-208046000000001",
+		"supi":       "imsi-208046000000001",
 		"eapMessage": "!!!invalid-base64!!!",
 	}
 
@@ -236,12 +236,12 @@ func TestConfirmAuth_MissingEapMessage(t *testing.T) {
 	store := newMockStoreAIW()
 	store.data["ctx-missing-eap"] = &aiw.AuthContext{
 		AuthCtxID: "ctx-missing-eap",
-		Supi:      "imu-208046000000001",
+		Supi:      "imsi-208046000000001",
 	}
 	h := aiw.NewHandler(store, aiw.WithAPIRoot("https://nssAAF.example.com"))
 
 	body := map[string]interface{}{
-		"supi": "imu-208046000000001",
+		"supi": "imsi-208046000000001",
 		// eapMessage missing
 	}
 
@@ -257,7 +257,7 @@ func TestConfirmAuth_StoreLoadError(t *testing.T) {
 	h := aiw.NewHandler(store, aiw.WithAPIRoot("https://nssAAF.example.com"))
 
 	body := map[string]interface{}{
-		"supi":       "imu-208046000000001",
+		"supi":       "imsi-208046000000001",
 		"eapMessage": "dGVzdA==",
 	}
 
@@ -272,13 +272,13 @@ func TestConfirmAuth_StoreSaveError(t *testing.T) {
 	store := newMockStoreAIW()
 	store.data["ctx-save-err"] = &aiw.AuthContext{
 		AuthCtxID: "ctx-save-err",
-		Supi:      "imu-208046000000001",
+		Supi:      "imsi-208046000000001",
 	}
 	store.saveErr = errors.New("redis write failed")
 	h := aiw.NewHandler(store, aiw.WithAPIRoot("https://nssAAF.example.com"))
 
 	body := map[string]interface{}{
-		"supi":       "imu-208046000000001",
+		"supi":       "imsi-208046000000001",
 		"eapMessage": "dGVzdA==",
 	}
 
@@ -292,7 +292,7 @@ func TestConfirmAuth_InvalidJSON(t *testing.T) {
 	store := newMockStoreAIW()
 	store.data["ctx-json-err"] = &aiw.AuthContext{
 		AuthCtxID: "ctx-json-err",
-		Supi:      "imu-208046000000001",
+		Supi:      "imsi-208046000000001",
 	}
 	h := aiw.NewHandler(store, aiw.WithAPIRoot("https://nssAAF.example.com"))
 
@@ -314,7 +314,7 @@ func TestConfirmAuth_AuthCtxIDInvalid(t *testing.T) {
 	h := aiw.NewHandler(store, aiw.WithAPIRoot("https://nssAAF.example.com"))
 
 	body := map[string]interface{}{
-		"supi":       "imu-208046000000001",
+		"supi":       "imsi-208046000000001",
 		"eapMessage": "dGVzdA==",
 	}
 

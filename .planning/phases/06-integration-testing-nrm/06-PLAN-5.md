@@ -184,7 +184,7 @@ Create `test/e2e/revocation_test.go` — AAA-S triggered revocation E2E:
 Create `test/e2e/aiw_flow_test.go` — full AIW E2E tests using the harness:
 - `TestE2E_AIW_BasicFlow` — AUSF mock → HTTP GW → Biz Pod → AAA GW → AAA-S → success
   1. Start full harness + AUSF mock (`Harness.StartAUSFMock()`)
-  2. POST to HTTP GW (N60 API) with valid SUPI (`imu-208046000000001`), eapIdRsp
+  2. POST to HTTP GW (N60 API) with valid SUPI (`imsi-208046000000001`), eapIdRsp
   3. Verify 201 response, Location header, authCtxId
   4. PUT confirm (EAP-TLS handshake rounds)
   5. Verify 200 response with EAP-Message or authResult
@@ -202,9 +202,9 @@ Create `test/e2e/aiw_flow_test.go` — full AIW E2E tests using the harness:
 - `TestE2E_AIW_InvalidSupi` — invalid SUPI format → HTTP 400, cause=INVALID_SUPI
   1. Send AIW auth request with SUPI="invalid-supi-format"
   2. Verify 400 Bad Request, ProblemDetails.cause=INVALID_SUPI
-  3. SUPI must match `^imu-[0-9]{15}$`
+  3. SUPI must match `^imsi-[0-9]{15}$`
 - `TestE2E_AIW_AAA_NotConfigured` — SUPI range with no AAA config → HTTP 404
-  1. Send AIW auth with SUPI in unconfigured range (`imu-999999999999999`)
+  1. Send AIW auth with SUPI in unconfigured range (`imsi-999999999999999`)
   2. Verify 404 Not Found, ProblemDetails.cause=AAA_SERVER_NOT_CONFIGURED
 - `TestE2E_AIW_TTLS` — EAP-TTLS with inner PAP method, PVSInfo returned
   1. Configure AAA-S mode: EAP_TTLS with inner PAP
@@ -283,7 +283,7 @@ GetSliceAuthenticationContext (TC-NSSAA-030 to TC-NSSAA-032):
 - TC-AIW-02: MSKReturnedOnSuccess — EAP_SUCCESS → 200 with 64-octet MSK in body (RFC 5216 §2.1.4)
 - TC-AIW-03: PVSInfoReturned — EAP_SUCCESS → PvsInfo array present in response
 - TC-AIW-04: EAPFailureInBody — EAP_FAILURE → 200 OK with authResult=EAP_FAILURE in body (not HTTP 403)
-- TC-AIW-05: InvalidSupiRejected — SUPI not matching `^imu-[0-9]{15}$` → 400 Bad Request
+- TC-AIW-05: InvalidSupiRejected — SUPI not matching `^imsi-[0-9]{15}$` → 400 Bad Request
 - TC-AIW-06: AAA_NotConfigured — no AAA server for SUPI range → 404 Not Found
 - TC-AIW-07: MultiRoundChallenge — multi-step EAP-TLS handshake → final authResult
 - TC-AIW-08: SupportedFeaturesEcho — N60 SupportedFeatures echoed in response headers

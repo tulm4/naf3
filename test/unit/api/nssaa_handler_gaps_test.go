@@ -364,7 +364,7 @@ func TestCreateSliceAuth_MissingSnssai(t *testing.T) {
 
 	body := map[string]interface{}{
 		"gpsi":     "520804600000001",
-		"supi":    "imu-208930000000001",
+		"supi":    "imsi-208930000000001",
 		"supiKind": "SUCI",
 		"eapIdRsp": "dGVzdA==",
 		// snssai missing
@@ -459,7 +459,7 @@ func TestCreateSliceAuth_EmptySnssai(t *testing.T) {
 	body := map[string]interface{}{
 		"gpsi":      "520804600000001",
 		"snssai":    map[string]interface{}{},
-		"supi":      "imu-208930000000001",
+		"supi":      "imsi-208930000000001",
 		"supiKind":  "SUCI",
 		"eapIdRsp":  "dGVzdA==",
 	}

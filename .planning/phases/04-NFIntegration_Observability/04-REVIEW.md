@@ -76,14 +76,14 @@ g.radiusHandler = &RadiusHandler{
 ### WR-01: SUPI bounds check in `extractPLMNFromSupi` causes panic on short SUPI
 
 **File:** `internal/udm/udm.go:136-141`
-**Issue:** The bounds check `if len(supi) >= 10` is insufficient. If `len(supi)` is between 4 and 9 (inclusive), `supi[4:10]` will panic with an index-out-of-range error. The comment says SUPI format is `imu-{mcc}{mnc}{rest}`, which requires at least 10 characters, but no validation exists upstream to enforce this before calling `extractPLMNFromSupi`.
+**Issue:** The bounds check `if len(supi) >= 10` is insufficient. If `len(supi)` is between 4 and 9 (inclusive), `supi[4:10]` will panic with an index-out-of-range error. The comment says SUPI format is `imsi-{mcc}{mnc}{rest}`, which requires at least 10 characters, but no validation exists upstream to enforce this before calling `extractPLMNFromSupi`.
 
 ```134:141:internal/udm/udm.go
-// extractPLMNFromSupi extracts PLMN from SUPI format: imu-{mcc}{mnc}{rest}.
-// e.g. imu-208001000000000 → "208001"
+// extractPLMNFromSupi extracts PLMN from SUPI format: imsi-{mcc}{mnc}{rest}.
+// e.g. imsi-208001000000000 → "208001"
 func extractPLMNFromSupi(supi string) string {
 	if len(supi) >= 10 {
-		return supi[4:10] // "imu-" = 4 chars, next 6 = MCC+MNC
+		return supi[4:10] // "imsi-" = 4 chars, next 6 = MCC+MNC
 	}
 	return "208001" // default PLMN
 }
@@ -100,7 +100,7 @@ func extractPLMNFromSupi(supi string) string {
 }
 ```
 
-Alternatively, validate SUPI format upstream (e.g., via regex `^imu-[0-9]{15}$`) before calling this function, and document the assumption.
+Alternatively, validate SUPI format upstream (e.g., via regex `^imsi-[0-9]{15}$`) before calling this function, and document the assumption.
 
 ---
 

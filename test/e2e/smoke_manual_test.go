@@ -364,7 +364,7 @@ func TestE2E_05_AIW_CreateSession(t *testing.T) {
 	skipIfServicesNotUp(t)
 
 	body := map[string]interface{}{
-		"supi":     "imu-208046000000001",
+		"supi":     "imsi-208046000000001",
 		"eapIdRsp": "dGVzdA==",
 	}
 

@@ -34,7 +34,7 @@ Nnssaaf_AIW is the service used by AUSF for SNPN (Standalone Non-Public Network)
 - AUSF determines that AAA-based authentication is required (vs 5G-AKA)
 - UE does not have 3GPP subscription credentials; uses enterprise credentials instead
 
-**Precondition:** UE has SUPI (imu-scheme). AUSF holds SUPI from SIDF or UE context.
+**Precondition:** UE has SUPI (imsi-scheme). AUSF holds SUPI from SIDF or UE context.
 
 ### Step-by-Step Flow
 
@@ -112,7 +112,7 @@ Step N+4: If EAP-Success:
 ### Key Points
 
 - AUSF is the EAP passthrough peer; NSSAAF is the EAP authenticator backend
-- SUPI (imu-scheme) is mandatory for AIW, not GPSI
+- SUPI (imsi-scheme) is mandatory for AIW, not GPSI
 - MSK derivation: `MSK = TLS-Exporter("EAP-TLS MSK", 64)` (RFC 5216 §2.1.4)
 - MSK is forwarded via Nnssaaf_AIW response to AUSF (unique to AIW; not done in NSSAA)
 - pvsInfo (Privacy-Violating Servers) is returned only on EAP-Success (TS 29.526 §7.3.3)
@@ -132,7 +132,7 @@ Step N+4: If EAP-Success:
 
 | Field | Required | Validation | 3GPP Cause |
 |-------|----------|-----------|-----------|
-| supi | M | `^imu-[0-9]{15}$` | INVALID_SUPI |
+| supi | M | `^imsi-[0-9]{15}$` | INVALID_SUPI |
 | eapIdRsp | O | Base64-encoded EAP Response | INVALID_EAP_MESSAGE |
 | ttlsInnerMethodContainer | O | Base64-encoded | INVALID_PAYLOAD |
 | supportedFeatures | O | Non-empty string | INVALID_FEATURES |
@@ -203,7 +203,7 @@ POST {apiRoot}/nnssaaf-aiw/v1/authentications
 
 Request:
 {
-  "supi": "imu-208046000000001",
+  "supi": "imsi-208046000000001",
   "eapIdRsp": null,          // null on initial request
   "ttlsInnerMethodContainer": null,
   "supportedFeatures": "3GPP-R18-AIW"
@@ -211,7 +211,7 @@ Request:
 
 Response 201 Created:
 {
-  "supi": "imu-208046000000001",
+  "supi": "imsi-208046000000001",
   "authCtxId": "01fr5xg2e3p4q5r6s7t8u9v0w2",
   "eapMessage": "<Base64 EAP Identity Request>",
   "ttlsInnerMethodContainer": null,

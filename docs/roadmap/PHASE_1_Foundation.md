@@ -138,7 +138,7 @@ PUT /nnssaaf-aiw/v1/authentications/{authCtxId}
 |------|-------|
 | `snssai.go` | `Snssai`, `SnssaiFromJSON()`, validation, `Key()`, `Equal()` |
 | `gpsi.go` | `Gpsi`, validation with `^5-?[0-9]{8,14}$` pattern, `Normalize()` |
-| `supi.go` | `Supi`, validation with `^imu-[0-9]{15}$` pattern, `IMSI()` |
+| `supi.go` | `Supi`, validation with `^imsi-[0-9]{15}$` pattern, `IMSI()` |
 | `eap.go` | `EapCode`, `EapMethod`, `EapMessage` with Base64 validation |
 | `nssaa_status.go` | `NssaaStatus`, `AuthResult`, `NotificationType` constants |
 | `nssaa_error.go` | `ValidationError`, `NssaaError`, cause codes, sentinel errors |
@@ -182,7 +182,7 @@ Wires the chi router, applies global middleware, handles graceful shutdown.
 - [x] `go build ./cmd/nssAAF/... ./internal/api/... ./internal/types/... ./internal/config/...`
 - [x] `go test ./internal/api/nssaa/... ./internal/api/aiw/... ./internal/api/common/... ./internal/types/... ./internal/config/...`
 - [x] GPSI regex: `^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$` (from TS 29.571 §5.2.2)
-- [x] SUPI regex: `^imu-[0-9]{15}$` (from TS 29.571 §5.4.4.2)
+- [x] SUPI regex: `^imsi-[0-9]{15}$` (from TS 29.571 §5.4.4.2)
 - [x] Snssai SST range: 0-255
 - [x] Snssai SD format: 6 hex chars
 - [x] ProblemDetails (RFC 7807) for all error responses

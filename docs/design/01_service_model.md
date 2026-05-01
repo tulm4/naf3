@@ -263,7 +263,7 @@ POST /nnrf-disc/v1/nf-instances
   "nsiList": ["nsi-001", "nsi-002"],
   "nff信息": [...],
   "nssaaInfo": {
-    "supiRanges": [{ "start": "imu-208001000000000", "end": "imu-208001000099999" }],
+    "supiRanges": [{ "start": "imsi-208001000000000", "end": "imsi-208001000099999" }],
     "supportedSecurityAlgorithm": ["EAP-TLS", "EAP-TTLS"]
   },
   "nfServices": [
@@ -970,9 +970,9 @@ nfServices:
 # NSSAAF-specific info (per TS 28.541 §5.3.146)
 nssaaInfo:
   supiRanges:
-    - start: "imu-208001000000000"
-      end:   "imu-208001099999999"
-      pattern: "^imu-208001[0-9]{8}$"
+    - start: "imsi-208001000000000"
+      end:   "imsi-208001099999999"
+      pattern: "^imsi-208001[0-9]{8}$"
   internalGroupIdentifiersRanges:
     - start: "group-001"
       end:   "group-999"

@@ -23,7 +23,7 @@ The current `24_test_strategy.md` §5 E2E section only covers NSSAA flows (N58 i
 | Aspect | NSSAA (§5.2) | AIW (to add) |
 |--------|--------------|--------------|
 | Consumer NF | AMF (gRPC mock) | AUSF (HTTP mock) |
-| Subscriber ID | GPSI (`5-{digits}`) | SUPI (`imu-{digits}`) |
+| Subscriber ID | GPSI (`5-{digits}`) | SUPI (`imsi-{digits}`) |
 | Interface | N58 | N60 |
 | MSK output | Not in scope | **Required** (64-byte, base64) |
 | PVS Info | Not in scope | **Required** (optional array) |
@@ -246,7 +246,7 @@ func TestE2E_AIW_Flow(t *testing.T) {
 
     // AUSF initiates AIW authentication
     ctx := &Nnssaaf_AIW_Authenticate_Request{
-        Supi:    "imu-208046000000001",
+        Supi:    "imsi-208046000000001",
         EapIdRsp: EncodeEAPIdentityResponse("user@example.com"),
     }
 

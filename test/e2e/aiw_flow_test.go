@@ -31,7 +31,7 @@ func TestE2E_AIW_BasicFlow(t *testing.T) {
 
 	// 1. Create authentication context via HTTP GW (N60 API).
 	body := map[string]interface{}{
-		"supi":     "imu-208046000000001",
+		"supi":     "imsi-208046000000001",
 		"eapIdRsp": "dGVzdA==",
 	}
 	payloadBytes, _ := json.Marshal(body)
@@ -67,7 +67,7 @@ func TestE2E_AIW_BasicFlow(t *testing.T) {
 
 	// 2. Confirm authentication with EAP message via Biz Pod direct URL.
 	confirmBody := map[string]interface{}{
-		"supi":       "imu-208046000000001",
+		"supi":       "imsi-208046000000001",
 		"eapMessage": "dGVzdA==",
 	}
 	confirmBytes, _ := json.Marshal(confirmBody)
@@ -112,7 +112,7 @@ func TestE2E_AIW_EAPFailure(t *testing.T) {
 
 	// 1. Create session.
 	body := map[string]interface{}{
-		"supi":     "imu-208046000000001",
+		"supi":     "imsi-208046000000001",
 		"eapIdRsp": "dGVzdA==",
 	}
 	payloadBytes, _ := json.Marshal(body)
@@ -135,7 +135,7 @@ func TestE2E_AIW_EAPFailure(t *testing.T) {
 
 	// 2. Confirm with EAP-Failure mode via Biz Pod direct URL.
 	confirmBody := map[string]interface{}{
-		"supi":       "imu-208046000000001",
+		"supi":       "imsi-208046000000001",
 		"eapMessage": "dGVzdA==",
 	}
 	confirmBytes, _ := json.Marshal(confirmBody)
@@ -163,7 +163,7 @@ func TestE2E_AIW_EAPFailure(t *testing.T) {
 }
 
 // TestE2E_AIW_InvalidSupi verifies that an invalid SUPI format returns HTTP 400.
-// Spec: TS 29.526 §7.3, TS 29.571 §5.4.4.2 (SUPI regex: ^imu-[0-9]{15}$)
+// Spec: TS 29.526 §7.3, TS 29.571 §5.4.4.2 (SUPI regex: ^imsi-[0-9]{15}$)
 func TestE2E_AIW_InvalidSupi(t *testing.T) {
 	if testing.Short() {
 		t.Skip("E2E tests skipped in short mode")
@@ -238,7 +238,7 @@ func TestE2E_AIW_TTLS(t *testing.T) {
 
 	// Use ttlsInnerMethodContainer field.
 	body := map[string]interface{}{
-		"supi":                     "imu-208046000000001",
+		"supi":                     "imsi-208046000000001",
 		"eapIdRsp":                 "dGVzdA==",
 		"ttlsInnerMethodContainer": "aGVsbG8=", // base64 "hello" (PAP username/password placeholder)
 	}

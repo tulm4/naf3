@@ -15,7 +15,7 @@ BEGIN;
 CREATE TABLE IF NOT EXISTS aiw_auth_sessions (
     auth_ctx_id        VARCHAR(64) NOT NULL,
 
-    -- Subscriber identification (TS 29.571 — SUPI, imu-scheme)
+    -- Subscriber identification (TS 29.571 — SUPI, imsi-scheme)
     -- Stored encrypted (AES-256-GCM), base64-encoded ciphertext in TEXT column
     supi               TEXT NOT NULL,
     supi_hash          VARCHAR(32),  -- SHA-256(supi) for lookups

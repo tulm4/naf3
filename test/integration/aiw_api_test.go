@@ -106,7 +106,7 @@ func TestIntegration_AIW_CreateSession(t *testing.T) {
 	router := aiwRouter(store)
 
 	body := map[string]interface{}{
-		"supi":     "imu-208046000000001",
+		"supi":     "imsi-208046000000001",
 		"eapIdRsp": "dXNlcgBleGFtcGxlLmNvbQ==",
 	}
 
@@ -119,7 +119,7 @@ func TestIntegration_AIW_CreateSession(t *testing.T) {
 
 	var resp aiwnats.AuthContext
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	assert.Equal(t, "imu-208046000000001", string(resp.Supi))
+	assert.Equal(t, "imsi-208046000000001", string(resp.Supi))
 	assert.NotEmpty(t, resp.AuthCtxId)
 }
 
@@ -137,7 +137,7 @@ func TestIntegration_AIW_ConfirmSession(t *testing.T) {
 
 	// Create session first.
 	createBody := map[string]interface{}{
-		"supi":     "imu-208046000000002",
+		"supi":     "imsi-208046000000002",
 		"eapIdRsp": "dXNlcjI=",
 	}
 	rec := doAIWRequest(router, http.MethodPost, "/nnssaaf-aiw/v1/authentications", createBody)
@@ -147,7 +147,7 @@ func TestIntegration_AIW_ConfirmSession(t *testing.T) {
 
 	// Confirm session.
 	confirmBody := map[string]interface{}{
-		"supi":       "imu-208046000000002",
+		"supi":       "imsi-208046000000002",
 		"eapMessage": "dGVzdA==",
 	}
 	path := "/nnssaaf-aiw/v1/authentications/" + createResp.AuthCtxId
@@ -158,7 +158,7 @@ func TestIntegration_AIW_ConfirmSession(t *testing.T) {
 
 	var confirmResp aiwnats.AuthConfirmationResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &confirmResp))
-	assert.Equal(t, "imu-208046000000002", string(confirmResp.Supi))
+	assert.Equal(t, "imsi-208046000000002", string(confirmResp.Supi))
 }
 
 // ─── Test: GetSession via store ─────────────────────────────────────────────
@@ -176,7 +176,7 @@ func TestIntegration_AIW_GetSession(t *testing.T) {
 
 	// Create a session via the handler.
 	createBody := map[string]interface{}{
-		"supi":     "imu-208046000000003",
+		"supi":     "imsi-208046000000003",
 		"eapIdRsp": "dXNlcjM=",
 	}
 	rec := doAIWRequest(router, http.MethodPost, "/nnssaaf-aiw/v1/authentications", createBody)
@@ -187,7 +187,7 @@ func TestIntegration_AIW_GetSession(t *testing.T) {
 	// GET the session via store (GET handler not implemented in Phase 1).
 	loaded, err := pgStore.Load(createResp.AuthCtxId)
 	require.NoError(t, err)
-	assert.Equal(t, "imu-208046000000003", loaded.Supi)
+	assert.Equal(t, "imsi-208046000000003", loaded.Supi)
 }
 
 // ─── Test: GetSession → 404 NotFound ───────────────────────────────────────
@@ -223,7 +223,7 @@ func TestIntegration_AIW_SessionInRedis(t *testing.T) {
 	router := aiwRouter(store)
 
 	body := map[string]interface{}{
-		"supi":     "imu-208046000000004",
+		"supi":     "imsi-208046000000004",
 		"eapIdRsp": "dXNlcjQ=",
 	}
 	rec := doAIWRequest(router, http.MethodPost, "/nnssaaf-aiw/v1/authentications", body)
@@ -234,7 +234,7 @@ func TestIntegration_AIW_SessionInRedis(t *testing.T) {
 	// Verify session exists in PostgreSQL.
 	loaded, err := pgStore.Load(resp.AuthCtxId)
 	require.NoError(t, err)
-	assert.Equal(t, "imu-208046000000004", loaded.Supi)
+	assert.Equal(t, "imsi-208046000000004", loaded.Supi)
 }
 
 // ─── Test: Invalid SUPI → 400 ─────────────────────────────────────────────
@@ -276,9 +276,9 @@ func TestIntegration_AIW_SupiMismatch(t *testing.T) {
 	store := &aiwStoreWithCache{pg: postgres.NewAIWSessionStore(pool, enc)}
 	router := aiwRouter(store)
 
-	// Create session with SUPI imu-208046000000005.
+	// Create session with SUPI imsi-208046000000005.
 	createBody := map[string]interface{}{
-		"supi":     "imu-208046000000005",
+		"supi":     "imsi-208046000000005",
 		"eapIdRsp": "dXNlcjU=",
 	}
 	rec := doAIWRequest(router, http.MethodPost, "/nnssaaf-aiw/v1/authentications", createBody)
@@ -288,7 +288,7 @@ func TestIntegration_AIW_SupiMismatch(t *testing.T) {
 
 	// Confirm with a different SUPI.
 	confirmBody := map[string]interface{}{
-		"supi":       "imu-999999999999999", // different SUPI
+		"supi":       "imsi-999999999999999", // different SUPI
 		"eapMessage": "dGVzdA==",
 	}
 	path := "/nnssaaf-aiw/v1/authentications/" + createResp.AuthCtxId
@@ -317,9 +317,9 @@ func TestIntegration_AIW_ConcurrentSessions(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			// SUPI pattern: ^imu-[0-9]{15}$ (exactly 15 digits after "imu-").
+			// SUPI pattern: ^imsi-[0-9]{15}$ (exactly 15 digits after "imsi-").
 			// "208" (3 digits) + 12 zero-padded digits = 15 total digits.
-			supi := fmt.Sprintf("imu-208%012d", idx)
+			supi := fmt.Sprintf("imsi-208%012d", idx)
 			body := map[string]interface{}{
 				"supi":     supi,
 				"eapIdRsp": "dGVzdA==",

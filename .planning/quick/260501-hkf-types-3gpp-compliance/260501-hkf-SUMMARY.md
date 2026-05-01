@@ -50,7 +50,7 @@ Pattern: '^(imsi-[0-9]{5,15}|nai-.+|gci-.+|gli-.+|.+)$'
 
 **Previous (INCORRECT - contained typo):**
 ```go
-var supiIMSIRegex = regexp.MustCompile(`^imu-[0-9]{15}$`)
+var supiIMSIRegex = regexp.MustCompile(`^imsi-[0-9]{15}$`)
 ```
 
 **Fixed:**
@@ -59,7 +59,7 @@ var supiIMSIRegex = regexp.MustCompile(`^imsi-[0-9]{5,15}$`)
 ```
 
 **Issues Fixed:**
-1. **Typo**: `imu-` → `imsi-` (was missing 's')
+1. **Typo**: `imsi-` → `imsi-` (was missing 's')
 2. **Length**: Fixed to allow 5-15 digits per spec (was only 15)
 
 ### 3. S-NSSAI — Already Correct ✅
@@ -74,7 +74,7 @@ SST range 0-255 and SD format (6 hex chars) are compliant.
 | File | Change |
 |------|--------|
 | `internal/types/gpsi.go` | Updated GPSI regex to match TS 29.571 §5.2.2 |
-| `internal/types/supi.go` | Fixed SUPI regex typo: `imu-` → `imsi-`, length: `15` → `5,15` |
+| `internal/types/supi.go` | Fixed SUPI regex typo: `imsi-` → `imsi-`, length: `15` → `5,15` |
 | `internal/api/common/validator.go` | Fixed SUPI regex typo and length |
 | `internal/types/types_test.go` | Updated GPSI and SUPI validation tests |
 | `internal/api/common/common_test.go` | Updated SUPI validation tests |

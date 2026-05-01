@@ -84,7 +84,7 @@ Primary 5G subscription identifier.
 ```yaml
 Supi:
   type: string
-  pattern: '^imu-[0-9]{15}$'
+  pattern: '^imsi-[0-9]{15}$'
   description: Permanent identifier assigned to the subscription
 ```
 

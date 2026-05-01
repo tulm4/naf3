@@ -130,7 +130,7 @@ var (
 
 	ErrInvalidSupi = &ValidationError{
 		Field:      "supi",
-		Reason:     "SUPI must match pattern ^imu-[0-9]{15}$ (TS 29.571 §5.4.4.2)",
+		Reason:     "SUPI must match pattern ^imsi-[0-9]{5,15}$ (TS 29.571 §5.4.4.2)",
 		HTTPStatus: http.StatusBadRequest,
 		Cause:      CauseInvalidSupi,
 	}

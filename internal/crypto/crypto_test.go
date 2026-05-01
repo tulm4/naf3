@@ -161,7 +161,7 @@ func TestHashGPSI(t *testing.T) {
 }
 
 func TestHashSUPI(t *testing.T) {
-	supi := "imu-123456789012345"
+	supi := "imsi-123456789012345"
 	h1 := HashSUPI(supi)
 	h2 := HashSUPI(supi)
 

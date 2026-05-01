@@ -187,7 +187,7 @@ func TestSupiValidate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "invalid prefix (old typo imu-)",
+			name:    "invalid prefix (imu-)",
 			supi:    Supi("imu-208046000000001"),
 			wantErr: true,
 		},

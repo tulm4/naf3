@@ -473,8 +473,8 @@ CREATE INDEX idx_supi_ranges_aiw
 CREATE TABLE aiw_auth_sessions (
     auth_ctx_id        VARCHAR(64) NOT NULL,
 
-    -- Subscriber identification (TS 29.571 — SUPI, imu-scheme)
-    supi               VARCHAR(32) NOT NULL,  -- pattern: ^imu-[0-9]{15}$
+    -- Subscriber identification (TS 29.571 — SUPI, imsi-scheme)
+    supi               VARCHAR(32) NOT NULL,  -- pattern: ^imsi-[0-9]{15}$
 
     -- AAA configuration reference
     aaa_config_id      UUID NOT NULL REFERENCES aaa_server_configs(id),
@@ -870,7 +870,7 @@ func HashGpsi(gpsi string) string {
 
 ### 6.3 SUPI Privacy
 
-SUPI (imu-scheme) cũng không bao giờ được lưu plaintext trong audit log hoặc logs. Sử dụng cùng hash scheme như GPSI:
+SUPI (imsi-scheme) cũng không bao giờ được lưu plaintext trong audit log hoặc logs. Sử dụng cùng hash scheme như GPSI:
 
 ```go
 // SUPI hashed with SHA-256, truncated to first 16 bytes

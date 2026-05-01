@@ -46,7 +46,7 @@ Pattern: '^(imsi-[0-9]{5,15}|nai-.+|gci-.+|gli-.+|.+)$'
 
 **Current Code:**
 ```go
-var supiIMSIRegex = regexp.MustCompile(`^imu-[0-9]{15}$`)
+var supiIMSIRegex = regexp.MustCompile(`^imsi-[0-9]{15}$`)
 ```
 
 **Issue:** Code only accepts IMSI-based SUPI. The spec allows multiple formats, but for NSSAAF use case, IMSI-based SUPI is acceptable. However, the regex allows 5-15 digits while spec says 5-15. The current `15` is correct for this implementation.

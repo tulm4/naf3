@@ -85,7 +85,7 @@ func TestCreateAuthenticationContext_OK(t *testing.T) {
 	h := NewHandler(store, WithAPIRoot("https://nssAAF.example.com"))
 
 	body := map[string]interface{}{
-		"supi":     "imu-208046000000001",
+		"supi":     "imsi-208046000000001",
 		"eapIdRsp": "dXNlckBleGFtcGxlLmNvbQ==",
 	}
 
@@ -99,7 +99,7 @@ func TestCreateAuthenticationContext_OK(t *testing.T) {
 	var resp aiwnats.AuthContext
 	err := json.Unmarshal(rec.Body.Bytes(), &resp)
 	require.NoError(t, err)
-	assert.Equal(t, "imu-208046000000001", string(resp.Supi))
+	assert.Equal(t, "imsi-208046000000001", string(resp.Supi))
 	assert.NotEmpty(t, resp.AuthCtxId)
 }
 
@@ -108,7 +108,7 @@ func TestCreateAuthenticationContext_WithOptionalFields(t *testing.T) {
 	h := NewHandler(store, WithAPIRoot("https://nssAAF.example.com"))
 
 	body := map[string]interface{}{
-		"supi":                     "imu-208046000000001",
+		"supi":                     "imsi-208046000000001",
 		"eapIdRsp":                 "dXNlckBleGFtcGxlLmNvbQ==",
 		"ttlsInnerMethodContainer": "aGVsbG8=", // base64 "hello"
 		"supportedFeatures":        "a1b2c3",
@@ -150,7 +150,7 @@ func TestCreateAuthenticationContext_StoreSaveError(t *testing.T) {
 	h := NewHandler(store, WithAPIRoot("https://nssAAF.example.com"))
 
 	body := map[string]interface{}{
-		"supi": "imu-208046000000001",
+		"supi": "imsi-208046000000001",
 	}
 
 	rec := doRequest(h, http.MethodPost, "/nnssaaf-aiw/v1/authentications", body)
@@ -178,12 +178,12 @@ func TestConfirmAuthentication_OK(t *testing.T) {
 	store := newMockStore()
 	store.data["auth-ctx-001"] = &AuthContext{
 		AuthCtxID: "auth-ctx-001",
-		Supi:      "imu-208046000000001",
+		Supi:      "imsi-208046000000001",
 	}
 	h := NewHandler(store, WithAPIRoot("https://nssAAF.example.com"))
 
 	body := map[string]interface{}{
-		"supi":       "imu-208046000000001",
+		"supi":       "imsi-208046000000001",
 		"eapMessage": "dGVzdA==", // base64 "test"
 	}
 
@@ -196,7 +196,7 @@ func TestConfirmAuthentication_OK(t *testing.T) {
 	var resp aiwnats.AuthConfirmationResponse
 	err := json.Unmarshal(rec.Body.Bytes(), &resp)
 	require.NoError(t, err)
-	assert.Equal(t, "imu-208046000000001", string(resp.Supi))
+	assert.Equal(t, "imsi-208046000000001", string(resp.Supi))
 	assert.NotNil(t, resp.EapMessage)
 	assert.Nil(t, resp.AuthResult) // Phase 1: continue (null)
 }
@@ -206,7 +206,7 @@ func TestConfirmAuthentication_NotFound(t *testing.T) {
 	h := NewHandler(store, WithAPIRoot("https://nssAAF.example.com"))
 
 	body := map[string]interface{}{
-		"supi":       "imu-208046000000001",
+		"supi":       "imsi-208046000000001",
 		"eapMessage": "dGVzdA==",
 	}
 
@@ -220,12 +220,12 @@ func TestConfirmAuthentication_SupiMismatch(t *testing.T) {
 	store := newMockStore()
 	store.data["auth-ctx-002"] = &AuthContext{
 		AuthCtxID: "auth-ctx-002",
-		Supi:      "imu-208046000000001",
+		Supi:      "imsi-208046000000001",
 	}
 	h := NewHandler(store, WithAPIRoot("https://nssAAF.example.com"))
 
 	body := map[string]interface{}{
-		"supi":       "imu-999999999999999", // different SUPI
+		"supi":       "imsi-999999999999999", // different SUPI
 		"eapMessage": "dGVzdA==",
 	}
 
@@ -255,12 +255,12 @@ func TestConfirmAuthentication_MissingEapMessage(t *testing.T) {
 	store := newMockStore()
 	store.data["auth-ctx-003"] = &AuthContext{
 		AuthCtxID: "auth-ctx-003",
-		Supi:      "imu-208046000000001",
+		Supi:      "imsi-208046000000001",
 	}
 	h := NewHandler(store, WithAPIRoot("https://nssAAF.example.com"))
 
 	body := map[string]interface{}{
-		"supi": "imu-208046000000001",
+		"supi": "imsi-208046000000001",
 		// eapMessage missing
 	}
 
@@ -274,12 +274,12 @@ func TestConfirmAuthentication_EmptyEapMessage(t *testing.T) {
 	store := newMockStore()
 	store.data["auth-ctx-004"] = &AuthContext{
 		AuthCtxID: "auth-ctx-004",
-		Supi:      "imu-208046000000001",
+		Supi:      "imsi-208046000000001",
 	}
 	h := NewHandler(store, WithAPIRoot("https://nssAAF.example.com"))
 
 	body := map[string]interface{}{
-		"supi":       "imu-208046000000001",
+		"supi":       "imsi-208046000000001",
 		"eapMessage": "",
 	}
 
@@ -295,7 +295,7 @@ func TestConfirmAuthentication_StoreLoadError(t *testing.T) {
 	h := NewHandler(store, WithAPIRoot("https://nssAAF.example.com"))
 
 	body := map[string]interface{}{
-		"supi":       "imu-208046000000001",
+		"supi":       "imsi-208046000000001",
 		"eapMessage": "dGVzdA==",
 	}
 
@@ -309,7 +309,7 @@ func TestConfirmAuthentication_InvalidJSON(t *testing.T) {
 	store := newMockStore()
 	store.data["auth-ctx-005"] = &AuthContext{
 		AuthCtxID: "auth-ctx-005",
-		Supi:      "imu-208046000000001",
+		Supi:      "imsi-208046000000001",
 	}
 	h := NewHandler(store, WithAPIRoot("https://nssAAF.example.com"))
 
@@ -329,13 +329,13 @@ func TestConfirmAuthentication_InvalidJSON(t *testing.T) {
 func TestInMemoryStore(t *testing.T) {
 	store := NewInMemoryStore()
 
-	ctx := &AuthContext{AuthCtxID: "id-001", Supi: "imu-208046000000001"}
+	ctx := &AuthContext{AuthCtxID: "id-001", Supi: "imsi-208046000000001"}
 	err := store.Save(ctx)
 	require.NoError(t, err)
 
 	loaded, err := store.Load("id-001")
 	require.NoError(t, err)
-	assert.Equal(t, "imu-208046000000001", loaded.Supi)
+	assert.Equal(t, "imsi-208046000000001", loaded.Supi)
 
 	_, err = store.Load("nonexistent")
 	assert.ErrorIs(t, err, ErrNotFound)

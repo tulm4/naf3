@@ -38,7 +38,7 @@
 |-------|--------|----------------|
 | Metadata header | PASS | TS 29.526 §7.3 |
 | N60 interface | PASS | TS 29.526 |
-| SUPI pattern `^imu-[0-9]{15}$` | PASS | TS 29.571 §5.4.4.61 |
+| SUPI pattern `^imsi-[0-9]{15}$` | PASS | TS 29.571 §5.4.4.61 |
 | MSK output (64-byte) | PASS | RFC 5216 §2.1.4 |
 | pvsInfo structure | PASS | TS 29.526 §7.3.3 |
 | No reauth/revocation | PASS | Per design decision |
@@ -193,7 +193,7 @@ EAP_SUCCESS ──(AAA-S Reauth Request)──→ PENDING
 | 2 | Spec version matches filter | e.g., TS 29.526 v18.7.0 |
 | 3 | Section references correct | §7.2 vs §7.3 |
 | 4 | GPSI regex matches TS 29.571 | `^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$` |
-| 5 | SUPI regex matches TS 29.571 | `^imu-[0-9]{15}$` |
+| 5 | SUPI regex matches TS 29.571 | `^imsi-[0-9]{15}$` |
 | 6 | Error codes match TS 29.526 | 400/403/404/502/503/504 |
 | 7 | NssaaStatus enum complete | NOT_EXECUTED/PENDING/EAP_SUCCESS/EAP_FAILURE |
 | 8 | AAA protocol attributes | VSA #200 for RADIUS, AVP 310 for Diameter |

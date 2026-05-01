@@ -388,7 +388,7 @@ func TestTS29526_NSSAA_CreateSlice_EmptySnssai(t *testing.T) {
 	body := map[string]interface{}{
 		"gpsi":      "520804600000001",
 		"snssai":    map[string]interface{}{},
-		"supi":      "imu-208930000000001",
+		"supi":      "imsi-208930000000001",
 		"supiKind":  "SUCI",
 		"eapIdRsp":  "dGVzdA==",
 	}
@@ -658,7 +658,7 @@ func TestTS29526_AIW_BasicAuthFlow(t *testing.T) {
 	h := aiwHandlerFromStore(store, aiw.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
-		"supi":     "imu-208046000000001",
+		"supi":     "imsi-208046000000001",
 		"eapIdRsp": "dGVzdA==",
 	}
 	rec := aiwRequest(h, http.MethodPost, "/nnssaaf-aiw/v1/authentications", body)
@@ -672,11 +672,11 @@ func TestTS29526_AIW_BasicAuthFlow(t *testing.T) {
 func TestTS29526_AIW_MSKReturnedOnSuccess(t *testing.T) {
 	t.Parallel()
 	store := newAiwMockStore()
-	store.data["aiw-02"] = &aiw.AuthContext{AuthCtxID: "aiw-02", Supi: "imu-208046000000001"}
+	store.data["aiw-02"] = &aiw.AuthContext{AuthCtxID: "aiw-02", Supi: "imsi-208046000000001"}
 	h := aiwHandlerFromStore(store, aiw.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
-		"supi":       "imu-208046000000001",
+		"supi":       "imsi-208046000000001",
 		"eapMessage": "dGVzdA==",
 	}
 	rec := aiwRequest(h, http.MethodPut, "/nnssaaf-aiw/v1/authentications/aiw-02", body)
@@ -690,11 +690,11 @@ func TestTS29526_AIW_MSKReturnedOnSuccess(t *testing.T) {
 func TestTS29526_AIW_PVSInfoReturned(t *testing.T) {
 	t.Parallel()
 	store := newAiwMockStore()
-	store.data["aiw-03"] = &aiw.AuthContext{AuthCtxID: "aiw-03", Supi: "imu-208046000000001"}
+	store.data["aiw-03"] = &aiw.AuthContext{AuthCtxID: "aiw-03", Supi: "imsi-208046000000001"}
 	h := aiwHandlerFromStore(store, aiw.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
-		"supi":       "imu-208046000000001",
+		"supi":       "imsi-208046000000001",
 		"eapMessage": "dGVzdA==",
 	}
 	rec := aiwRequest(h, http.MethodPut, "/nnssaaf-aiw/v1/authentications/aiw-03", body)
@@ -707,11 +707,11 @@ func TestTS29526_AIW_PVSInfoReturned(t *testing.T) {
 func TestTS29526_AIW_EAPFailureInBody(t *testing.T) {
 	t.Parallel()
 	store := newAiwMockStore()
-	store.data["aiw-04"] = &aiw.AuthContext{AuthCtxID: "aiw-04", Supi: "imu-208046000000001"}
+	store.data["aiw-04"] = &aiw.AuthContext{AuthCtxID: "aiw-04", Supi: "imsi-208046000000001"}
 	h := aiwHandlerFromStore(store, aiw.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
-		"supi":       "imu-208046000000001",
+		"supi":       "imsi-208046000000001",
 		"eapMessage": "dGVzdA==",
 	}
 	rec := aiwRequest(h, http.MethodPut, "/nnssaaf-aiw/v1/authentications/aiw-04", body)
@@ -722,7 +722,7 @@ func TestTS29526_AIW_EAPFailureInBody(t *testing.T) {
 	_ = rec
 }
 
-// TC-AIW-05: InvalidSupiRejected — SUPI not matching ^imu-[0-9]{15}$ → 400.
+// TC-AIW-05: InvalidSupiRejected — SUPI not matching ^imsi-[0-9]{15}$ → 400.
 // Spec: TS 29.526 §7.3, TS 29.571 §5.4.4.2
 func TestTS29526_AIW_InvalidSupiRejected(t *testing.T) {
 	t.Parallel()
@@ -749,7 +749,7 @@ func TestTS29526_AIW_AAA_NotConfigured(t *testing.T) {
 	h := aiwHandlerFromStore(store, aiw.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
-		"supi":     "imu-208046000000001",
+		"supi":     "imsi-208046000000001",
 		"eapIdRsp": "dGVzdA==",
 	}
 	rec := aiwRequest(h, http.MethodPost, "/nnssaaf-aiw/v1/authentications", body)
@@ -763,11 +763,11 @@ func TestTS29526_AIW_AAA_NotConfigured(t *testing.T) {
 func TestTS29526_AIW_MultiRoundChallenge(t *testing.T) {
 	t.Parallel()
 	store := newAiwMockStore()
-	store.data["aiw-07"] = &aiw.AuthContext{AuthCtxID: "aiw-07", Supi: "imu-208046000000001"}
+	store.data["aiw-07"] = &aiw.AuthContext{AuthCtxID: "aiw-07", Supi: "imsi-208046000000001"}
 	h := aiwHandlerFromStore(store, aiw.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
-		"supi":       "imu-208046000000001",
+		"supi":       "imsi-208046000000001",
 		"eapMessage": "dGVzdA==",
 	}
 	rec := aiwRequest(h, http.MethodPut, "/nnssaaf-aiw/v1/authentications/aiw-07", body)
@@ -782,7 +782,7 @@ func TestTS29526_AIW_SupportedFeaturesEcho(t *testing.T) {
 	h := aiwHandlerFromStore(store, aiw.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
-		"supi":               "imu-208046000000001",
+		"supi":               "imsi-208046000000001",
 		"eapIdRsp":           "dGVzdA==",
 		"supportedFeatures":  "a1b2c3",
 	}
@@ -798,7 +798,7 @@ func TestTS29526_AIW_TTLSInnerMethodContainer(t *testing.T) {
 	h := aiwHandlerFromStore(store, aiw.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
-		"supi":                     "imu-208046000000001",
+		"supi":                     "imsi-208046000000001",
 		"eapIdRsp":                 "dGVzdA==",
 		"ttlsInnerMethodContainer": "aGVsbG8=",
 	}

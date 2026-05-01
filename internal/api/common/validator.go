@@ -15,11 +15,11 @@ var (
 	// Supports MSISDN-based, External Identifier-based, and catch-all formats
 	// Spec: TS 29.571 §5.2.2
 	gpsiRegex = regexp.MustCompile(`^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$`)
-	// SUPI pattern per project convention (TS 29.571 §5.4.4.2):
-	// Uses 'imu-' prefix (U = User) instead of 'imsi-' (I = Identity/Mobile Subscriber)
-	// Followed by 5-15 digits (IMSI format: MCC + MNC + MSIN)
+	// SUPI pattern per TS 29.571 §5.4.4.2:
+	// 'imsi-' prefix (IMSI = Identity Mobile Subscriber Identifier)
+	// followed by 5-15 digits (IMSI format: MCC + MNC + MSIN)
 	// Spec: TS 23.003 §2.2, TS 29.571 §5.4.4.2
-	supiRegex = regexp.MustCompile(`^imu-[0-9]{5,15}$`)
+	supiRegex = regexp.MustCompile(`^imsi-[0-9]{5,15}$`)
 	// SD pattern: exactly 6 hexadecimal characters
 	// Spec: TS 23.003 §3.2, TS 29.571 §5.4.4.60
 	sdRegex = regexp.MustCompile(`^[0-9A-Fa-f]{6}$`)
@@ -40,14 +40,14 @@ func ValidateGPSI(gpsi string) error {
 }
 
 // ValidateSUPI validates that the SUPI (Subscription Permanent Identifier)
-// conforms to project convention (TS 29.571 §5.4.4.2).
+// conforms to TS 29.571 §5.4.4.2.
 // Spec: TS 23.003 §2.2, TS 29.571 §5.4.4.2
 func ValidateSUPI(supi string) error {
 	if supi == "" {
 		return ValidationProblem("supi", "SUPI is required")
 	}
 	if !supiRegex.MatchString(supi) {
-		return ValidationProblem("supi", "must match pattern ^imu-[0-9]{5,15}$ (IMSI-based SUPI, TS 29.571 §5.4.4.2)")
+		return ValidationProblem("supi", "must match pattern ^imsi-[0-9]{5,15}$ (IMSI-based SUPI, TS 29.571 §5.4.4.2)")
 	}
 	return nil
 }

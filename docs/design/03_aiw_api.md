@@ -61,7 +61,7 @@ Security: OAuth2 Client Credentials (scope: nnssaaf-aiw)
 POST /nnssaaf-aiw/v1/authentications
 
 {
-  "supi": "imu-208046000000001",
+  "supi": "imsi-208046000000001",
   "eapIdRsp": "AG5nZXQtaWQAdXNlckBleGFtcGxlLmNvbQA=",
   "ttlsInnerMethodContainer": null,
   "supportedFeatures": "3GPP-R18-AIW"
@@ -72,7 +72,7 @@ POST /nnssaaf-aiw/v1/authentications
 
 | Field | Validation | Error |
 |-------|-----------|-------|
-| supi | Required, matches `^imu-[0-9]{15}$` | 400 InvalidSupi |
+| supi | Required, matches `^imsi-[0-9]{15}$` | 400 InvalidSupi |
 | eapIdRsp | Optional, Base64 encoded if present | 400 InvalidEapPayload |
 | ttlsInnerMethodContainer | Optional, Base64 encoded | 400 InvalidPayload |
 | supportedFeatures | Optional, non-empty if present | 400 InvalidFeatures |
@@ -84,7 +84,7 @@ POST /nnssaaf-aiw/v1/authentications
    - Reject if token expired or missing scope
 2. Parse AuthInfo JSON
 3. Validate all required fields:
-   - supi: regex ^imu-[0-9]{15}$
+   - supi: regex ^imsi-[0-9]{15}$
    - eapIdRsp: if present, valid Base64, decodes to valid EAP Response packet
    - ttlsInnerMethodContainer: if present, valid Base64
    - supportedFeatures: if present, non-empty string
@@ -153,7 +153,7 @@ HTTP/1.1 201 Created
 Location: https://nssAAF.operator.com/nnssaaf-aiw/v1/authentications/01fr5xg2e3p4q5r6s7t8u9v0w2
 
 {
-  "supi": "imu-208046000000001",
+  "supi": "imsi-208046000000001",
   "authCtxId": "01fr5xg2e3p4q5r6s7t8u9v0w2",
   "eapMessage": "AG5uZXh0LWlkQHVzZXIuZXhhbXBsZS5jb20=",
   "authResult": null,
@@ -176,7 +176,7 @@ Location: https://nssAAF.operator.com/nnssaaf-aiw/v1/authentications/01fr5xg2e3p
 PUT /nnssaaf-aiw/v1/authentications/01fr5xg2e3p4q5r6s7t8u9v0w2
 
 {
-  "supi": "imu-208046000000001",
+  "supi": "imsi-208046000000001",
   "eapMessage": "AG5uZXh0LWlkQHVzZXIuZXhhbXBsZS5jb20=",
   "supportedFeatures": "3GPP-R18-AIW"
 }
@@ -236,7 +236,7 @@ PUT /nnssaaf-aiw/v1/authentications/01fr5xg2e3p4q5r6s7t8u9v0w2
 ```json
 // Multi-round continues
 {
-  "supi": "imu-208046000000001",
+  "supi": "imsi-208046000000001",
   "eapMessage": "AG5jaGFsbGVuZ2UAdXNlcjEA",
   "authResult": null,
   "pvsInfo": null,
@@ -246,7 +246,7 @@ PUT /nnssaaf-aiw/v1/authentications/01fr5xg2e3p4q5r6s7t8u9v0w2
 
 // Final: EAP Success (with MSK)
 {
-  "supi": "imu-208046000000001",
+  "supi": "imsi-208046000000001",
   "eapMessage": "AG5zZXNzaW9uLWtleS1kYXRh",
   "authResult": "EAP_SUCCESS",
   "pvsInfo": [
@@ -261,7 +261,7 @@ PUT /nnssaaf-aiw/v1/authentications/01fr5xg2e3p4q5r6s7t8u9v0w2
 
 // Final: EAP Failure
 {
-  "supi": "imu-208046000000001",
+  "supi": "imsi-208046000000001",
   "eapMessage": null,
   "authResult": "EAP_FAILURE",
   "pvsInfo": null,

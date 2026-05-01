@@ -115,7 +115,7 @@ GET /nnrf-disc/v1/nf-instances?target-nf-type=AMF&service-names=nnssaaf-nssaa-no
   "nfStatus": "REGISTERED",
   "plmnId": { "mcc": "208", "mnc": "001" },
   "nssaaInfo": {
-    "supiRanges": [{ "start": "imu-208001000000000", "end": "imu-208001099999999" }],
+    "supiRanges": [{ "start": "imsi-208001000000000", "end": "imsi-208001099999999" }],
     "supportedSecurityAlgorithm": ["EAP-TLS", "EAP-TTLS", "EAP-AKA_PRIME"]
   },
   "nfServices": {

@@ -1603,11 +1603,11 @@ func (c *Client) UpdateAuthContext(ctx context.Context, supi, authCtxId string, 
 	return nil
 }
 
-// extractPLMNFromSupi extracts PLMN from SUPI format: imu-{mcc}{mnc}{rest}.
-// e.g. imu-208001000000000 → "208001"
+// extractPLMNFromSupi extracts PLMN from SUPI format: imsi-{mcc}{mnc}{rest}.
+// e.g. imsi-208001000000000 → "208001"
 func extractPLMNFromSupi(supi string) string {
 	if len(supi) >= 8 {
-		return supi[4:10] // "imu-" = 4 chars, next 6 = MCC+MNC
+		return supi[4:10] // "imsi-" = 4 chars, next 6 = MCC+MNC
 	}
 	return "208001" // default PLMN
 }

@@ -141,7 +141,7 @@ func (h *Handler) [Method](w http.ResponseWriter, r *http.Request) {
 
 ### Types
 - [ ] GPSI regex: `^5[0-9]{8,14}$`
-- [ ] SUPI regex: `^imu-[0-9]{15}$`
+- [ ] SUPI regex: `^imsi-[0-9]{15}$`
 - [ ] Snssai SST: 0-255
 - [ ] Snssai SD: 6 hex chars
 
@@ -185,7 +185,7 @@ func (h *Handler) [Method](w http.ResponseWriter, r *http.Request) {
 gpsiRegex := regexp.MustCompile(`^5[0-9]{8,14}$`)
 
 // SUPI (used in AIW)
-supiRegex := regexp.MustCompile(`^imu-[0-9]{15}$`)
+supiRegex := regexp.MustCompile(`^imsi-[0-9]{15}$`)
 
 // Snssai
 // SST: 0-255

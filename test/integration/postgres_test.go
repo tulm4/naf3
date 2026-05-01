@@ -90,7 +90,7 @@ func TestIntegration_PG_SessionEncryption(t *testing.T) {
 	// Test SUPI encryption.
 	sessionSUPI := &postgres.Session{
 		AuthCtxID:  "test-auth-ctx-003",
-		Supi:       "imu-208046000000003",
+		Supi:       "imsi-208046000000003",
 		SnssaiSST:  2,
 		SnssaiSD:   "000003",
 		EAPSessionState: []byte(`{}`),

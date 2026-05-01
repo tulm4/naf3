@@ -484,7 +484,7 @@ func TestE2E_AIW_BasicFlow(t *testing.T) {
 
     // AUSF sends initial request via HTTP Gateway
     ctx := &AiwAuthInfo{
-        Supi:         "imu-208046000000001",
+        Supi:         "imsi-208046000000001",
         EapIdRsp:     EncodeEAPIdentityResponse("user@example.com"),
         SupportedFeatures: "3GPP-R18-AIW",
     }
@@ -547,7 +547,7 @@ func TestE2E_AIW_MSKExtraction(t *testing.T) {
     defer aaaSim.Stop()
 
     ctx := &AiwAuthInfo{
-        Supi:         "imu-208046000000001",
+        Supi:         "imsi-208046000000001",
         EapIdRsp:     EncodeEAPIdentityResponse("user@example.com"),
         SupportedFeatures: "3GPP-R18-AIW",
     }
@@ -605,7 +605,7 @@ func TestE2E_AIW_EAPFailure(t *testing.T) {
     defer aaaSim.Stop()
 
     ctx := &AiwAuthInfo{
-        Supi:         "imu-208046000000001",
+        Supi:         "imsi-208046000000001",
         EapIdRsp:     EncodeEAPIdentityResponse("user@example.com"),
         SupportedFeatures: "3GPP-R18-AIW",
     }
@@ -657,7 +657,7 @@ func TestE2E_AIW_InvalidSupi(t *testing.T) {
     resp, err := ausfMock.Authenticate(ctx)
     require.NoError(t, err)
 
-    // HTTP 400: invalid SUPI does not match ^imu-[0-9]{15}$
+    // HTTP 400: invalid SUPI does not match ^imsi-[0-9]{15}$
     assert.Equal(t, 400, resp.StatusCode)
 
     var problem ProblemDetails
@@ -686,7 +686,7 @@ func TestE2E_AIW_AAA_NotConfigured(t *testing.T) {
 
     // SUPI in range that has no AAA config
     ctx := &AiwAuthInfo{
-        Supi:         "imu-999999999999999", // No AAA server for this SUPI range
+        Supi:         "imsi-999999999999999", // No AAA server for this SUPI range
         EapIdRsp:     EncodeEAPIdentityResponse("user@example.com"),
         SupportedFeatures: "3GPP-R18-AIW",
     }
@@ -736,7 +736,7 @@ func TestE2E_AIW_TTLS(t *testing.T) {
     defer aaaSim.Stop()
 
     ctx := &AiwAuthInfo{
-        Supi:                   "imu-208046000000001",
+        Supi:                   "imsi-208046000000001",
         EapIdRsp:               EncodeEAPIdentityResponse("user@example.com"),
         TtlsInnerMethodContainer: base64.StdEncoding.EncodeToString(ttlsInner),
         SupportedFeatures:      "3GPP-R18-AIW",

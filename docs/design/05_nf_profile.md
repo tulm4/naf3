@@ -90,9 +90,9 @@ POST /nnrf-disc/v1/nf-instances
   "nssaaInfo": {
     "supiRanges": [
       {
-        "start": "imu-208001000000000",
-        "end": "imu-208001099999999",
-        "pattern": "^imu-208001[0-9]{8}$"
+        "start": "imsi-208001000000000",
+        "end": "imsi-208001099999999",
+        "pattern": "^imsi-208001[0-9]{8}$"
       }
     ],
     "internalGroupIdentifiersRanges": [

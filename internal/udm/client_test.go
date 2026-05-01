@@ -42,7 +42,7 @@ func TestGetAuthContext_Success(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount.Add(1)
-		assert.Equal(t, "/nudm-uem/v1/subscribers/imu-208001000000000/auth-contexts", r.URL.Path)
+		assert.Equal(t, "/nudm-uem/v1/subscribers/imsi-208001000000000/auth-contexts", r.URL.Path)
 		assert.Equal(t, http.MethodGet, r.Method)
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
@@ -61,7 +61,7 @@ func TestGetAuthContext_Success(t *testing.T) {
 	client := NewClient(cfg, nil)
 
 	ctx := context.Background()
-	result, err := client.GetAuthContext(ctx, "imu-208001000000000")
+	result, err := client.GetAuthContext(ctx, "imsi-208001000000000")
 
 	assert.NoError(t, err)
 	assert.Equal(t, int32(1), callCount.Load())
@@ -81,7 +81,7 @@ func TestGetAuthContext_NotFound(t *testing.T) {
 	client := NewClient(cfg, nil)
 
 	ctx := context.Background()
-	result, err := client.GetAuthContext(ctx, "imu-999999999999999")
+	result, err := client.GetAuthContext(ctx, "imsi-999999999999999")
 
 	assert.Error(t, err)
 	assert.Nil(t, result)
@@ -98,7 +98,7 @@ func TestGetAuthContext_UnexpectedStatus(t *testing.T) {
 	client := NewClient(cfg, nil)
 
 	ctx := context.Background()
-	result, err := client.GetAuthContext(ctx, "imu-208001000000000")
+	result, err := client.GetAuthContext(ctx, "imsi-208001000000000")
 
 	assert.Error(t, err)
 	assert.Nil(t, result)
@@ -120,7 +120,7 @@ func TestGetAuthContext_EmptyAuthContexts(t *testing.T) {
 	client := NewClient(cfg, nil)
 
 	ctx := context.Background()
-	result, err := client.GetAuthContext(ctx, "imu-208001000000000")
+	result, err := client.GetAuthContext(ctx, "imsi-208001000000000")
 
 	assert.Error(t, err)
 	assert.Nil(t, result)
@@ -139,7 +139,7 @@ func TestGetAuthContext_InvalidJSON(t *testing.T) {
 	client := NewClient(cfg, nil)
 
 	ctx := context.Background()
-	result, err := client.GetAuthContext(ctx, "imu-208001000000000")
+	result, err := client.GetAuthContext(ctx, "imsi-208001000000000")
 
 	assert.Error(t, err)
 	assert.Nil(t, result)
@@ -159,7 +159,7 @@ func TestGetAuthContext_ContextCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	result, err := client.GetAuthContext(ctx, "imu-208001000000000")
+	result, err := client.GetAuthContext(ctx, "imsi-208001000000000")
 
 	assert.Error(t, err)
 	assert.Nil(t, result)
@@ -199,7 +199,7 @@ func TestGetAuthContext_NRFDiscovery(t *testing.T) {
 	client := NewClient(cfg, nil)
 
 	ctx := context.Background()
-	result, err := client.GetAuthContext(ctx, "imu-208001000000000")
+	result, err := client.GetAuthContext(ctx, "imsi-208001000000000")
 
 	assert.Error(t, err)
 	assert.Nil(t, result)
@@ -212,7 +212,7 @@ func TestUpdateAuthContext_Success(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount.Add(1)
-		assert.Equal(t, "/nudm-uem/v1/subscribers/imu-208001000000000/auth-contexts/auth-123", r.URL.Path)
+		assert.Equal(t, "/nudm-uem/v1/subscribers/imsi-208001000000000/auth-contexts/auth-123", r.URL.Path)
 		assert.Equal(t, http.MethodPut, r.Method)
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
@@ -229,7 +229,7 @@ func TestUpdateAuthContext_Success(t *testing.T) {
 	client := NewClient(cfg, nil)
 
 	ctx := context.Background()
-	err := client.UpdateAuthContext(ctx, "imu-208001000000000", "auth-123", "EAP_SUCCESS")
+	err := client.UpdateAuthContext(ctx, "imsi-208001000000000", "auth-123", "EAP_SUCCESS")
 
 	assert.NoError(t, err)
 	assert.Equal(t, int32(1), callCount.Load())
@@ -249,7 +249,7 @@ func TestUpdateAuthContext_UnexpectedStatus(t *testing.T) {
 	client := NewClient(cfg, nil)
 
 	ctx := context.Background()
-	err := client.UpdateAuthContext(ctx, "imu-208001000000000", "auth-456", "EAP_FAILURE")
+	err := client.UpdateAuthContext(ctx, "imsi-208001000000000", "auth-456", "EAP_FAILURE")
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "update status 400")
@@ -268,7 +268,7 @@ func TestUpdateAuthContext_ContextCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := client.UpdateAuthContext(ctx, "imu-208001000000000", "auth-789", "EAP_SUCCESS")
+	err := client.UpdateAuthContext(ctx, "imsi-208001000000000", "auth-789", "EAP_SUCCESS")
 
 	assert.Error(t, err)
 }
@@ -279,7 +279,7 @@ func TestUpdateAuthContext_NRFDiscovery(t *testing.T) {
 	client := NewClient(cfg, nil)
 
 	ctx := context.Background()
-	err := client.UpdateAuthContext(ctx, "imu-208001000000000", "auth-xyz", "EAP_SUCCESS")
+	err := client.UpdateAuthContext(ctx, "imsi-208001000000000", "auth-xyz", "EAP_SUCCESS")
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported protocol scheme")
@@ -290,13 +290,13 @@ func TestExtractPLMNFromSupi(t *testing.T) {
 		supi     string
 		expected string
 	}{
-		{"imu-208001000000000", "208001"},
-		{"imu-440010123456789", "440010"},
-		{"imu-310410999999999", "310410"},
-		{"imu-12345", "208001"},  // too short → default
+		{"imsi-208001000000000", "208001"},
+		{"imsi-440010123456789", "440010"},
+		{"imsi-310410999999999", "310410"},
+		{"imsi-12345", "208001"},  // too short → default
 		{"", "208001"},           // empty → default
-		{"imu-208", "208001"},    // just enough for "imu-" + MCC = 7 chars → "208001"
-		{"imu-208001", "208001"}, // "imu-"(4) + "208001"(6) = 10 → matches
+		{"imsi-208", "208001"},    // just enough for "imsi-" + MCC = 7 chars → "208001"
+		{"imsi-208001", "208001"}, // "imsi-"(4) + "208001"(6) = 10 → matches
 	}
 
 	for _, tt := range tests {

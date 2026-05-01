@@ -204,7 +204,7 @@ func TestHTTPGateway_AuthBypass(t *testing.T) {
     defer teardown()
 
     // POST without Authorization header — should succeed (not 401)
-    body := `{"gpsi":"504217500001","snssai":{"sst":1,"sd":"000001"},"supi":"imu-208930000000001","supiKind":"SUCI"}`
+    body := `{"gpsi":"504217500001","snssai":{"sst":1,"sd":"000001"},"supi":"imsi-208930000000001","supiKind":"SUCI"}`
     req, _ := http.NewRequest(http.MethodPost,
         gwURL+"/nnssaaf-nssaa/v1/slice-authentications",
         strings.NewReader(body))
@@ -283,7 +283,7 @@ func TestCreateSliceAuth_EmptySnssai(t *testing.T) {
     handler := nssaa.NewHandler(mockStore{}, nssaa.WithAAA(mockAAA{}))
 
     // snssai: {} — empty object should be rejected with 400
-    body := `{"gpsi":"504217500001","snssai":{},"supi":"imu-208930000000001","supiKind":"SUCI","eapIdRsp":"dGVzdA=="}`
+    body := `{"gpsi":"504217500001","snssai":{},"supi":"imsi-208930000000001","supiKind":"SUCI","eapIdRsp":"dGVzdA=="}`
     req := httptest.NewRequest(http.MethodPost,
         "/nnssaaf-nssaa/v1/slice-authentications",
         strings.NewReader(body))
@@ -301,7 +301,7 @@ func TestCreateSliceAuth_MissingSnssai(t *testing.T) {
     handler := nssaa.NewHandler(mockStore{}, nssaa.WithAAA(mockAAA{}))
 
     // No snssai field at all — should also return 400
-    body := `{"gpsi":"504217500001","supi":"imu-208930000000001","supiKind":"SUCI","eapIdRsp":"dGVzdA=="}`
+    body := `{"gpsi":"504217500001","supi":"imsi-208930000000001","supiKind":"SUCI","eapIdRsp":"dGVzdA=="}`
     req := httptest.NewRequest(http.MethodPost,
         "/nnssaaf-nssaa/v1/slice-authentications",
         strings.NewReader(body))
@@ -330,7 +330,7 @@ func TestTS29526_CreateSession_EmptySnssai(t *testing.T) {
     body := map[string]interface{}{
         "gpsi":    "504217500001",
         "snssai":  map[string]interface{}{}, // empty object
-        "supi":    "imu-208930000000001",
+        "supi":    "imsi-208930000000001",
         "supiKind": "SUCI",
         "eapIdRsp": base64.StdEncoding.EncodeToString([]byte("test")),
     }

@@ -17,16 +17,16 @@ func TestIntegration_UDM_GetRegistration(t *testing.T) {
 	mock := mocks.NewUDMMock()
 	defer mock.Close()
 
-	mock.SetGPSI("imu-208046000000001", "520804600000001")
+	mock.SetGPSI("imsi-208046000000001", "520804600000001")
 
-	resp, err := http.Get(mock.URL() + "/nudm-uemm/v1/imu-208046000000001/registration")
+	resp, err := http.Get(mock.URL() + "/nudm-uemm/v1/imsi-208046000000001/registration")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	var reg mocks.NudmUECMRegistration
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&reg))
-	assert.Equal(t, "imu-208046000000001", reg.Supi)
+	assert.Equal(t, "imsi-208046000000001", reg.Supi)
 	assert.Equal(t, "520804600000001", reg.GPSI)
 }
 
@@ -37,22 +37,22 @@ func TestIntegration_UDM_GPSIKnown(t *testing.T) {
 	defer mock.Close()
 
 	reg := &mocks.NudmUECMRegistration{
-		Supi: "imu-208046000000002",
+		Supi: "imsi-208046000000002",
 		GPSI: "520804600000002",
 		Registrations: []mocks.NudmRegItem{
 			{PlmnID: "00101", Legacy: false},
 		},
 	}
-	mock.SetRegistration("imu-208046000000002", reg)
+	mock.SetRegistration("imsi-208046000000002", reg)
 
-	resp, err := http.Get(mock.URL() + "/nudm-uemm/v1/imu-208046000000002/registration")
+	resp, err := http.Get(mock.URL() + "/nudm-uemm/v1/imsi-208046000000002/registration")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	var result mocks.NudmUECMRegistration
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
-	assert.Equal(t, "imu-208046000000002", result.Supi)
+	assert.Equal(t, "imsi-208046000000002", result.Supi)
 	assert.Equal(t, "520804600000002", result.GPSI)
 }
 
@@ -62,7 +62,7 @@ func TestIntegration_UDM_GPSIUnknown(t *testing.T) {
 	mock := mocks.NewUDMMock()
 	defer mock.Close()
 
-	resp, err := http.Get(mock.URL() + "/nudm-uemm/v1/imu-999999999999999/registration")
+	resp, err := http.Get(mock.URL() + "/nudm-uemm/v1/imsi-999999999999999/registration")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode,
@@ -79,9 +79,9 @@ func TestIntegration_UDM_Timeout(t *testing.T) {
 	mock := mocks.NewUDMMock()
 	defer mock.Close()
 
-	mock.SetError("imu-timeout-001", http.StatusGatewayTimeout)
+	mock.SetError("imsi-timeout-001", http.StatusGatewayTimeout)
 
-	resp, err := http.Get(mock.URL() + "/nudm-uemm/v1/imu-timeout-001/registration")
+	resp, err := http.Get(mock.URL() + "/nudm-uemm/v1/imsi-timeout-001/registration")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusGatewayTimeout, resp.StatusCode,

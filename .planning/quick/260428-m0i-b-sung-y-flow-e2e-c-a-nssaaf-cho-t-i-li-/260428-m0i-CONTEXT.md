@@ -34,7 +34,7 @@ Add missing AIW (Nnssaaf_AIW) E2E test flows to `docs/design/24_test_strategy.md
 ## Specific Ideas
 
 From `docs/design/03_aiw_api.md`:
-- AIW uses SUPI (not GPSI): pattern `^imu-[0-9]{15}$`
+- AIW uses SUPI (not GPSI): pattern `^imsi-[0-9]{15}$`
 - Consumer is AUSF (not AMF) — N60 interface
 - MSK returned on EAP_SUCCESS (64-byte, base64)
 - pvsInfo returned when applicable

@@ -417,7 +417,7 @@ Headers:
     "sst": 1,
     "sd": "000001"
   },
-  "supi": "imu-208046000000001"
+  "supi": "imsi-208046000000001"
 }
 ```
 
@@ -461,7 +461,7 @@ POST https://amf1.operator.com:8080/namf-comm/v1/subscriptions
     "sst": 1,
     "sd": "000001"
   },
-  "supi": "imu-208046000000001"
+  "supi": "imsi-208046000000001"
 }
 ```
 
