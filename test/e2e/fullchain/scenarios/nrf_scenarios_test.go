@@ -8,9 +8,9 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/operator/nssAAF/test/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/operator/nssAAF/test/mocks"
 )
 
 // TestNRF_UDMDiscovery verifies NRF returns correct UDM endpoint.
