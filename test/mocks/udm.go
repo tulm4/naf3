@@ -55,9 +55,9 @@ type UDMMock struct {
 // NewUDMMock creates a UDM mock server.
 func NewUDMMock() *UDMMock {
 	m := &UDMMock{
-		registrations:      make(map[string]*NudmUECMRegistration),
-		errorCodes:         make(map[string]int),
-		authSubscriptions:  make(map[string]*AuthSubscription),
+		registrations:     make(map[string]*NudmUECMRegistration),
+		errorCodes:        make(map[string]int),
+		authSubscriptions: make(map[string]*AuthSubscription),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/nudm-uemm/v1/", m.handleRegistration)

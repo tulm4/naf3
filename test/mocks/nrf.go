@@ -40,7 +40,7 @@ func NewNRFMock() *NRFMock {
 			"ausf-001":   "REGISTERED",
 			"aaa-gw-001": "REGISTERED",
 		},
-		profiles:        map[string][]byte{},
+		profiles:         map[string][]byte{},
 		serviceEndpoints: map[string]ServiceEndpointConfig{},
 	}
 	// Use a custom mux so we can register different handlers for the same path
