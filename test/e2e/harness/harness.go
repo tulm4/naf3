@@ -1,11 +1,8 @@
-//go:build e2e
-// +build e2e
-
-// Package e2e provides an end-to-end test harness for the 3-component
+// Package harness provides an end-to-end test harness for the 3-component
 // NSSAAF architecture: HTTP Gateway, Biz Pod, and AAA Gateway.
 //
 // Lifecycle model (Phase 4.1 refactor):
-//   - docker compose up/down is managed once by TestMain in e2e.go (via Makefile)
+//   - docker compose up/down is managed once by TestMain in suite/e2e.go (via Makefile)
 //   - NewHarness connects to the pre-started docker compose stack; it does NOT
 //     start any binary processes
 //   - Each test gets a clean slate via h.ResetState() (TRUNCATE tables + Redis FLUSHDB)
@@ -23,7 +20,7 @@
 //	BIZ_PG_URL     postgres connection URL
 //	BIZ_REDIS_URL  redis connection URL
 //	E2E_TLS_CA     path to CA certificate for HTTPS health checks
-package e2e
+package harness
 
 import (
 	"context"
@@ -347,17 +344,16 @@ func (h *Harness) Close() {
 	}
 }
 
-// FinalizeHarness closes the DB/Redis connections for the shared harness.
-// Call this once from TestMain after all tests finish.
-func FinalizeHarness() {
-	if sharedHarness == nil {
+// FinalizeHarness closes the DB/Redis connections for the given harness.
+func FinalizeHarness(h *Harness) {
+	if h == nil {
 		return
 	}
-	if sharedHarness.pgConn != nil {
-		sharedHarness.pgConn.Close()
+	if h.pgConn != nil {
+		h.pgConn.Close()
 	}
-	if sharedHarness.redis != nil {
-		_ = sharedHarness.redis.Close()
+	if h.redis != nil {
+		_ = h.redis.Close()
 	}
 }
 
@@ -396,6 +392,12 @@ func (h *Harness) StartAMFMock() *httptest.Server {
 	h.amfMock = mocks.NewAMFMock()
 	return h.amfMock.Server
 }
+
+// T returns the underlying *testing.T.
+func (h *Harness) T() *testing.T { return h.t }
+
+// SetT sets the underlying *testing.T for logging purposes.
+func (h *Harness) SetT(t *testing.T) { h.t = t }
 
 // ─── Internal helpers ───────────────────────────────────────────────────────
 

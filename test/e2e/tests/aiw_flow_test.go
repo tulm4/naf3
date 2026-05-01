@@ -1,8 +1,5 @@
-//go:build e2e
-// +build e2e
-
-// Package e2e provides end-to-end integration tests for the NSSAAF system.
-package e2e
+// Package tests provides end-to-end integration tests for the NSSAAF system.
+package tests
 
 import (
 	"encoding/json"
@@ -11,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/operator/nssAAF/test/e2e/harness"
+	"github.com/operator/nssAAF/test/e2e/suite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -22,7 +21,7 @@ func TestE2E_AIW_BasicFlow(t *testing.T) {
 		t.Skip("E2E tests skipped in short mode")
 	}
 
-	h := NewHarnessForTest(t)
+	h := suite.NewHarnessForTest(t)
 	defer h.Close()
 
 	// Start AUSF mock for AIW tests.
@@ -103,7 +102,7 @@ func TestE2E_AIW_EAPFailure(t *testing.T) {
 		t.Skip("E2E tests skipped in short mode")
 	}
 
-	h := NewHarnessForTest(t)
+	h := suite.NewHarnessForTest(t)
 	defer h.Close()
 
 	// Start AUSF mock.
@@ -169,7 +168,7 @@ func TestE2E_AIW_InvalidSupi(t *testing.T) {
 		t.Skip("E2E tests skipped in short mode")
 	}
 
-	h := NewHarnessForTest(t)
+	h := suite.NewHarnessForTest(t)
 	defer h.Close()
 
 	testCases := []struct {
@@ -229,7 +228,7 @@ func TestE2E_AIW_TTLS(t *testing.T) {
 		t.Skip("E2E tests skipped in short mode")
 	}
 
-	h := NewHarnessForTest(t)
+	h := suite.NewHarnessForTest(t)
 	defer h.Close()
 
 	// Start AUSF mock.
@@ -254,3 +253,6 @@ func TestE2E_AIW_TTLS(t *testing.T) {
 	// Should get 201 Created.
 	assert.Equal(t, http.StatusCreated, resp.StatusCode, "AIW TTLS flow should return 201")
 }
+
+// Compile-time check: Harness methods are accessible
+var _ func() *harness.Harness = suite.NewHarnessForTest

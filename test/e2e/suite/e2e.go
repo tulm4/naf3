@@ -1,8 +1,8 @@
-//go:build e2e
-// +build e2e
-
-// Package e2e provides end-to-end integration tests for the NSSAAF system.
-package e2e
+// Package suite provides the TestMain entry point for the E2E test suite.
+// It manages docker compose lifecycle and provides a shared harness to all tests.
+//
+//nolint:gochecknoinits // TestMain with init is Go best practice for test lifecycle
+package suite
 
 import (
 	"context"
@@ -15,13 +15,15 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/operator/nssAAF/test/e2e/harness"
 )
 
 // composeManaged is set to true once TestMain has brought up docker compose.
 var composeManaged int32
 
 // sharedHarness is the single Harness instance shared by all tests in this run.
-var sharedHarness *Harness
+var sharedHarness *harness.Harness
 
 // TestMain coordinates the shared lifecycle for the entire E2E test suite:
 //
@@ -65,7 +67,7 @@ func TestMain(m *testing.M) {
 	// Individual tests must call NewHarnessForTest() to get a clean slate.
 	sharedHarness = NewHarnessForTest(&testing.T{})
 	defer func() {
-		FinalizeHarness()
+		harness.FinalizeHarness(sharedHarness)
 	}()
 
 	// 3. Run all tests.
@@ -109,7 +111,7 @@ func dockerComposeDown(ctx context.Context, composeFile string) {
 
 // SharedHarness returns the singleton Harness created by TestMain.
 // If compose could not be started, it returns nil.
-func SharedHarness() *Harness { return sharedHarness }
+func SharedHarness() *harness.Harness { return sharedHarness }
 
 // ─── Exported helpers used by test cases ────────────────────────────────────
 
@@ -127,7 +129,7 @@ var sharedHarnessMu sync.Mutex
 //
 //	h := NewHarnessForTest(t)   // shared, resets state
 //	defer h.Close()             // closes mocks; does NOT restart binaries
-func NewHarnessForTest(t *testing.T) *Harness {
+func NewHarnessForTest(t *testing.T) *harness.Harness {
 	t.Helper()
 	sharedHarnessMu.Lock()
 	defer sharedHarnessMu.Unlock()
@@ -135,9 +137,8 @@ func NewHarnessForTest(t *testing.T) *Harness {
 		// First call: lazily initialize the shared harness.
 		// This calls the real NewHarness which waits for docker compose services.
 		// Pass a fresh *testing.T so fatal errors don't corrupt the caller's test.
-		sharedHarness = NewHarness(&testing.T{})
+		sharedHarness = harness.NewHarness(&testing.T{})
 	}
-	sharedHarness.t = t
 	sharedHarness.ResetState()
 	return sharedHarness
 }

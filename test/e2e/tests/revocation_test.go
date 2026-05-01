@@ -1,8 +1,5 @@
-//go:build e2e
-// +build e2e
-
-// Package e2e provides end-to-end integration tests for the NSSAAF system.
-package e2e
+// Package tests provides end-to-end integration tests for the NSSAAF system.
+package tests
 
 import (
 	"encoding/json"
@@ -10,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/operator/nssAAF/test/e2e/suite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -21,7 +19,7 @@ func TestE2E_Revocation_HappyPath(t *testing.T) {
 		t.Skip("E2E tests skipped in short mode")
 	}
 
-	h := NewHarnessForTest(t)
+	h := suite.NewHarnessForTest(t)
 	defer h.Close()
 
 	// Start AMF mock to receive revocation notifications.
