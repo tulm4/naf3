@@ -3,11 +3,18 @@ package mocks
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 )
+
+// ServiceEndpointConfig holds the endpoint configuration for a service.
+type ServiceEndpointConfig struct {
+	IPv4Address string
+	Port        int
+}
 
 // NRFMock is an httptest.Server implementing the NRF Nnrf_NFM API.
 // Spec: TS 29.510 §6
@@ -19,6 +26,8 @@ type NRFMock struct {
 	nfStatus map[string]string
 	// profiles maps nfInstanceId → NFProfile JSON bytes
 	profiles map[string][]byte
+	// serviceEndpoints maps "NFType:serviceName" → endpoint config
+	serviceEndpoints map[string]ServiceEndpointConfig
 }
 
 // NewNRFMock creates an NRF mock server with default UDM, AMF, AUSF, and AAA-GW profiles.
@@ -31,7 +40,8 @@ func NewNRFMock() *NRFMock {
 			"ausf-001":   "REGISTERED",
 			"aaa-gw-001": "REGISTERED",
 		},
-		profiles: map[string][]byte{},
+		profiles:        map[string][]byte{},
+		serviceEndpoints: map[string]ServiceEndpointConfig{},
 	}
 	// Use a custom mux so we can register different handlers for the same path
 	// with different HTTP methods (ServeMux only allows one handler per path).
@@ -71,6 +81,18 @@ func (m *NRFMock) SetProfile(nfInstanceID string, profileJSON []byte) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.profiles[nfInstanceID] = profileJSON
+}
+
+// SetServiceEndpoint configures the endpoint for an NF's service.
+// This allows E2E tests to point to container DNS names.
+func (m *NRFMock) SetServiceEndpoint(nfType, serviceName, host string, port int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := fmt.Sprintf("%s:%s", nfType, serviceName)
+	m.serviceEndpoints[key] = ServiceEndpointConfig{
+		IPv4Address: host,
+		Port:        port,
+	}
 }
 
 // handleNfInstancesDisc dispatches Nnrf_NFDiscovery calls.
@@ -188,6 +210,13 @@ func (m *NRFMock) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 		}
 		profile := defaultNFProfile(nfType, id, status)
 		if svcName != "" {
+			key := nfType + ":" + svcName
+			var ipAddr string = "127.0.0.1"
+			var port int = 8080
+			if ep, ok := m.serviceEndpoints[key]; ok {
+				ipAddr = ep.IPv4Address
+				port = ep.Port
+			}
 			profile["nfServices"] = map[string]interface{}{
 				svcName: map[string]interface{}{
 					"serviceName": svcName,
@@ -195,7 +224,7 @@ func (m *NRFMock) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 						{"apiVersion": "v1"},
 					},
 					"ipEndPoints": []map[string]interface{}{
-						{"ipv4Address": "127.0.0.1", "port": 8080},
+						{"ipv4Address": ipAddr, "port": port},
 					},
 				},
 			}
