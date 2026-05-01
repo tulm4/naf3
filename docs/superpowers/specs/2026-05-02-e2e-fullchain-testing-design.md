@@ -13,8 +13,10 @@ This design specifies the implementation of E2E full chain testing for NSSAAF, a
 **Goals:**
 - Verify end-to-end correctness of N58 (NSSAA) and N60 (AIW) interfaces
 - Validate resilience scenarios (AAA timeout, circuit breaker, pod kill)
-- Ensure spec compliance (TS 23.502, TS 29.526, RFC 3579, RFC 5216)
+- Ensure spec compliance (TS 23.502, TS 29.526, RFC 3579, RFC 5216, RFC 6733)
 - Support AMF/AUSF mock initiation (not just notification reception)
+- Validate UDM integration (Nudm_UECM_Get, Nudm_UECM_UpdateAuthContext)
+- Support both TCP and SCTP for Diameter transport
 
 **Non-Goals:**
 - Load testing (Phase 8)
@@ -28,34 +30,42 @@ This design specifies the implementation of E2E full chain testing for NSSAAF, a
 ### 2.1 Component Topology
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           E2E Test Suite                                    │
-│                         (test/e2e/fullchain/)                              │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  ┌──────────────┐     ┌───────────────┐     ┌─────────────┐             │
-│  │  AMF Mock   │────▶│  HTTP Gateway │────▶│  Biz Pod    │             │
-│  │ (initiator) │     │   (real)      │     │   (real)    │             │
-│  └──────────────┘     └───────────────┘     └──────┬──────┘             │
-│                                                       │                    │
-│  ┌──────────────┐                                    ▼                    │
-│  │ AUSF Mock    │─────────────────────────────▶┌─────────────┐           │
-│  │ (initiator)  │                              │ AAA Gateway │           │
-│  └──────────────┘                              │   (real)   │           │
-│                                                  └──────┬──────┘          │
-│                                                         │                   │
-│                                                         ▼                   │
-│                                               ┌─────────────────┐           │
-│                                               │  mock-aaa-s    │           │
-│                                               │  (RADIUS/Dia)  │           │
-│                                               └─────────────────┘           │
-│                                                                             │
-│  Supporting Infrastructure:                                                   │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                    │
-│  │  PostgreSQL  │  │    Redis     │  │    NRF Mock  │                    │
-│  └──────────────┘  └──────────────┘  └──────────────┘                    │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│                           E2E Test Suite                                        │
+│                         (test/e2e/fullchain/)                                  │
+├──────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                │
+│  ┌──────────────┐      ┌───────────────┐      ┌─────────────┐                │
+│  │  AMF Mock   │─────▶│  HTTP Gateway │─────▶│  Biz Pod    │                │
+│  │ (initiator) │      │   (real)      │      │   (real)    │                │
+│  └──────────────┘      └───────────────┘      └──────┬──────┘                │
+│                                                        │                       │
+│  ┌──────────────┐                                     ▼                       │
+│  │ AUSF Mock    │────────────────────────────▶ ┌─────────────┐                │
+│  │ (initiator)  │                               │ AAA Gateway │                │
+│  └──────────────┘                               │   (real)   │                │
+│                                                  └──────┬──────┘               │
+│                                                        │                       │
+│  ┌──────────────┐                                     ▼                       │
+│  │  UDM Mock   │ ◀── Nudm_UECM_Get              ┌─────────────────┐        │
+│  │              │    Nudm_UECM_UpdateAuthContext │  mock-aaa-s     │        │
+│  └──────────────┘                                 │  (RADIUS/Dia)  │        │
+│                                                  └────────┬────────┘        │
+│                                                             │                 │
+│  Supporting Infrastructure:                                   │                 │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │                 │
+│  │  PostgreSQL  │  │    Redis     │  │    NRF Mock │      │                 │
+│  └──────────────┘  └──────────────┘  └──────────────┘      │                 │
+│                                                              │                 │
+│  ┌──────────────────────────────────────────────────────────┴──────────────┐  │
+│  │  mock-aaa-s Container (TCP/SCTP for Diameter)                            │  │
+│  │  - CER/CEA handshake (RFC 6733 §5.3)                                   │  │
+│  │  - DWR/DWA watchdog (RFC 6733 §5.5)                                    │  │
+│  │  - DER/DEA EAP handling                                                  │  │
+│  │  - RADIUS UDP (RFC 3579)                                                │  │
+│  └──────────────────────────────────────────────────────────────────────────┘  │
+│                                                                                │
+└──────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### 2.2 Component Responsibilities
@@ -64,12 +74,44 @@ This design specifies the implementation of E2E full chain testing for NSSAAF, a
 |-----------|------|----------------|
 | AMF Mock (initiator) | Initiates N58 calls, receives notifications | `test/e2e/fullchain/mocks/amf_initiator.go` |
 | AUSF Mock (initiator) | Initiates N60 calls | `test/e2e/fullchain/mocks/ausf_initiator.go` |
+| UDM Mock | Nudm_UECM_Get returns auth subscription, AAA server config | `test/mocks/udm.go` (extend) |
 | HTTP Gateway | TLS terminator, request routing | Real component (docker-compose) |
 | Biz Pod | EAP engine, session management, NF integration | Real component with full wiring |
-| AAA Gateway | RADIUS/Diameter encoding, active-standby | Real component |
-| mock-aaa-s | EAP-TLS, EAP-TTLS simulation | Container-based (existing) |
+| AAA Gateway | RADIUS/Diameter encoding, active-standby, CER/CEA, watchdog | Real component |
+| mock-aaa-s | RADIUS EAP (UDP), Diameter EAP (TCP/SCTP) with CER/CEA handshake | `test/aaa_sim/` |
 | PostgreSQL | Session storage, monthly partitions | Real infrastructure |
 | Redis | Session cache, rate limiting | Real infrastructure |
+
+### 2.3 Diameter Transport Requirements
+
+Diameter requires full RFC 6733 compliance for E2E testing:
+
+| Feature | Requirement | Spec Reference |
+|---------|-------------|----------------|
+| CER/CEA Handshake | Mandatory before any DER/DEA | RFC 6733 §5.3 |
+| Watchdog (DWR/DWA) | Mandatory for connection health | RFC 6733 §5.5 |
+| SCTP Support | Required for production-like testing | RFC 6733 §3 |
+| TLS on Diameter | Optional, configurable | RFC 6733 §2.4 |
+
+**Why TCP/SCTP matters:** UDP-based testing misses real-world failure modes:
+- Connection failures that SCTP handles gracefully
+- Message ordering and fragmentation
+- Path MTU discovery
+- Multi-stream benefits in SCTP
+
+### 2.4 UDM Integration Requirements
+
+The NSSAA flow requires UDM integration per TS 23.502 §4.2.9:
+
+| API | Purpose | Test Coverage |
+|-----|---------|---------------|
+| Nudm_UECM_Get | Retrieve auth subscription for SUPI | AAA server routing |
+| Nudm_UECM_UpdateAuthContext | Update auth result after EAP | Status synchronization |
+
+**UDM Mock must support:**
+- Configurable auth subscription (EAP method, AAA server URL)
+- GPSI-to-SUPI mapping
+- Error injection (404, 503, timeout)
 
 ---
 
@@ -95,6 +137,19 @@ test/e2e/
     │   ├── n60_scenarios.go   # AIW full chain scenarios
     │   └── resilience.go      # Resilience/failure scenarios
     └── harness_fullchain.go   # Extended harness for full chain
+
+test/aaa_sim/              # Existing - AAA-S simulator
+├── diameter.go            # CER/CEA handshake, DER/DEA handling
+├── radius.go              # RADIUS EAP handling
+├── mode.go                # Mode configuration
+└── aaa_sim_test.go       # Unit tests
+
+test/mocks/
+├── udm.go                 # Existing - extend for auth subscription
+├── amf.go                 # Existing - notification receiver
+├── ausf.go                # Existing - N60 API
+├── nrf.go                 # Existing - NF discovery
+└── compose.go             # Existing - docker compose integration
 ```
 
 ---
@@ -128,7 +183,27 @@ test/e2e/
 | TC-N60-06 | No Re-Auth | TS 29.526 AC8 | Re-Auth returns error |
 | TC-N60-07 | No Revocation | TS 29.526 AC8 | Revocation returns error |
 
-### 4.3 Resilience Scenarios
+### 4.3 UDM Integration Scenarios
+
+| ID | Scenario | Spec | Expected Result |
+|----|----------|------|----------------|
+| TC-UDM-01 | UDM Returns Auth Subscription | TS 23.502 §4.2.9.2 | Correct AAA server selected |
+| TC-UDM-02 | UDM Subscriber Not Found | TS 29.526 | 404 from NSSAAF |
+| TC-UDM-03 | UDM Update After Auth | TS 29.526 §7.3.3 | Nudm_UECM_UpdateAuthContext called |
+| TC-UDM-04 | UDM Timeout | TS 29.526 | 504 Gateway Timeout |
+
+### 4.4 Diameter Transport Scenarios
+
+| ID | Scenario | Spec | Expected Result |
+|----|----------|------|----------------|
+| TC-DIA-01 | CER/CEA Handshake | RFC 6733 §5.3 | Connection established |
+| TC-DIA-02 | DWR/DWA Watchdog | RFC 6733 §5.5 | Connection health maintained |
+| TC-DIA-03 | DER/DEA EAP | RFC 4072 | EAP-Success in DEA |
+| TC-DIA-04 | SCTP Transport | RFC 6733 §3 | Multi-stream working |
+| TC-DIA-05 | TCP Transport | RFC 6733 §3 | Connection fallback |
+| TC-DIA-06 | Connection Failure | RFC 6733 | Reconnection attempted |
+
+### 4.5 Resilience Scenarios
 
 | ID | Scenario | Spec | Expected Result |
 |----|----------|------|----------------|
@@ -142,7 +217,7 @@ test/e2e/
 
 ## 5. Data Flow
 
-### 5.1 NSSAA Flow (TS 23.502 §4.2.9)
+### 5.1 NSSAA Flow with UDM (TS 23.502 §4.2.9)
 
 ```
 Step 1: AMF Mock initiates N58 call
@@ -154,50 +229,80 @@ Step 1: AMF Mock initiates N58 call
 Step 2: HTTP GW routes to Biz Pod                         ▼
                                                  ┌─────────────┐
                                                  │   Biz Pod   │
-                                                 │  (validate, │
-                                                 │  session,   │
-                                                 │  forward)   │
+                                                 │  (validate) │
                                                  └──────┬──────┘
                                                           │
-Step 3: Biz Pod forwards to AAA Gateway                   ▼
+Step 3: Biz Pod queries UDM for auth subscription          ▼
+                                                 ┌─────────────┐
+                                                 │  UDM Mock  │
+                                                 │ Nudm_UECM_ │
+                                                 │    Get     │
+                                                 └──────┬──────┘
+                                                          │
+Step 4: UDM returns auth subscription                     ▼
+       (AAA server URL, EAP method)              ┌─────────────┐
+                                                 │   Biz Pod   │
+                                                 │ (AAA route) │
+                                                 └──────┬──────┘
+                                                          │
+Step 5: Biz Pod forwards to AAA Gateway                   ▼
                                                  ┌─────────────┐
                                                  │ AAA Gateway │
                                                  │  (RADIUS/  │
                                                  │  Diameter)  │
                                                  └──────┬──────┘
                                                           │
-Step 4: AAA Gateway sends to AAA-S                       ▼
+Step 6: AAA Gateway sends to AAA-S                       ▼
                                                  ┌─────────────┐
                                                  │ mock-aaa-s │
                                                  │  (EAP-TLS) │
                                                  └──────┬──────┘
                                                           │
-Step 5: AAA-S responds with Access-Challenge
+Step 7: AAA-S responds with Access-Challenge
                               Access-Challenge ◀────────────
                        (eapMessage: TLS handshake)
                                                           │
-Step 6-8: Multi-round EAP-TLS handshake
-       (repeat steps 2-5 until handshake complete)
+Step 8-10: Multi-round EAP-TLS handshake
+       (repeat steps 5-7 until handshake complete)
 
-Step 9: Final response to AMF
+Step 11: Final response to AMF
 ┌─────────────┐    200 OK                      ┌─────────────┐
 │  AMF Mock  │ ◀────────────────────────────── │ HTTP Gateway│
 │             │    {authCtxId, authResult:     │             │
 └─────────────┘     EAP_SUCCESS}               └─────────────┘
+
+Step 12: Biz Pod updates UDM
+                                                 ┌─────────────┐
+                                                 │  UDM Mock  │
+                                                 │ Nudm_UECM_ │
+                                                 │ UpdateAuth  │
+                                                 └─────────────┘
 ```
 
-### 5.2 AIW Flow (TS 29.526 §7.3)
+### 5.2 AIW Flow with UDM (TS 29.526 §7.3)
 
 ```
-AUSF Mock  ──▶  HTTP GW  ──▶  Biz Pod  ──▶  AAA GW  ──▶  mock-aaa-s
-                  ▲                                         │
-                  │                                         │
-              201 Created                              Access-
-              {authCtxId, eapMessage}                 Challenge
-                  │                                         │
-                  └─────────────────────────────────────────┘
-                           PUT /authentications/{id}
-                           {eapMessage: response}
+AUSF Mock  ──▶  HTTP GW  ──▶  Biz Pod  ──▶  UDM Mock  ──▶  Biz Pod
+  (initiate)                                  Nudm_UECM_Get
+                        │                          │
+                        │                          ▼
+                        │                    (auth subscription)
+                        │                          │
+                        │                          ▼
+                        │                    ┌─────────────┐
+                        │                    │ AAA Gateway │
+                        │                    └──────┬──────┘
+                        │                          │
+                        ▼                          ▼
+                   ┌─────────────┐          ┌─────────────┐
+                   │ HTTP GW    │          │ mock-aaa-s │
+                   │  (201)     │          └──────┬──────┘
+                   └──────┬──────┘                 │
+                          │                       │
+                          │◀──────────────────────┘
+                          │    Access-Challenge
+                          ▼
+                     (eapMessage)
 ```
 
 ---
@@ -210,10 +315,14 @@ AUSF Mock  ──▶  HTTP GW  ──▶  Biz Pod  ──▶  AAA GW  ──▶ 
 |----------|---------|-------------------|
 | AAA Timeout | mock-aaa-s doesn't respond for 5s | 504 after retry exhaustion |
 | AAA Unreachable | mock-aaa-s is down | 502 after circuit breaker |
+| UDM Timeout | UDM mock doesn't respond | 504 Gateway Timeout |
+| UDM Not Found | GPSI/SUPI not in UDM | 404 Not Found |
 | Invalid GPSI | GPSI doesn't match pattern | 400 with ProblemDetails |
 | Session Not Found | PUT with unknown authCtxId | 404 Not Found |
 | DB Down | PostgreSQL unavailable | 503 Service Unavailable |
 | Redis Down | Redis unavailable | Fallback to PostgreSQL |
+| Diameter CER Fail | CER/CEA handshake fails | 502 Bad Gateway |
+| Diameter Watchdog | Watchdog timeout | Connection reset |
 
 ### 6.2 Error Response Format
 
@@ -233,16 +342,17 @@ All errors return ProblemDetails (RFC 7807):
 
 | HTTP | Cause | Description |
 |------|-------|-------------|
-| 400 | INVALID_GPSI_FORMAT | GPSI doesn't match `^(msisdn-[0-9]{5,15}\|extid-[^@]+@[^@]+\|.+)$` |
+| 400 | INVALID_GPSI_FORMAT | GPSI doesn't match pattern |
 | 400 | INVALID_SUPI_FORMAT | SUPI doesn't match `^imsi-[0-9]{15}$` |
 | 400 | INVALID_SNSSAI | Snssai.sst > 255 or sd not 6 hex chars |
 | 400 | BAD_REQUEST | Missing required fields |
 | 403 | AAA_REJECTED | AAA-S rejected authentication |
+| 404 | UDM_NOT_FOUND | GPSI/SUPI not found in UDM |
 | 404 | AAA_NOT_CONFIGURED | No AAA server for SUPI/GPSI range |
 | 404 | SESSION_NOT_FOUND | authCtxId doesn't exist |
-| 502 | BAD_GATEWAY | AAA-S unreachable |
-| 503 | SERVICE_UNAVAILABLE | AAA-S temporarily unavailable |
-| 504 | GATEWAY_TIMEOUT | AAA-S timeout |
+| 502 | BAD_GATEWAY | AAA-S unreachable, CER/CEA fails |
+| 503 | SERVICE_UNAVAILABLE | UDM/AAA-S temporarily unavailable |
+| 504 | GATEWAY_TIMEOUT | UDM/AAA-S timeout |
 
 ---
 
@@ -256,6 +366,18 @@ make test-e2e
 
 # Full chain tests only (skips existing tests)
 go test -tags=e2e -run TestFullChain ./test/e2e/fullchain/...
+
+# NSSAA scenarios only
+go test -tags=e2e -run TestFullChain_N58 ./test/e2e/fullchain/...
+
+# AIW scenarios only
+go test -tags=e2e -run TestFullChain_N60 ./test/e2e/fullchain/...
+
+# UDM integration tests only
+go test -tags=e2e -run TestFullChain_UDM ./test/e2e/fullchain/...
+
+# Diameter transport tests only
+go test -tags=e2e -run TestFullChain_Diameter ./test/e2e/fullchain/...
 
 # Single scenario
 go test -tags=e2e -run TestFullChain_N58_HappyPath ./test/e2e/fullchain/...
@@ -298,14 +420,13 @@ jobs:
 
 ---
 
-## 8. Mock AAA-S Integration
+## 8. mock-aaa-s Integration
 
 ### 8.1 mock-aaa-s Container
 
-The existing `mock-aaa-s` container will be:
-1. Added to `compose/dev.yaml`
-2. Wired to AAA Gateway via `AAAConfig`
-3. Configurable via environment variables
+The existing `test/aaa_sim/` package implements:
+- **RADIUS Server (UDP/1812)**: EAP-Message attribute handling, Message-Authenticator validation
+- **Diameter Server (TCP:3868, SCTP)**: CER/CEA handshake, DWR/DWA watchdog, DER/DEA handling
 
 ### 8.2 Configuration
 
@@ -314,53 +435,120 @@ The existing `mock-aaa-s` container will be:
 services:
   mock-aaa-s:
     build:
-      context: ./mock-aaa-s
+      context: ./test/aaa_sim
+      dockerfile: Dockerfile
     ports:
       - "1812:1812/udp"   # RADIUS
-      - "3868:3868/tcp"   # Diameter
+      - "3868:3868/tcp"   # Diameter TCP
+      - "3868:3868/sctp"  # Diameter SCTP
     environment:
-      EAP_METHOD: EAP-TLS
-      AUTH_RESULT: ACCEPT
-      MSK_LENGTH: 64
-      RESPONSE_DELAY_MS: 0
+      AAA_SIM_MODE: EAP_TLS_SUCCESS
+      AAA_SIM_SECRET: testing123
+      AAA_SIM_DIAMETER_TRANSPORT: tcp
+      AAA_SIM_DIAMETER_ADDR: ":3868"
+      AAA_SIM_RADIUS_ADDR: ":1812"
+```
+
+### 8.3 Diameter CER/CEA Handshake
+
+```go
+// The Diameter server uses go-diameter/v4/sm for RFC 6733 compliance:
+// 1. Client connects to port 3868
+// 2. Client sends CER (Capabilities-Exchange-Request)
+// 3. Server responds with CEA (Capabilities-Exchange-Answer)
+// 4. Connection is now established for DER/DEA
+// 5. Watchdog (DWR/DWA) maintains connection health
+//
+// The AAA Gateway client must:
+// 1. Connect to mock-aaa-s
+// 2. Wait for CER/CEA exchange to complete
+// 3. Only then send DER messages
 ```
 
 ---
 
-## 9. Acceptance Criteria
+## 9. UDM Mock Extension
+
+### 9.1 Auth Subscription Response
+
+The UDM Mock must return auth subscription data for GPSI-to-AAA routing:
+
+```json
+{
+  "authContexts": [
+    {
+      "authType": "EAP_TLS",
+      "aaaServer": "radius://mock-aaa-s:1812",
+      "priority": 1
+    }
+  ]
+}
+```
+
+### 9.2 Configuration for Tests
+
+```go
+// UDM Mock must support:
+type UDMMockConfig struct {
+    AuthSubscriptions map[string]*AuthSubscription
+    GPSIToSUPIMapping map[string]string
+    ErrorInjection    map[string]int  // SUPI -> HTTP status code
+}
+```
+
+---
+
+## 10. Acceptance Criteria
 
 | ID | Criteria | Validation |
 |----|----------|------------|
 | AC-01 | All N58 scenarios pass | `go test -tags=e2e -run TestFullChain_N58 ./test/e2e/fullchain/...` |
 | AC-02 | All N60 scenarios pass | `go test -tags=e2e -run TestFullChain_N60 ./test/e2e/fullchain/...` |
-| AC-03 | Resilience scenarios pass | `go test -tags=e2e -run TestFullChain_Resilience ./test/e2e/fullchain/...` |
-| AC-04 | Error codes match spec | All 4xx/5xx responses have ProblemDetails |
-| AC-05 | Circuit breaker verified | TC-N58-05 passes |
-| AC-06 | Re-auth flow verified | TC-N58-06 passes |
-| AC-07 | Revocation flow verified | TC-N58-07 passes |
+| AC-03 | UDM integration scenarios pass | `go test -tags=e2e -run TestFullChain_UDM ./test/e2e/fullchain/...` |
+| AC-04 | Diameter transport scenarios pass | `go test -tags=e2e -run TestFullChain_Diameter ./test/e2e/fullchain/...` |
+| AC-05 | Resilience scenarios pass | `go test -tags=e2e -run TestFullChain_Resilience ./test/e2e/fullchain/...` |
+| AC-06 | Error codes match spec | All 4xx/5xx responses have ProblemDetails |
+| AC-07 | CER/CEA handshake verified | TC-DIA-01 passes |
+| AC-08 | Watchdog verified | TC-DIA-02 passes |
+| AC-09 | Circuit breaker verified | TC-N58-05 passes |
+| AC-10 | Re-auth flow verified | TC-N58-06 passes |
+| AC-11 | Revocation flow verified | TC-N58-07 passes |
+| AC-12 | UDM update verified | TC-UDM-03 passes |
 
 ---
 
-## 10. Implementation Plan
+## 11. Implementation Plan
 
 ### Phase 1: Infrastructure
 1. Create `test/e2e/fullchain/` directory structure
 2. Add mock-aaa-s to docker-compose
 3. Implement `amf_initiator.go` and `ausf_initiator.go`
 4. Implement `harness_fullchain.go`
+5. Extend UDM Mock to support auth subscription
 
-### Phase 2: NSSAA Scenarios
-5. Implement TC-N58-01 through TC-N58-10
-6. Validate against existing NSSAA flow tests
+### Phase 2: Diameter Transport
+6. Verify CER/CEA handshake in mock-aaa-s
+7. Verify DWR/DWA watchdog in mock-aaa-s
+8. Add SCTP transport support (if needed)
+9. Implement TC-DIA-* scenarios
 
-### Phase 3: AIW Scenarios
-7. Implement TC-N60-01 through TC-N60-07
-8. Validate against existing AIW flow tests
+### Phase 3: UDM Integration
+10. Extend UDM Mock with auth subscription
+11. Implement TC-UDM-* scenarios
+12. Verify Nudm_UECM_UpdateAuthContext called
 
-### Phase 4: Resilience Scenarios
-9. Implement TC-RES-01 through TC-RES-05
-10. Add circuit breaker and DLQ verification
+### Phase 4: NSSAA Scenarios
+13. Implement TC-N58-01 through TC-N58-10
+14. Validate against existing NSSAA flow tests
+
+### Phase 5: AIW Scenarios
+15. Implement TC-N60-01 through TC-N60-07
+16. Validate against existing AIW flow tests
+
+### Phase 6: Resilience Scenarios
+17. Implement TC-RES-01 through TC-RES-05
+18. Add circuit breaker and DLQ verification
 
 ---
 
-*Design approved: 2026-05-02*
+*Design updated: 2026-05-02 (added UDM integration and Diameter transport requirements)*
