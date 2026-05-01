@@ -1,8 +1,11 @@
 ---
-spec: RFC 2865 / RFC 3579 / RFC 4818 / RFC 3588 / RFC 4301
-section: AAA Protocol Security
+spec: TS 29.561 v18.5.0 / RFC 2865 / RFC 3579 / RFC 4818
+section: TS 29.561 §16.1 / §17.1
 interface: N/A (NSSAAF ↔ AAA-S)
-service: AAA Security
+service: N/A (AAA protocol security)
+operation: N/A
+eapMethod: N/A
+aaaProtocol: RADIUS / Diameter
 ---
 
 # NSSAAF AAA Protocol Security Design

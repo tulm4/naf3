@@ -372,20 +372,30 @@ TTL: 300s
               ▼              │              ▼         │
     ┌──────────────────┐   │   ┌──────────────────┐ │
     │    EAP_SUCCESS    │   │   │   EAP_FAILURE    │ │
-    │   (terminal)      │   │   │   (terminal)     │ │
-    └──────────────────┘   │   └──────────────────┘ │
-                            │                        │
-                            │ timeout / retry       │
-                            └────────────────────────┘
-                             (back to NOT_EXECUTED,
-                              AMF stores in UE Context)
+    │   (terminal for  │   │   │   (terminal)     │ │
+    │    initial auth) │   │   └──────────────────┘ │
+    └────────┬─────────┘   │                        │
+             │              │                        │
+             │ AAA-S Reauth │                        │
+             │    Request   │                        │
+             ▼              │                        │
+    ┌──────────────────┐   │                        │
+    │     PENDING      │───┘                        │
+    │  (re-auth in    │                             │
+    │   progress)      │                             │
+    └──────────────────┘                             │
+                                                    │
+             timeout / retry (retry next reg) ◄───────┘
+             (back to NOT_EXECUTED,
+              AMF stores in UE Context)
 ```
 
 **State transitions triggered by:**
-- `NOT_EXECUTED → PENDING`: POST /slice-authentications
+- `NOT_EXECUTED → PENDING`: POST /slice-authentications (initial NSSAA)
 - `PENDING → EAP_SUCCESS`: AAA-S returns Access-Accept / DEA with EAP-Success
 - `PENDING → EAP_FAILURE`: AAA-S returns Access-Reject / DEA with EAP-Failure
 - `PENDING → NOT_EXECUTED`: Session timeout, AMF stores result in UE Context
+- `EAP_SUCCESS → PENDING`: AAA-S Reauth Request (TS 23.502 §4.2.9.3)
 
 ### 2.7 Callback Notifications (Server-Sent)
 
@@ -422,6 +432,8 @@ Headers:
 1. NSSAAF receives Disconnect-Request (RADIUS CoA) or ASR (Diameter) from AAA-S
 2. Validate message authenticator / signature
 3. Look up active slice-auth session by (gpsi, snssai) in Redis
+3a. NSSAAF → UDM: Nudm_UECM_Get(GPSI) → get AMF ID(s)
+    NOTE: If AMF not registered → procedure stops here (log warning, return 204)
 4. If session found:
    a. Transition NssaaStatus from EAP_SUCCESS → PENDING
    b. POST to reauthNotifUri (from SliceAuthContext)
@@ -465,6 +477,9 @@ POST https://amf1.operator.com:8080/namf-comm/v1/subscriptions
 1. NSSAAF receives Revocation-Request (RADIUS DM) or STR (Diameter) from AAA-S
 2. Validate message authenticator / signature
 3. Look up all active slice-auth sessions for (gpsi, snssai) in Redis/DB
+3a. NSSAAF → UDM: Nudm_UECM_Get(GPSI) → get AMF ID(s)
+    NOTE: If AMF not registered → procedure stops here (log warning, return 204)
+    NOTE: NSSAAF may send ACK to AAA-S before receiving AMF/Nudm response (per TS 23.502)
 4. For each matching session:
    a. Transition NssaaStatus from EAP_SUCCESS → EAP_FAILURE
    b. POST to revocNotifUri (from SliceAuthContext)

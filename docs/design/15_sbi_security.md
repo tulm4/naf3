@@ -1,9 +1,11 @@
 ---
-spec: RFC 8446 / RFC 5246 / RFC 5216 / TS 29.500 §5 / TS 33.310
-section: §5
-interface: N58, N60, N59, Nnrf (all SBI)
-service: Security
+spec: TS 29.500 v18.2.0 / TS 33.310 v18.10.0
+section: TS 29.500 §5 / TS 33.310 §6
+interface: N58, N60, N59, Nnrf
+service: N/A (SBI security)
 operation: N/A
+eapMethod: N/A
+aaaProtocol: N/A
 ---
 
 # NSSAAF SBI Security Design
