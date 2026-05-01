@@ -170,8 +170,14 @@ func (m *UDMMock) handleAuthContexts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	m.mu.Lock()
+	errorCode, hasError := m.errorCodes[supi]
 	authSub, ok := m.authSubscriptions[supi]
 	m.mu.Unlock()
+
+	if hasError {
+		http.Error(w, fmt.Sprintf(`{"cause":"UDM_ERROR_%d"}`, errorCode), errorCode)
+		return
+	}
 
 	if !ok {
 		http.Error(w, `{"cause":"USER_NOT_FOUND","supi":"`+supi+`"}`, http.StatusNotFound)
