@@ -3,6 +3,7 @@ package mocks
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -21,7 +22,7 @@ func TestUDMMock_SetAuthSubscription(t *testing.T) {
 	}
 
 	body := resp.Body.String()
-	if !contains(body, "EAP_TLS") {
+	if !strings.Contains(body, "EAP_TLS") {
 		t.Errorf("expected response to contain 'EAP_TLS', got: %s", body)
 	}
 }

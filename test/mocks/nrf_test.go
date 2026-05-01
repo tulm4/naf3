@@ -3,6 +3,7 @@ package mocks
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -21,20 +22,7 @@ func TestNRFMock_SetServiceEndpoint(t *testing.T) {
 	}
 
 	body := resp.Body.String()
-	if !contains(body, "udm-mock") {
+	if !strings.Contains(body, "udm-mock") {
 		t.Errorf("expected response to contain 'udm-mock', got: %s", body)
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsAt(s, substr))
-}
-
-func containsAt(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
