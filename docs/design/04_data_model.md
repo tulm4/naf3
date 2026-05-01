@@ -409,6 +409,8 @@ CREATE INDEX idx_supi_ranges_supi
 
 AIW uses the same `aaa_server_configs` table as NSSAA, but with a different lookup key. Where NSSAA resolves by `(snssai_sst, snssai_sd)`, AIW resolves by SUPI range. The `supi_ranges` table (NRM, §3.4) provides the mapping from SUPI to `aaa_config_id`.
 
+> **Note:** SUPI range → AAA config mapping is **operator-specific configuration**, not defined in 3GPP specs. The 3GPP specs (TS 29.526 §7.3) define the API interface but not the internal routing logic between SUPI and AAA servers.
+
 ```sql
 -- AIW AAA config lookup: SUPI → supi_ranges → aaa_server_configs
 -- Resolution order:

@@ -1,6 +1,6 @@
 ---
-spec: TS 29.526 v18.7.0 / TS 33.501 v18.10.0 / TS 33.501 §I.2.2.2
-section: §7.3, TS 29.501 §I.2.2.2
+spec: TS 29.526 v18.7.0 / TS 33.501 v18.10.0
+section: TS 29.526 §7.3 / TS 33.501 §I.2.2.2
 interface: N60 (AUSF-NSSAAF)
 service: Nnssaaf_AIW
 operation: Authenticate
@@ -156,6 +156,7 @@ Location: https://nssAAF.operator.com/nnssaaf-aiw/v1/authentications/01fr5xg2e3p
   "supi": "imu-208046000000001",
   "authCtxId": "01fr5xg2e3p4q5r6s7t8u9v0w2",
   "eapMessage": "AG5uZXh0LWlkQHVzZXIuZXhhbXBsZS5jb20=",
+  "authResult": null,
   "ttlsInnerMethodContainer": null,
   "supportedFeatures": "3GPP-R18-AIW"
 }

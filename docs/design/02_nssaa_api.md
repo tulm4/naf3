@@ -64,7 +64,7 @@ POST /nnssaaf-nssaa/v1/slice-authentications
 
 | Field | Validation | Error |
 |-------|-----------|-------|
-| gpsi | Required, matches `^5[0-9]{8,14}$` or `^5-[0-9]{8,14}$` (with optional dash per TS 23.003) | 400 InvalidGpsi |
+| gpsi | Required, matches `^5[0-9]{8,14}$` (TS 29.571 §5.4.4.61) | 400 InvalidGpsi |
 | snssai.sst | Required, 0-255 | 400 InvalidSnssaiSst |
 | snssai.sd | Optional, 6 hex chars `[A-Fa-f0-9]{6}` | 400 InvalidSnssaiSd |
 | eapIdRsp | Required, Base64 encoded, non-empty | 400 MissingEapPayload |
@@ -79,7 +79,7 @@ POST /nnssaaf-nssaa/v1/slice-authentications
    - Reject if token expired or missing scope
 2. Parse SliceAuthInfo JSON
 3. Validate all required fields:
-   - gpsi: regex ^5[0-9]{8,14}$
+   - gpsi: regex ^5[0-9]{8,14}$ (TS 29.571 §5.4.4.61)
    - snssai.sst: 0-255
    - snssai.sd: 6 hex chars or omitted
    - eapIdRsp: non-empty, valid Base64, decodes to valid EAP Response packet
