@@ -93,9 +93,45 @@ func (p *Pool) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
 	return p.pool.QueryRow(ctx, sql, args...)
 }
 
-// BeginTx starts a new transaction.
-func (p *Pool) BeginTx(ctx context.Context) (pgx.Tx, error) {
-	return p.pool.Begin(ctx)
+// BeginTx starts a new transaction and returns a transaction pool wrapper.
+func (p *Pool) BeginTx(ctx context.Context) (*TxPool, error) {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin transaction: %w", err)
+	}
+	return &TxPool{pool: p, tx: tx}, nil
+}
+
+// TxPool wraps a transaction for pool-like operations.
+type TxPool struct {
+	pool *Pool
+	tx   pgx.Tx
+}
+
+// Exec executes a query without returning rows.
+func (t *TxPool) Exec(ctx context.Context, sql string, args ...any) error {
+	_, err := t.tx.Exec(ctx, sql, args...)
+	return err
+}
+
+// Query executes a query and returns rows.
+func (t *TxPool) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	return t.tx.Query(ctx, sql, args...)
+}
+
+// QueryRow executes a query and returns a single row.
+func (t *TxPool) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	return t.tx.QueryRow(ctx, sql, args...)
+}
+
+// Rollback rolls back the transaction.
+func (t *TxPool) Rollback(ctx context.Context) error {
+	return t.tx.Rollback(ctx)
+}
+
+// Commit commits the transaction.
+func (t *TxPool) Commit(ctx context.Context) error {
+	return t.tx.Commit(ctx)
 }
 
 // Stats returns pool statistics.
@@ -111,4 +147,28 @@ func (p *Pool) Close() {
 // Ping checks database connectivity.
 func (p *Pool) Ping(ctx context.Context) error {
 	return p.pool.Ping(ctx)
+}
+
+// ExecTx executes a function within a transaction.
+func (p *Pool) ExecTx(ctx context.Context, fn func(*Pool) error) error {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+
+	// Create a tx pool that wraps the transaction
+	txPool := &Pool{pool: p.pool} // Reuse same underlying pool reference
+
+	if err := fn(txPool); err != nil {
+		if rbErr := tx.Rollback(ctx); rbErr != nil {
+			return fmt.Errorf("rollback failed: %v (original error: %w)", rbErr, err)
+		}
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+
+	return nil
 }
