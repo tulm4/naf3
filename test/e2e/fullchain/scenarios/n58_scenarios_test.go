@@ -4,9 +4,10 @@
 package scenarios
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
-	"strings"
 	"testing"
 
 	"github.com/operator/nssAAF/test/e2e/fullchain"
@@ -21,6 +22,7 @@ func TestN58_HappyPath(t *testing.T) {
 		t.Skip("E2E tests skipped in short mode")
 	}
 
+	ctx := context.Background()
 	h := fullchain.NewHarness(t)
 	defer h.Close()
 	h.ResetState()
@@ -32,9 +34,9 @@ func TestN58_HappyPath(t *testing.T) {
 	}
 
 	payloadBytes, _ := json.Marshal(body)
-	req, err := http.NewRequest(http.MethodPost,
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		h.HTTPGWURL()+"/nnssaaf-nssaa/v1/slice-authentications",
-		strings.NewReader(string(payloadBytes)))
+		bytes.NewReader(payloadBytes))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Request-ID", "n58-happy-"+t.Name())
@@ -61,6 +63,7 @@ func TestN58_InvalidGPSI(t *testing.T) {
 		t.Skip("E2E tests skipped in short mode")
 	}
 
+	ctx := context.Background()
 	h := fullchain.NewHarness(t)
 	defer h.Close()
 	h.ResetState()
@@ -72,9 +75,9 @@ func TestN58_InvalidGPSI(t *testing.T) {
 	}
 
 	payloadBytes, _ := json.Marshal(body)
-	req, err := http.NewRequest(http.MethodPost,
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		h.HTTPGWURL()+"/nnssaaf-nssaa/v1/slice-authentications",
-		strings.NewReader(string(payloadBytes)))
+		bytes.NewReader(payloadBytes))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 
@@ -98,6 +101,7 @@ func TestN58_InvalidSnssai(t *testing.T) {
 		t.Skip("E2E tests skipped in short mode")
 	}
 
+	ctx := context.Background()
 	h := fullchain.NewHarness(t)
 	defer h.Close()
 	h.ResetState()
@@ -109,9 +113,9 @@ func TestN58_InvalidSnssai(t *testing.T) {
 	}
 
 	payloadBytes, _ := json.Marshal(body)
-	req, err := http.NewRequest(http.MethodPost,
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		h.HTTPGWURL()+"/nnssaaf-nssaa/v1/slice-authentications",
-		strings.NewReader(string(payloadBytes)))
+		bytes.NewReader(payloadBytes))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 

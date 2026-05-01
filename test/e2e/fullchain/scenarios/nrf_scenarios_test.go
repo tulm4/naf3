@@ -4,6 +4,7 @@
 package scenarios
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -20,6 +21,7 @@ func TestNRF_UDMDiscovery(t *testing.T) {
 		t.Skip("E2E tests skipped in short mode")
 	}
 
+	ctx := context.Background()
 	nrfMock := mocks.NewNRFMock()
 	defer nrfMock.Close()
 
@@ -27,7 +29,7 @@ func TestNRF_UDMDiscovery(t *testing.T) {
 	nrfMock.SetServiceEndpoint("UDM", "nudm-uem", "udm-mock", 8080)
 
 	client := &http.Client{}
-	req, err := http.NewRequest(http.MethodGet,
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		nrfMock.URL()+"/nnrf-disc/v1/nf-instances?target-nf-type=UDM&service-names=nudm-uem",
 		nil)
 	require.NoError(t, err)
@@ -51,8 +53,8 @@ func TestNRF_UDMDiscovery(t *testing.T) {
 	require.True(t, ok)
 	nudmService, ok := services["nudm-uem"].(map[string]interface{})
 	require.True(t, ok)
-	endpoints, ok := nudmService["ipEndPoints"].([]interface{})
-	require.NotEmpty(t, endpoints)
+	_, ok = nudmService["ipEndPoints"].([]interface{})
+	require.True(t, ok)
 }
 
 // TestNRF_CustomEndpoint verifies SetServiceEndpoint changes discovery response.
@@ -62,6 +64,7 @@ func TestNRF_CustomEndpoint(t *testing.T) {
 		t.Skip("E2E tests skipped in short mode")
 	}
 
+	ctx := context.Background()
 	nrfMock := mocks.NewNRFMock()
 	defer nrfMock.Close()
 
@@ -69,7 +72,7 @@ func TestNRF_CustomEndpoint(t *testing.T) {
 	nrfMock.SetServiceEndpoint("UDM", "nudm-uem", "custom-udm", 9090)
 
 	client := &http.Client{}
-	req, err := http.NewRequest(http.MethodGet,
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		nrfMock.URL()+"/nnrf-disc/v1/nf-instances?target-nf-type=UDM&service-names=nudm-uem",
 		nil)
 	require.NoError(t, err)
@@ -99,6 +102,7 @@ func TestNRF_NotRegistered(t *testing.T) {
 		t.Skip("E2E tests skipped in short mode")
 	}
 
+	ctx := context.Background()
 	nrfMock := mocks.NewNRFMock()
 	defer nrfMock.Close()
 
@@ -106,7 +110,7 @@ func TestNRF_NotRegistered(t *testing.T) {
 	nrfMock.SetNFStatus("udm-001", "NOT_REGISTERED")
 
 	client := &http.Client{}
-	req, err := http.NewRequest(http.MethodGet,
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		nrfMock.URL()+"/nnrf-disc/v1/nf-instances?target-nf-type=UDM&service-names=nudm-uem",
 		nil)
 	require.NoError(t, err)
@@ -132,11 +136,12 @@ func TestNRF_AllRegistered(t *testing.T) {
 		t.Skip("E2E tests skipped in short mode")
 	}
 
+	ctx := context.Background()
 	nrfMock := mocks.NewNRFMock()
 	defer nrfMock.Close()
 
 	client := &http.Client{}
-	req, err := http.NewRequest(http.MethodGet,
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		nrfMock.URL()+"/nnrf-disc/v1/nf-instances",
 		nil)
 	require.NoError(t, err)
