@@ -1,5 +1,8 @@
-// Package tests provides end-to-end integration tests for the NSSAAF system.
-package tests
+//go:build e2e
+// +build e2e
+
+// Package e2e provides end-to-end integration tests for the NSSAAF system.
+package e2e
 
 import (
 	"context"
@@ -9,8 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/operator/nssAAF/test/e2e/harness"
-	"github.com/operator/nssAAF/test/e2e/suite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -22,7 +23,7 @@ func TestE2E_NSSAA_HappyPath(t *testing.T) {
 		t.Skip("E2E tests skipped in short mode")
 	}
 
-	h := suite.NewHarnessForTest(t)
+	h := NewHarnessForTest(t)
 	defer h.Close()
 
 	// Start AMF mock to receive notifications.
@@ -108,7 +109,7 @@ func TestE2E_NSSAA_AuthFailure(t *testing.T) {
 		t.Skip("E2E tests skipped in short mode")
 	}
 
-	h := suite.NewHarnessForTest(t)
+	h := NewHarnessForTest(t)
 	defer h.Close()
 
 	// Configure AAA-S mode via env (if supported) or use the failure scenario.
@@ -166,7 +167,7 @@ func TestE2E_NSSAA_AuthChallenge(t *testing.T) {
 		t.Skip("E2E tests skipped in short mode")
 	}
 
-	h := suite.NewHarnessForTest(t)
+	h := NewHarnessForTest(t)
 	defer h.Close()
 
 	body := map[string]interface{}{
@@ -231,7 +232,7 @@ func TestE2E_NSSAA_InvalidGPSI(t *testing.T) {
 		t.Skip("E2E tests skipped in short mode")
 	}
 
-	h := suite.NewHarnessForTest(t)
+	h := NewHarnessForTest(t)
 	defer h.Close()
 
 	body := map[string]interface{}{
@@ -263,19 +264,19 @@ func TestE2E_NSSAA_InvalidSnssai(t *testing.T) {
 		t.Skip("E2E tests skipped in short mode")
 	}
 
-	h := suite.NewHarnessForTest(t)
+	h := NewHarnessForTest(t)
 	defer h.Close()
 
-	testCases := []struct {
-		name   string
-		snssai map[string]interface{}
+	tests := []struct {
+		name     string
+		snssai   map[string]interface{}
 	}{
 		{"SST out of range", map[string]interface{}{"sst": 300}},
 		{"SD not 6 hex chars", map[string]interface{}{"sst": 1, "sd": "GGGGGG"}},
 		{"Missing SST", map[string]interface{}{}},
 	}
 
-	for _, tc := range testCases {
+	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			body := map[string]interface{}{
 				"gpsi":     "520804600000001",
@@ -341,16 +342,3 @@ func requireTestContext(t *testing.T) context.Context {
 	t.Cleanup(cancel)
 	return ctx
 }
-
-// parseAuthCtxID extracts authCtxId from a NSSAA API response.
-func parseAuthCtxID(t *testing.T, resp *http.Response) string {
-	var body map[string]interface{}
-	err := json.NewDecoder(resp.Body).Decode(&body)
-	require.NoError(t, err)
-	id, ok := body["authCtxId"].(string)
-	require.True(t, ok, "authCtxId must be present")
-	return id
-}
-
-// Compile-time check: Harness type is accessible
-var _ *harness.Harness = nil
