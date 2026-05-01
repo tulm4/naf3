@@ -9,10 +9,10 @@ import (
 	"strings"
 )
 
-// SUPI patterns from TS 29.571 §5.4.4.2:
-// IMSI-based SUPI: 'imu-' followed by 15 digits (MCC + MNC + MSIN)
+// IMSI-based SUPI: 'imsi-' followed by 5-15 digits (MCC + MNC + MSIN)
+// Per TS 23.003 §2.2, an IMSI is 15 digits: MCC (3) + MNC (2-3) + MSIN (remaining)
 // Spec: TS 23.003 §2.2, TS 29.571 §5.4.4.2
-var supiIMSIRegex = regexp.MustCompile(`^imu-[0-9]{15}$`)
+var supiIMSIRegex = regexp.MustCompile(`^imsi-[0-9]{5,15}$`)
 
 // Supi represents a Subscription Permanent Identifier.
 // It is the permanent identifier of a 5G subscription.
@@ -33,7 +33,7 @@ func (s Supi) Validate() error {
 	if !supiIMSIRegex.MatchString(string(s)) {
 		return &ValidationError{
 			Field:      "supi",
-			Reason:     "SUPI must match pattern ^imu-[0-9]{15}$ (IMSI-based SUPI, TS 29.571 §5.4.4.2)",
+			Reason:     "SUPI must match pattern ^imsi-[0-9]{5,15}$ (IMSI-based SUPI, TS 29.571 §5.4.4.2)",
 			HTTPStatus: 400,
 			Cause:      CauseInvalidSupi,
 		}
@@ -43,16 +43,16 @@ func (s Supi) Validate() error {
 
 // IsIMSI reports whether the SUPI is an IMSI-based SUPI.
 func (s Supi) IsIMSI() bool {
-	return strings.HasPrefix(string(s), "imu-")
+	return strings.HasPrefix(string(s), "imsi-")
 }
 
-// IMSI returns the IMSI component of the SUPI (without the "imu-" prefix).
+// IMSI returns the IMSI component of the SUPI (without the "imsi-" prefix).
 // Only valid if IsIMSI() is true.
 func (s Supi) IMSI() string {
 	if !s.IsIMSI() {
 		return ""
 	}
-	return strings.TrimPrefix(string(s), "imu-")
+	return strings.TrimPrefix(string(s), "imsi-")
 }
 
 // String implements fmt.Stringer.

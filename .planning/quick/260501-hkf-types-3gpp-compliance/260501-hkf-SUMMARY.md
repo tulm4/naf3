@@ -41,9 +41,26 @@ var gpsiRegex = regexp.MustCompile(`^5[0-9]{8,14}$`)
 var gpsiRegex = regexp.MustCompile(`^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$`)
 ```
 
-### 2. SUPI — Already Correct ✅
+### 2. SUPI — FIXED ✅
 
-IMSI-based SUPI pattern `^imu-[0-9]{15}$` is compliant with TS 29.571 §5.2.2.
+**Spec (TS 29.571 §5.2.2):**
+```
+Pattern: '^(imsi-[0-9]{5,15}|nai-.+|gci-.+|gli-.+|.+)$'
+```
+
+**Previous (INCORRECT - contained typo):**
+```go
+var supiIMSIRegex = regexp.MustCompile(`^imu-[0-9]{15}$`)
+```
+
+**Fixed:**
+```go
+var supiIMSIRegex = regexp.MustCompile(`^imsi-[0-9]{5,15}$`)
+```
+
+**Issues Fixed:**
+1. **Typo**: `imu-` → `imsi-` (was missing 's')
+2. **Length**: Fixed to allow 5-15 digits per spec (was only 15)
 
 ### 3. S-NSSAI — Already Correct ✅
 
@@ -57,10 +74,10 @@ SST range 0-255 and SD format (6 hex chars) are compliant.
 | File | Change |
 |------|--------|
 | `internal/types/gpsi.go` | Updated GPSI regex to match TS 29.571 §5.2.2 |
-| `internal/api/common/validator.go` | Updated GPSI regex and comments |
-| `internal/types/types_test.go` | Updated GPSI validation tests |
-| `internal/api/common/common_test.go` | Updated GPSI validation tests |
-| `internal/api/nssaa/handler_test.go` | Updated GPSI invalid test cases |
+| `internal/types/supi.go` | Fixed SUPI regex typo: `imu-` → `imsi-`, length: `15` → `5,15` |
+| `internal/api/common/validator.go` | Fixed SUPI regex typo and length |
+| `internal/types/types_test.go` | Updated GPSI and SUPI validation tests |
+| `internal/api/common/common_test.go` | Updated SUPI validation tests |
 
 ### Documentation
 | File | Change |

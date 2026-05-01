@@ -39,6 +39,12 @@ func main() {
 		"listen_addr", cfg.NRM.ListenAddr,
 	)
 
+	// Override listen address from environment variable if set.
+	if envAddr := os.Getenv("NRM_LISTEN_ADDR"); envAddr != "" {
+		cfg.NRM.ListenAddr = envAddr
+		slog.Info("listen address overridden from environment", "addr", envAddr)
+	}
+
 	// Populate NRMURL from ListenAddr so that Biz Pod NRMClient
 	// can push events to this NRM server.
 	nrmURL := cfg.NRM.ListenAddr

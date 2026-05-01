@@ -6,7 +6,7 @@
   "agents_installed": true,
   "parallelization": true,
   "commit_docs": true,
-  "runtime": "claude",
+  "runtime": "codex",
   "model_profile": "balanced",
   "workflow": {
     "research": true,

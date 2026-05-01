@@ -142,7 +142,9 @@ test-integration: ## Run integration tests against real PostgreSQL and Redis via
 	docker compose -f compose/dev.yaml up -d --quiet-pull
 	@echo "$(YELLOW)Waiting for infrastructure to be healthy...$(NC)"
 	@sleep 5
-	@$(GOTEST) -race -v ./test/integration/... || { docker compose -f compose/dev.yaml down; exit 1; }
+	@TEST_DATABASE_URL="postgres://nssaa:nssaa@localhost:5432/nssaa?sslmode=disable" \
+	TEST_REDIS_URL="redis://localhost:6379" \
+	$(GOTEST) -race -v ./test/integration/... || { docker compose -f compose/dev.yaml down; exit 1; }
 	@echo "$(YELLOW)Tearing down test infrastructure...$(NC)"
 	docker compose -f compose/dev.yaml down
 	@echo "$(GREEN)Integration tests complete$(NC)"

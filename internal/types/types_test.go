@@ -163,24 +163,47 @@ func TestSupiValidate(t *testing.T) {
 		supi    Supi
 		wantErr bool
 	}{
+		// Valid: IMSI-based SUPI per TS 29.571 §5.2.2
+		// IMSI format: imsi- + 5-15 digits (MCC + MNC + MSIN)
 		{
-			name:    "valid IMSI",
-			supi:    Supi("imu-208046000000001"),
+			name:    "valid IMSI 15 digits (full length)",
+			supi:    Supi("imsi-208046000000001"),
 			wantErr: false,
 		},
+		{
+			name:    "valid IMSI 5 digits (min length)",
+			supi:    Supi("imsi-20801"),
+			wantErr: false,
+		},
+		{
+			name:    "valid IMSI 14 digits",
+			supi:    Supi("imsi-20804600000001"),
+			wantErr: false,
+		},
+		// Invalid
 		{
 			name:    "invalid empty",
 			supi:    Supi(""),
 			wantErr: true,
 		},
 		{
-			name:    "invalid prefix",
+			name:    "invalid prefix (old typo imu-)",
+			supi:    Supi("imu-208046000000001"),
+			wantErr: true,
+		},
+		{
+			name:    "invalid prefix (abc-)",
 			supi:    Supi("abc-208046000000001"),
 			wantErr: true,
 		},
 		{
-			name:    "invalid too few digits",
-			supi:    Supi("imu-208046"),
+			name:    "invalid too few digits (4)",
+			supi:    Supi("imsi-2080"),
+			wantErr: true,
+		},
+		{
+			name:    "invalid too many digits (16)",
+			supi:    Supi("imsi-2080460000000001"),
 			wantErr: true,
 		},
 	}
@@ -198,7 +221,7 @@ func TestSupiValidate(t *testing.T) {
 }
 
 func TestSupiHelpers(t *testing.T) {
-	s := Supi("imu-208046000000001")
+	s := Supi("imsi-208046000000001")
 	assert.True(t, s.IsIMSI())
 	assert.Equal(t, "208046000000001", s.IMSI())
 

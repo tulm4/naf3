@@ -177,14 +177,19 @@ func TestValidateSUPI(t *testing.T) {
 		supi    string
 		wantErr bool
 	}{
-		{"valid imsi", "imu-123456789012345", false},
-		{"valid zero imsi", "imu-000000000000000", false},
+		// Valid: IMSI-based SUPI per TS 29.571 §5.2.2
+		// IMSI format: imsi- + 5-15 digits
+		{"valid imsi 15 digits", "imsi-123456789012345", false},
+		{"valid imsi 5 digits (min)", "imsi-12345", false},
+		{"valid imsi 10 digits", "imsi-2080460000", false},
+		// Invalid
 		{"empty", "", true},
 		{"missing prefix", "123456789012345", true},
 		{"wrong prefix", "nai-123456789012345", true},
-		{"too short", "imu-12345678901234", true},
-		{"too long", "imu-1234567890123456", true},
-		{"non-digit chars", "imu-12345678901234a", true},
+		{"too short (4 digits)", "imsi-1234", true},
+		{"too short (5 digits - invalid for current impl)", "imsi-12345", false}, // 5 is valid per spec
+		{"too long (16 digits)", "imsi-1234567890123456", true},
+		{"non-digit chars", "imsi-12345678901234a", true},
 	}
 
 	for _, tt := range tests {

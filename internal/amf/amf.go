@@ -19,11 +19,12 @@ import (
 type NotificationType string
 
 const (
-	// NotificationTypeReAuth indicates a slice re-authentication notification.
-	// NotificationTypeReAuth indicates a slice re-authentication notification.
-	NotificationTypeReAuth NotificationType = "reauth"
-	// NotificationTypeRevocation indicates a slice authorization revocation notification.
-	NotificationTypeRevocation NotificationType = "revocation"
+	// NotificationTypeSliceReAuth indicates a slice re-authentication notification.
+	// Spec: TS 23.502 §4.2.9.3, TS 29.518 §5.2.2.27
+	NotificationTypeSliceReAuth NotificationType = "SLICE_RE_AUTH"
+	// NotificationTypeSliceRevoc indicates a slice authorization revocation notification.
+	// Spec: TS 23.502 §4.2.9.4, TS 29.518 §5.2.2.27
+	NotificationTypeSliceRevoc NotificationType = "SLICE_REVOCATION"
 )
 
 // DLQItem represents an item in the AMF notification DLQ.
@@ -90,14 +91,14 @@ func NewClient(timeout time.Duration, cbRegistry *resilience.Registry, dlq inter
 // REQ-06: POST to reauthNotifUri with retry and DLQ on exhaustion.
 // Spec: TS 23.502 §4.2.9.3.
 func (c *Client) SendReAuthNotification(ctx context.Context, uri, authCtxID string, payload []byte) error {
-	return c.sendNotification(ctx, NotificationTypeReAuth, uri, authCtxID, payload)
+	return c.sendNotification(ctx, NotificationTypeSliceReAuth, uri, authCtxID, payload)
 }
 
 // SendRevocationNotification sends a slice revocation notification to the AMF.
 // REQ-07: POST to revocNotifUri with retry and DLQ on exhaustion.
 // Spec: TS 23.502 §4.2.9.4.
 func (c *Client) SendRevocationNotification(ctx context.Context, uri, authCtxID string, payload []byte) error {
-	return c.sendNotification(ctx, NotificationTypeRevocation, uri, authCtxID, payload)
+	return c.sendNotification(ctx, NotificationTypeSliceRevoc, uri, authCtxID, payload)
 }
 
 // sendNotification sends a notification with retry and DLQ fallback.

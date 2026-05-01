@@ -203,9 +203,9 @@ $$ LANGUAGE plpgsql STABLE;
 CREATE TABLE slice_auth_sessions (
     auth_ctx_id        VARCHAR(64) NOT NULL,
 
-    -- Subscriber identification (TS 29.571)
+    -- Subscriber identification (TS 29.571 §5.2.2)
     gpsi               VARCHAR(32) NOT NULL,  -- GPSI pattern: ^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$ (TS 29.571 §5.2.2)
-    supi               VARCHAR(32),           -- May be resolved later
+    supi               VARCHAR(32),           -- SUPI pattern: ^imsi-[0-9]{5,15}$ (TS 29.571 §5.2.2) — May be resolved later
 
     -- Slice identification (TS 29.571 Snssai)
     snssai_sst         INTEGER NOT NULL CHECK (snssai_sst BETWEEN 0 AND 255),

@@ -46,7 +46,7 @@ func TestDLQ_Enqueue(t *testing.T) {
 
 	item := &AMFDLQItem{
 		ID:        "test-123",
-		Type:      "reauth",
+		Type:      "SLICE_RE_AUTH",
 		URI:       "http://amf:8080/reauth",
 		AuthCtxID: "auth-456",
 		Attempt:   1,

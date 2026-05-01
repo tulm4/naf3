@@ -59,13 +59,20 @@ func startNRMServer(t *testing.T, binaryPath string) (*exec.Cmd, string) {
 	}
 	configPath := filepath.Join(naf3Root, "compose/configs/nrm.yaml")
 
+	// Use a unique port to avoid conflicts between parallel tests.
+	port := 28081 + int(time.Now().UnixNano()%10000)
+	listenAddr := fmt.Sprintf("127.0.0.1:%d", port)
+
 	cmd := exec.Command(binaryPath, "--config="+configPath)
-	cmd.Env = append(os.Environ(), "NRM_LISTEN_ADDR=127.0.0.1:8081")
+	cmd.Env = append(os.Environ(),
+		"NRM_LISTEN_ADDR="+listenAddr,
+		"NAF3_ROOT="+naf3Root,
+	)
 	if err := cmd.Start(); err != nil {
 		t.Skip("failed to start NRM binary:", err)
 	}
 	time.Sleep(500 * time.Millisecond)
-	return cmd, "http://127.0.0.1:8081"
+	return cmd, "http://" + listenAddr
 }
 
 func stopNRMServer(cmd *exec.Cmd) {

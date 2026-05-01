@@ -18,7 +18,7 @@ const amfDLQKey = "nssAAF:dlq:amf-notifications"
 // AMFDLQItem represents an item in the AMF notification DLQ.
 type AMFDLQItem struct {
 	ID          string          `json:"id"`
-	Type        string          `json:"type"` // "reauth" | "revocation"
+	Type        string          `json:"type"` // "SLICE_RE_AUTH" | "SLICE_REVOCATION"
 	URI         string          `json:"uri"`
 	Payload     json.RawMessage `json:"payload"`
 	AuthCtxID   string          `json:"authCtxId"`

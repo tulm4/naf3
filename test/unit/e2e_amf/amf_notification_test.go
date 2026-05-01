@@ -99,7 +99,7 @@ func TestNotifier_ReAuthNotification(t *testing.T) {
 	dlq := &mockDLQ{}
 	client := amf.NewClient(5*time.Second, cbRegistry, dlq)
 
-	payload := []byte(`{"notificationType":"reauth","reason":"expired"}`)
+	payload := []byte(`{"notificationType":"SLICE_RE_AUTH","reason":"expired"}`)
 	err := client.SendReAuthNotification(context.Background(), srv.URL+"/namf-callback/v1/", "auth-ctx-reauth-001", payload)
 	require.NoError(t, err)
 
@@ -118,7 +118,7 @@ func TestNotifier_RevocationNotification(t *testing.T) {
 	dlq := &mockDLQ{}
 	client := amf.NewClient(5*time.Second, cbRegistry, dlq)
 
-	payload := []byte(`{"notificationType":"revocation","reason":"policy_change"}`)
+	payload := []byte(`{"notificationType":"SLICE_REVOCATION","reason":"policy_change"}`)
 	err := client.SendRevocationNotification(context.Background(), srv.URL+"/namf-callback/v1/", "auth-ctx-revoc-001", payload)
 	require.NoError(t, err)
 

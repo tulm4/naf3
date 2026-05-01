@@ -15,9 +15,11 @@ var (
 	// Supports MSISDN-based, External Identifier-based, and catch-all formats
 	// Spec: TS 29.571 §5.2.2
 	gpsiRegex = regexp.MustCompile(`^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$`)
-	// SUPI pattern: 'imu-' followed by 15 digits (IMSI)
+	// SUPI pattern: 'imsi-' followed by 5-15 digits (IMSI)
+	// Per TS 23.003 §2.2, IMSI format: MCC (3) + MNC (2-3) + MSIN (variable)
+	// Total length: 5-15 decimal digits
 	// Spec: TS 23.003 §2.2, TS 29.571 §5.2.2
-	supiRegex = regexp.MustCompile(`^imu-[0-9]{15}$`)
+	supiRegex = regexp.MustCompile(`^imsi-[0-9]{5,15}$`)
 	// SD pattern: exactly 6 hexadecimal characters
 	// Spec: TS 23.003 §3.2, TS 29.571 §5.4.4.60
 	sdRegex = regexp.MustCompile(`^[0-9A-Fa-f]{6}$`)
@@ -45,7 +47,7 @@ func ValidateSUPI(supi string) error {
 		return ValidationProblem("supi", "SUPI is required")
 	}
 	if !supiRegex.MatchString(supi) {
-		return ValidationProblem("supi", "must match pattern ^imu-[0-9]{15}$ (IMSI-based SUPI, TS 29.571 §5.4.4.2)")
+		return ValidationProblem("supi", "must match pattern ^imsi-[0-9]{5,15}$ (IMSI-based SUPI, TS 29.571 §5.2.2)")
 	}
 	return nil
 }

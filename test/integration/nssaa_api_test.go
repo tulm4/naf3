@@ -28,8 +28,8 @@ import (
 )
 
 const (
-	defaultTestDBURL    = "postgres://nssaa_test:nssaa_test@localhost:5433/nssaa_test"
-	defaultTestRedisURL = "localhost:6380"
+	defaultTestDBURL    = "postgres://nssaa:nssaa@localhost:5432/nssaa"
+	defaultTestRedisURL = "redis://localhost:6379"
 )
 
 func testDBURL() string {
@@ -44,6 +44,21 @@ func testRedisURL() string {
 		return u
 	}
 	return defaultTestRedisURL
+}
+
+// redisAddr returns just "host:port" suitable for go-redis Options.Addr.
+func redisAddr() string {
+	u := testRedisURL()
+	// Strip scheme if present (e.g., redis://localhost:6379 → localhost:6379)
+	u = strings.TrimPrefix(u, "redis://")
+	u = strings.TrimPrefix(u, "rediss://")
+	if idx := strings.Index(u, "@"); idx != -1 {
+		u = u[idx+1:]
+	}
+	if idx := strings.Index(u, "/"); idx != -1 {
+		u = u[:idx]
+	}
+	return u
 }
 
 func skipIfNoDB(t *testing.T) {
@@ -118,7 +133,7 @@ func runMigrations(t *testing.T, pool *postgres.Pool) {
 func openTestRedis(t *testing.T) *goredis.Client {
 	skipIfNoRedis(t)
 	client := goredis.NewClient(&goredis.Options{
-		Addr: testRedisURL(),
+		Addr: redisAddr(),
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

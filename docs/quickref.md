@@ -27,8 +27,8 @@ See `docs/design/01_service_model.md` §5.4 for full details.
 type Gpsi string
 
 // SUPI: Subscription Permanent Identifier
-// Pattern: ^imu-[0-9]{15}$ (used in AIW)
-// Example: "imu-208046000000001"
+// Pattern: ^imsi-[0-9]{5,15}$ (used in AIW)
+// Example: "imsi-208046000000001"
 type Supi string
 
 // S-NSSAI: Single Network Slice Selection Assistance Information

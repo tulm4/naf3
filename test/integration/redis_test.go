@@ -23,7 +23,7 @@ func skipIfNoRedis_PG(t *testing.T) {
 func openTestRedisClient(t *testing.T) *goredis.Client {
 	skipIfNoRedis_PG(t)
 	client := goredis.NewClient(&goredis.Options{
-		Addr: testRedisURL(),
+		Addr: redisAddr(),
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
