@@ -474,7 +474,7 @@ CREATE TABLE aiw_auth_sessions (
     auth_ctx_id        VARCHAR(64) NOT NULL,
 
     -- Subscriber identification (TS 29.571 — SUPI, imsi-scheme)
-    supi               VARCHAR(32) NOT NULL,  -- pattern: ^imsi-[0-9]{15}$
+    supi               VARCHAR(32) NOT NULL,  -- pattern: ^imsi-[0-9]{5,15}$
 
     -- AAA configuration reference
     aaa_config_id      UUID NOT NULL REFERENCES aaa_server_configs(id),

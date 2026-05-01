@@ -107,7 +107,7 @@ Primary subscription identifier:
 ```yaml
 Supi:
   type: string
-  pattern: '^imsi-[0-9]{15}$'  # Example pattern for 5G subscription
+  pattern: '^imsi-[0-9]{5,15}$'  # Example pattern for 5G subscription
   description: Permanent identifier assigned to the subscription
 ```
 

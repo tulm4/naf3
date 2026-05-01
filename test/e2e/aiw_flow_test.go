@@ -163,7 +163,7 @@ func TestE2E_AIW_EAPFailure(t *testing.T) {
 }
 
 // TestE2E_AIW_InvalidSupi verifies that an invalid SUPI format returns HTTP 400.
-// Spec: TS 29.526 §7.3, TS 29.571 §5.4.4.2 (SUPI regex: ^imsi-[0-9]{15}$)
+// Spec: TS 29.526 §7.3, TS 29.571 §5.4.4.2 (SUPI regex: ^imsi-[0-9]{5,15}$)
 func TestE2E_AIW_InvalidSupi(t *testing.T) {
 	if testing.Short() {
 		t.Skip("E2E tests skipped in short mode")

@@ -317,7 +317,7 @@ func TestIntegration_AIW_ConcurrentSessions(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			// SUPI pattern: ^imsi-[0-9]{15}$ (exactly 15 digits after "imsi-").
+			// SUPI pattern: ^imsi-[0-9]{5,15}$ (5-15 digits after "imsi-").
 			// "208" (3 digits) + 12 zero-padded digits = 15 total digits.
 			supi := fmt.Sprintf("imsi-208%012d", idx)
 			body := map[string]interface{}{

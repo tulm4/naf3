@@ -722,7 +722,7 @@ func TestTS29526_AIW_EAPFailureInBody(t *testing.T) {
 	_ = rec
 }
 
-// TC-AIW-05: InvalidSupiRejected — SUPI not matching ^imsi-[0-9]{15}$ → 400.
+// TC-AIW-05: InvalidSupiRejected — SUPI not matching ^imsi-[0-9]{5,15}$ → 400.
 // Spec: TS 29.526 §7.3, TS 29.571 §5.4.4.2
 func TestTS29526_AIW_InvalidSupiRejected(t *testing.T) {
 	t.Parallel()

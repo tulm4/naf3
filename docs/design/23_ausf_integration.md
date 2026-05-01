@@ -225,7 +225,7 @@ UE              AUSF              HTTP GW           Biz Pod           AAA GW    
 1. Validate OAuth2 token (scope: `nnssaaf-aiw`)
 2. Parse request body
 3. Extract SUPI from request
-4. Validate SUPI format (`^imsi-[0-9]{15}$`)
+4. Validate SUPI format (`^imsi-[0-9]{5,15}$`)
 5. Forward to NSSAAF
 
 **Biz Pod Actions (NSSAAF):**

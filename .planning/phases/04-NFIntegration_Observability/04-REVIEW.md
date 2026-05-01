@@ -100,7 +100,7 @@ func extractPLMNFromSupi(supi string) string {
 }
 ```
 
-Alternatively, validate SUPI format upstream (e.g., via regex `^imsi-[0-9]{15}$`) before calling this function, and document the assumption.
+Alternatively, validate SUPI format upstream (e.g., via regex `^imsi-[0-9]{5,15}$`) before calling this function, and document the assumption.
 
 ---
 

@@ -395,7 +395,7 @@ All errors return ProblemDetails (RFC 7807):
 | HTTP | Cause | Description |
 |------|-------|-------------|
 | 400 | INVALID_GPSI_FORMAT | GPSI doesn't match pattern |
-| 400 | INVALID_SUPI_FORMAT | SUPI doesn't match `^imsi-[0-9]{15}$` |
+| 400 | INVALID_SUPI_FORMAT | SUPI doesn't match `^imsi-[0-9]{5,15}$` |
 | 400 | INVALID_SNSSAI | Snssai.sst > 255 or sd not 6 hex chars |
 | 400 | BAD_REQUEST | Missing required fields |
 | 403 | AAA_REJECTED | AAA-S rejected authentication |

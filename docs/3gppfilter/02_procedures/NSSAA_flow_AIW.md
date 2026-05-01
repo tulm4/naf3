@@ -132,7 +132,7 @@ Step N+4: If EAP-Success:
 
 | Field | Required | Validation | 3GPP Cause |
 |-------|----------|-----------|-----------|
-| supi | M | `^imsi-[0-9]{15}$` | INVALID_SUPI |
+| supi | M | `^imsi-[0-9]{5,15}$` | INVALID_SUPI |
 | eapIdRsp | O | Base64-encoded EAP Response | INVALID_EAP_MESSAGE |
 | ttlsInnerMethodContainer | O | Base64-encoded | INVALID_PAYLOAD |
 | supportedFeatures | O | Non-empty string | INVALID_FEATURES |

@@ -227,7 +227,7 @@ handleEvents (server.go:102-129)
 
 These are not issues — documentation for future improvement during Phase 3:
 
-1. **UDM mock SUPI prefix check:** `test/mocks/udm.go:106` accepts any SUPI starting with `imsi-`. TS 29.571 §5.4.4.2 specifies `^imsi-[0-9]{15}$`. This is acceptable for a test mock that needs to handle various test inputs.
+1. **UDM mock SUPI prefix check:** `test/mocks/udm.go:106` accepts any SUPI starting with `imsi-`. TS 29.571 §5.4.4.2 specifies `^imsi-[0-9]{5,15}$`. This is acceptable for a test mock that needs to handle various test inputs.
 
 2. **Integration test key construction:** `test/integration/nssaa_api_test.go:352` hardcodes `"nssaa:session:" + resp.AuthCtxId` instead of using `sessionKey()` from `session_cache.go`. Since both produce identical keys, this is acceptable — but using the helper would be cleaner.
 

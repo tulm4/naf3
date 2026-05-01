@@ -517,7 +517,7 @@ if !strings.HasPrefix(supi, "imsi-") && !strings.HasPrefix(supi, "5g-") {
 }
 ```
 
-The UDM mock accepts both `imsi-` and `5g-` prefixes. TS 29.571 §5.4.4.2 defines SUPI as `^imsi-[0-9]{15}$`. The `5g-` prefix is used for 5G-GUTI (temporary identity), not SUPI. This mismatch means tests using `5g-` prefixed identifiers will pass the mock but fail against real UDM.
+The UDM mock accepts both `imsi-` and `5g-` prefixes. TS 29.571 §5.4.4.2 defines SUPI as `^imsi-[0-9]{5,15}$`. The `5g-` prefix is used for 5G-GUTI (temporary identity), not SUPI. This mismatch means tests using `5g-` prefixed identifiers will pass the mock but fail against real UDM.
 
 ---
 

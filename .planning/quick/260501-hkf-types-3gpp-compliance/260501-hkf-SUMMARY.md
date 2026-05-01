@@ -50,7 +50,7 @@ Pattern: '^(imsi-[0-9]{5,15}|nai-.+|gci-.+|gli-.+|.+)$'
 
 **Previous (INCORRECT - contained typo):**
 ```go
-var supiIMSIRegex = regexp.MustCompile(`^imsi-[0-9]{15}$`)
+var supiIMSIRegex = regexp.MustCompile(`^imsi-[0-9]{5,15}$`)
 ```
 
 **Fixed:**

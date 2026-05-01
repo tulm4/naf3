@@ -657,7 +657,7 @@ func TestE2E_AIW_InvalidSupi(t *testing.T) {
     resp, err := ausfMock.Authenticate(ctx)
     require.NoError(t, err)
 
-    // HTTP 400: invalid SUPI does not match ^imsi-[0-9]{15}$
+    // HTTP 400: invalid SUPI does not match ^imsi-[0-9]{5,15}$
     assert.Equal(t, 400, resp.StatusCode)
 
     var problem ProblemDetails

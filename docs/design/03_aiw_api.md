@@ -72,7 +72,7 @@ POST /nnssaaf-aiw/v1/authentications
 
 | Field | Validation | Error |
 |-------|-----------|-------|
-| supi | Required, matches `^imsi-[0-9]{15}$` | 400 InvalidSupi |
+| supi | Required, matches `^imsi-[0-9]{5,15}$` | 400 InvalidSupi |
 | eapIdRsp | Optional, Base64 encoded if present | 400 InvalidEapPayload |
 | ttlsInnerMethodContainer | Optional, Base64 encoded | 400 InvalidPayload |
 | supportedFeatures | Optional, non-empty if present | 400 InvalidFeatures |
@@ -84,7 +84,7 @@ POST /nnssaaf-aiw/v1/authentications
    - Reject if token expired or missing scope
 2. Parse AuthInfo JSON
 3. Validate all required fields:
-   - supi: regex ^imsi-[0-9]{15}$
+   - supi: regex ^imsi-[0-9]{5,15}$
    - eapIdRsp: if present, valid Base64, decodes to valid EAP Response packet
    - ttlsInnerMethodContainer: if present, valid Base64
    - supportedFeatures: if present, non-empty string
