@@ -277,7 +277,7 @@ const dlqKey = "nssAAF:dlq:amf-notifications"
 
 type DLQItem struct {
     ID        string    `json:"id"`
-    Type      string    `json:"type"` // "reauth" | "revocation"
+    Type      string    `json:"type"` // "SLICE_RE_AUTH" | "SLICE_REVOCATION"
     URI       string    `json:"uri"`
     Payload   []byte    `json:"payload"`
     AuthCtxID string    `json:"authCtxId"`

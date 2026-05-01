@@ -81,7 +81,7 @@ All 47 findings from the Phase 06 deep code review have been addressed across 2 
 
 ### WR-02 — AMF Mock Accepts Wrong `NotificationType` Values
 - **File(s):** `test/mocks/amf.go:110`
-- **Fix applied:** FALSE POSITIVE. The mock already accepts both lowercase (`"reauth"`/`"revocation"`) and the spec-required uppercase values (`"SLICE_RE_AUTH"`/`"SLICE_REVOCATION"`). No code change needed.
+- **Status:** FALSE POSITIVE. The review batch cited wrong line numbers from the pattern file (04-PATTERNS.md) rather than the actual production code (`internal/amf/amf.go`). The mock was always correct. No fix needed.
 
 ### WR-03 / WR-21 — `seenChallenge` Map Has No Concurrency Protection
 - **File(s):** `test/aaa_sim/radius.go:55,126-133`

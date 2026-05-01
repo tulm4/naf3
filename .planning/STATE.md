@@ -214,7 +214,8 @@ Key fixes: exec.CommandContext variadic args bug, duplicate test function declar
 | 260430-qey | Refactor e2e harness to use YAML config, HTTPS/TLS with CA store, remove hardcoded values | 2026-04-30 | bebeacb | Verified | [260430-qey-refactor-e2e-harness-to-use-docker-compo](./quick/260430-qey-refactor-e2e-harness-to-use-docker-compo/) |
 | 260430-u3c | Remove binary startup from harness, add NRM to dev.yaml, add E2E NRM tests, fix all issues | 2026-04-30 | d4e297d | Verified | [260430-u3c-remove-binary-process-startup-from-harne](./quick/260430-u3c-remove-binary-process-startup-from-harne/) |
 | 260430-vq5 | Fix E2E flow tests: sharedHarness init, TLS, body bugs | 2026-04-30 | | Verified | [260430-vq5-fix-e2e-flow-tests](./quick/260430-vq5-fix-e2e-flow-tests/) |
+| 260501-hke | Audit and fix all non-3GPP-compliant constant values in the codebase | 2026-05-01 | | Verified | [260501-hke-audit-and-fix-all-non-3gpp-compliant-con](./quick/260501-hke-audit-and-fix-all-non-3gpp-compliant-con/) |
 
-Last activity: 2026-04-30 — Completed quick task 260430-vq5: fix E2E flow tests (16 pass, 9 skipped)
+Last activity: 2026-05-01 — Completed quick task 260501-hke: audit and fix non-3GPP-compliant constants (Go code already compliant, planning artifacts updated)
 
 **Planned Phase:** 06 (integration-testing-nrm) — 6 plans — 2026-04-29T19:14:46.985Z

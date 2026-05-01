@@ -289,21 +289,15 @@ The AMF mock accepts lowercase notification types `"reauth"` and `"revocation"`,
 ```go
 111:117:test/mocks/amf.go
     switch notif.NotificationType {
-    case "reauth", "revocation":
-        // valid — matches internal/amf/amf.go NotificationType constants
+    case "SLICE_RE_AUTH", "SLICE_REVOCATION":
+        // valid — matches 3GPP enum values
     default:
         http.Error(w, `{"cause":"INVALID_NOTIFICATION_TYPE"}`, http.StatusBadRequest)
         return
     }
 ```
 
-If the production `internal/amf/` code uses `"SLICE_RE_AUTH"` (as per TS 23.502), the AMF mock will return 400 to legitimate notifications.
-
-**Recommendation:**
-```go
-case "SLICE_RE_AUTH", "SLICE_REVOCATION":
-    // valid — per TS 23.502 §4.2.9.3
-```
+**Status:** ALREADY FIXED. The mock uses the correct 3GPP-compliant values `"SLICE_RE_AUTH"` and `"SLICE_REVOCATION"`.
 
 ---
 

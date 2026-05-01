@@ -1641,8 +1641,8 @@ import (
 type NotificationType string
 
 const (
-	NotificationTypeReAuth    NotificationType = "reauth"
-	NotificationTypeRevocation NotificationType = "revocation"
+	NotificationTypeSliceReAuth      NotificationType = "SLICE_RE_AUTH"
+	NotificationTypeSliceRevoc      NotificationType = "SLICE_REVOCATION"
 )
 
 // DLQItem represents an item in the AMF notification DLQ.
@@ -1694,14 +1694,14 @@ func NewClient(timeout time.Duration, cbRegistry *resilience.Registry, dlq inter
 // REQ-06: POST to reauthNotifUri with retry and DLQ on exhaustion.
 // Spec: TS 23.502 §4.2.9.3.
 func (c *Client) SendReAuthNotification(ctx context.Context, uri, authCtxID string, payload []byte) error {
-	return c.sendNotification(ctx, NotificationTypeReAuth, uri, authCtxID, payload)
+	return c.sendNotification(ctx, NotificationTypeSliceReAuth, uri, authCtxID, payload)
 }
 
 // SendRevocationNotification sends a slice revocation notification to the AMF.
 // REQ-07: POST to revocNotifUri with retry and DLQ on exhaustion.
 // Spec: TS 23.502 §4.2.9.4.
 func (c *Client) SendRevocationNotification(ctx context.Context, uri, authCtxID string, payload []byte) error {
-	return c.sendNotification(ctx, NotificationTypeRevocation, uri, authCtxID, payload)
+	return c.sendNotification(ctx, NotificationTypeSliceRevoc, uri, authCtxID, payload)
 }
 
 // sendNotification sends a notification with retry and DLQ fallback.
@@ -1912,7 +1912,7 @@ const amfDLQKey = "nssAAF:dlq:amf-notifications"
 // AMFDLQItem represents an item in the AMF notification DLQ.
 type AMFDLQItem struct {
 	ID          string          `json:"id"`
-	Type        string          `json:"type"` // "reauth" | "revocation"
+	Type        string          `json:"type"` // "SLICE_RE_AUTH" | "SLICE_REVOCATION"
 	URI         string          `json:"uri"`
 	Payload     json.RawMessage `json:"payload"`
 	AuthCtxID   string          `json:"authCtxId"`
