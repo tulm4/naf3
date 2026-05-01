@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -19,27 +18,27 @@ import (
 // AIWSession represents an AIW authentication session stored in PostgreSQL.
 // Spec: TS 29.526 §7.3
 type AIWSession struct {
-	AuthCtxID       string
-	Supi            string
-	SupiHash        string
-	AusfID         string
-	AAAConfigID     *string
-	EAPSessionState []byte // encrypted
-	NssaaStatus     string
-	AuthResult      string
-	EAPRounds       int
-	MaxEAPRounds    int
-	EAPLastNonce    string
-	MSK             []byte // encrypted
-	PvsInfo         []byte // JSONB
-	TtlsInner       []byte
+	AuthCtxID         string
+	Supi              string
+	SupiHash          string
+	AusfID            string
+	AAAConfigID       *string
+	EAPSessionState   []byte // encrypted
+	NssaaStatus       string
+	AuthResult        string
+	EAPRounds         int
+	MaxEAPRounds      int
+	EAPLastNonce      string
+	MSK               []byte // encrypted
+	PvsInfo           []byte // JSONB
+	TtlsInner         []byte
 	SupportedFeatures string
-	FailureReason   string
-	FailureCause    string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	ExpiresAt       time.Time
-	CompletedAt     *time.Time
+	FailureReason     string
+	FailureCause      string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	ExpiresAt         time.Time
+	CompletedAt       *time.Time
 }
 
 // AIWRepository provides database operations for AIW sessions.
@@ -247,7 +246,7 @@ func (r *AIWRepository) Delete(ctx context.Context, authCtxID string) error {
 func (r *AIWRepository) scanAIWSession(row pgx.Row) (*AIWSession, error) {
 	var s AIWSession
 	var stateBytes []byte
-	var aaaConfigID uuid.UUID
+	var aaaConfigID pgtype.UUID
 	var completedAt pgtype.Timestamptz
 	var rawSUPI, rawSupiHash string
 	var mskBytes []byte
@@ -275,7 +274,7 @@ func (r *AIWRepository) scanAIWSession(row pgx.Row) (*AIWSession, error) {
 		s.CompletedAt = &completedAt.Time
 	}
 
-	if aaaConfigID != uuid.Nil {
+	if aaaConfigID.Valid {
 		idStr := aaaConfigID.String()
 		s.AAAConfigID = &idStr
 	}

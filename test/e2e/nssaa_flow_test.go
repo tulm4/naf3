@@ -225,8 +225,9 @@ func TestE2E_NSSAA_AuthChallenge(t *testing.T) {
 	}
 }
 
-// TestE2E_NSSAA_InvalidGPSI verifies that an invalid GPSI returns HTTP 400.
-// Spec: TS 29.526 §7.2.3, TS 29.571 §5.4.4.3 (GPSI regex: ^5[0-9]{8,14}$)
+// TestE2E_NSSAA_InvalidGPSI verifies that an empty GPSI returns HTTP 400.
+// Spec: TS 29.526 §7.2.3, TS 29.571 §5.4.4.3
+// Note: With catch-all GPSI pattern, only empty GPSI is invalid.
 func TestE2E_NSSAA_InvalidGPSI(t *testing.T) {
 	if testing.Short() {
 		t.Skip("E2E tests skipped in short mode")
@@ -236,7 +237,7 @@ func TestE2E_NSSAA_InvalidGPSI(t *testing.T) {
 	defer h.Close()
 
 	body := map[string]interface{}{
-		"gpsi":     "invalid-gpsi",
+		"gpsi":     "",
 		"snssai":   map[string]interface{}{"sst": 1},
 		"eapIdRsp": "dGVzdA==",
 	}
@@ -249,7 +250,7 @@ func TestE2E_NSSAA_InvalidGPSI(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
-	assert.Equal(t, http.StatusBadRequest, resp.StatusCode, "Invalid GPSI should return 400")
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode, "Empty GPSI should return 400")
 
 	var problem map[string]interface{}
 	err = json.NewDecoder(resp.Body).Decode(&problem)

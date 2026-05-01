@@ -208,11 +208,11 @@ func TestValidateSUPI(t *testing.T) {
 
 func TestValidateSnssai(t *testing.T) {
 	tests := []struct {
-		name     string
-		sst      int
-		sd       string
-		missing  bool
-		wantErr  bool
+		name    string
+		sst     int
+		sd      string
+		missing bool
+		wantErr bool
 	}{
 		{"valid sst only", 1, "", false, false},
 		{"valid sst 0 with sd", 0, "000001", false, false},

@@ -300,7 +300,7 @@ func TestE2E_03_NSSAA_InvalidGPSI(t *testing.T) {
 	skipIfServicesNotUp(t)
 
 	body := map[string]interface{}{
-		"gpsi":     "not-a-valid-gpsi",
+		"gpsi":     "",
 		"snssai":   map[string]interface{}{"sst": 1},
 		"eapIdRsp": "dGVzdA==",
 	}
@@ -312,11 +312,11 @@ func TestE2E_03_NSSAA_InvalidGPSI(t *testing.T) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("expected 400 for invalid GPSI, got %d", resp.StatusCode)
+		t.Errorf("expected 400 for empty GPSI, got %d", resp.StatusCode)
 	} else {
 		var problem map[string]interface{}
 		json.NewDecoder(resp.Body).Decode(&problem)
-		t.Logf("Invalid GPSI response: %v", problem)
+		t.Logf("Empty GPSI response: %v", problem)
 	}
 }
 

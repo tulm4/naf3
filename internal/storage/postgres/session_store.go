@@ -139,19 +139,19 @@ func (s *AIWStore) Close() error {
 // aiwsessionToAuthCtx converts AIWSession (DB) → aiw.AuthContext.
 func aiwsessionToAuthCtx(s *AIWSession) *aiw.AuthContext {
 	ctx := &aiw.AuthContext{
-		AuthCtxID:          s.AuthCtxID,
-		Supi:               s.Supi,
-		EapPayload:         s.EAPSessionState,
-		TtlsInner:          s.TtlsInner,
-		MSK:                s.MSK,
-		PvsInfo:            s.PvsInfo,
-		AusfID:             s.AusfID,
-		SupportedFeatures:   s.SupportedFeatures,
-		Status:             s.NssaaStatus,
-		AuthResult:         s.AuthResult,
-		CreatedAt:          s.CreatedAt,
-		UpdatedAt:          s.UpdatedAt,
-		ExpiresAt:          s.ExpiresAt,
+		AuthCtxID:         s.AuthCtxID,
+		Supi:              s.Supi,
+		EapPayload:        s.EAPSessionState,
+		TtlsInner:         s.TtlsInner,
+		MSK:               s.MSK,
+		PvsInfo:           s.PvsInfo,
+		AusfID:            s.AusfID,
+		SupportedFeatures: s.SupportedFeatures,
+		Status:            s.NssaaStatus,
+		AuthResult:        s.AuthResult,
+		CreatedAt:         s.CreatedAt,
+		UpdatedAt:         s.UpdatedAt,
+		ExpiresAt:         s.ExpiresAt,
 	}
 	if s.CompletedAt != nil {
 		ctx.CompletedAt = s.CompletedAt
@@ -161,6 +161,12 @@ func aiwsessionToAuthCtx(s *AIWSession) *aiw.AuthContext {
 
 // authCtxToAIWSession converts aiw.AuthContext → AIWSession (DB).
 func authCtxToAIWSession(a *aiw.AuthContext) *AIWSession {
+	now := time.Now()
+	expiresAt := a.ExpiresAt
+	if expiresAt.IsZero() {
+		// Default: 24-hour session lifetime per TS 29.526 §7.3
+		expiresAt = now.Add(24 * time.Hour)
+	}
 	return &AIWSession{
 		AuthCtxID:         a.AuthCtxID,
 		Supi:              a.Supi,
@@ -172,8 +178,8 @@ func authCtxToAIWSession(a *aiw.AuthContext) *AIWSession {
 		SupportedFeatures: a.SupportedFeatures,
 		NssaaStatus:       a.Status,
 		AuthResult:        a.AuthResult,
-		CreatedAt:         a.CreatedAt,
-		UpdatedAt:         a.UpdatedAt,
-		ExpiresAt:         a.ExpiresAt,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+		ExpiresAt:         expiresAt,
 	}
 }
