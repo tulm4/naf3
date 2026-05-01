@@ -216,6 +216,6 @@ Key fixes: exec.CommandContext variadic args bug, duplicate test function declar
 | 260430-vq5 | Fix E2E flow tests: sharedHarness init, TLS, body bugs | 2026-04-30 | | Verified | [260430-vq5-fix-e2e-flow-tests](./quick/260430-vq5-fix-e2e-flow-tests/) |
 | 260501-hke | Audit and fix all non-3GPP-compliant constant values in the codebase | 2026-05-01 | | Verified | [260501-hke-audit-and-fix-all-non-3gpp-compliant-con](./quick/260501-hke-audit-and-fix-all-non-3gpp-compliant-con/) |
 
-Last activity: 2026-05-01 — Completed quick task 260501-hke: audit and fix non-3GPP-compliant constants (Go code already compliant, planning artifacts updated)
+Last activity: 2026-05-01 — Completed quick task 260501-hkf: update GPSI regex to match TS 29.571 §5.2.2 (fixed 3GPP compliance)
 
 **Planned Phase:** 06 (integration-testing-nrm) — 6 plans — 2026-04-29T19:14:46.985Z
