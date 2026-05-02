@@ -144,7 +144,7 @@ services:
       REDIS_ADDR: "redis:6379"
       NRF_URL: "http://nrf-mock:8081"
       UDM_URL: "http://udm-mock:8081"
-      AUSF_URL: "http://nrf-mock:8081"
+      AUSF_URL: "http://biz:8080/n39x"  # TODO: add ausf-mock service; placeholder for initial tests
       AAA_GW_URL: "http://aaa-gateway:9090"
     ports: ["8080:8080"]
     networks:

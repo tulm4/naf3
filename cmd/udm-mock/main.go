@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -22,6 +23,34 @@ func main() {
 	slog.SetDefault(logger)
 
 	srv := udmserver.NewServer()
+
+	// Pre-load test subscribers from UDM_AUTH_SUBSCRIPTIONS env var.
+	// Format: UDM_AUTH_SUBSCRIPTIONS=imsi-001:EAP-AKA:aaa-sim:1812,imsi-002:EAP-AKA:aaa-sim:1812
+	if authEnv := os.Getenv("UDM_AUTH_SUBSCRIPTIONS"); authEnv != "" {
+		for _, entry := range strings.Split(authEnv, ",") {
+			parts := strings.Split(entry, ":")
+			if len(parts) >= 4 {
+				supi := strings.TrimSpace(parts[0])
+				authType := strings.TrimSpace(parts[1])
+				aaaServer := strings.TrimSpace(parts[2]) + ":" + strings.TrimSpace(parts[3])
+				srv.SetAuthSubscription(supi, authType, aaaServer)
+			}
+		}
+	} else {
+		// Default test subscribers if no env var is set.
+		testSubscribers := []struct {
+			supi      string
+			authType  string
+			aaaServer string
+		}{
+			{"imsi-001234567890123", "EAP-AKA", "aaa-sim:1812"},
+			{"imsi-001234567890124", "EAP-AKA", "aaa-sim:1812"},
+			{"imsi-001234567890125", "EAP-AKA", "aaa-sim:1812"},
+		}
+		for _, sub := range testSubscribers {
+			srv.SetAuthSubscription(sub.supi, sub.authType, sub.aaaServer)
+		}
+	}
 
 	errCh := make(chan error, 1)
 	go func() {

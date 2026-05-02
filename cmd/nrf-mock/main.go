@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -22,6 +24,34 @@ func main() {
 	slog.SetDefault(logger)
 
 	srv := nrfserver.NewServer()
+
+	// Configure NF statuses from environment variable.
+	// Format: NRF_NF_STATUS=udm-001:REGISTERED,ausf-001:REGISTERED
+	if statusEnv := os.Getenv("NRF_NF_STATUS"); statusEnv != "" {
+		for _, entry := range strings.Split(statusEnv, ",") {
+			parts := strings.Split(entry, ":")
+			if len(parts) == 2 {
+				srv.SetNFStatus(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
+			}
+		}
+	}
+
+	// Configure service endpoints from environment variable.
+	// Format: NRF_SERVICE_ENDPOINTS=UDM:nudm-uem:udm-mock:8081,AUSF:nausf-auth:ausf-mock:8081
+	if endpointEnv := os.Getenv("NRF_SERVICE_ENDPOINTS"); endpointEnv != "" {
+		for _, entry := range strings.Split(endpointEnv, ",") {
+			parts := strings.Split(entry, ":")
+			if len(parts) == 4 {
+				port, _ := strconv.Atoi(strings.TrimSpace(parts[3]))
+				srv.SetServiceEndpoint(
+					strings.TrimSpace(parts[0]), // nfType
+					strings.TrimSpace(parts[1]), // serviceName
+					strings.TrimSpace(parts[2]), // host
+					port,
+				)
+			}
+		}
+	}
 
 	// Start server in goroutine
 	errCh := make(chan error, 1)
