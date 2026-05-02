@@ -8,7 +8,7 @@ COPY test/aaa_sim ./test/aaa_sim/
 COPY cmd/aaa-sim ./cmd/aaa-sim/
 COPY internal ./internal/
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOTOOLCHAIN=auto go build -ldflags="-s -w" -o /mock-aaa-s ./cmd/aaa-sim/
+RUN GOTOOLCHAIN=auto CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /mock-aaa-s ./cmd/aaa-sim/
 
 FROM alpine:3.19
 RUN apk --no-cache add ca-certificates
