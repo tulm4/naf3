@@ -212,7 +212,8 @@ test-all: test-unit test-integration test-e2e test-conformance ## Run all test l
 .PHONY: test-fullchain
 test-fullchain: gen-certs build ## Run fullchain E2E tests (real containers for NRF/UDM/AAA-SIM)
 	@echo "$(YELLOW)Starting fullchain docker compose stack...$(NC)"
-	docker compose -f compose/fullchain.yaml build
+	docker compose -f compose/fullchain.yaml build \
+		--build-arg BUILDKIT_INLINE_CACHE=1
 	docker compose -f compose/fullchain.yaml up -d --quiet-pull
 	@sleep 15
 	E2E_DOCKER_MANAGED=1 \
@@ -227,6 +228,48 @@ test-fullchain: gen-certs build ## Run fullchain E2E tests (real containers for 
 	@echo "$(YELLOW)Tearing down fullchain stack...$(NC)"
 	docker compose -f compose/fullchain.yaml down --remove-orphans
 	@echo "$(GREEN)Fullchain tests complete$(NC)"
+
+# =============================================================================
+# Fast Dev Loop targets
+# =============================================================================
+
+.PHONY: test-fullchain-fast
+test-fullchain-fast: gen-certs ## Fast dev loop: binary mount pattern for ~15-30s iteration
+	@echo "$(YELLOW)Starting fullchain docker compose stack (fast mode)...$(NC)"
+	@echo "$(YELLOW)Using pre-built binaries from bin/ with volume mounts...$(NC)"
+	docker compose -f compose/fullchain-dev.yaml build
+	docker compose -f compose/fullchain-dev.yaml up -d --quiet-pull
+	@sleep 15
+	E2E_DOCKER_MANAGED=1 \
+	E2E_TLS_CA=/tmp/e2e-tls/server.crt \
+	BIZ_PG_URL=postgres://nssaa:nssaa@localhost:5432/nssaa?sslmode=disable \
+	BIZ_REDIS_URL=redis://localhost:6379 \
+	FULLCHAIN_NRF_URL=http://localhost:8082 \
+	FULLCHAIN_UDM_URL=http://localhost:8083 \
+	$(GOTEST) -tags=e2e -v -count=1 -timeout=10m \
+		./test/e2e/fullchain/... \
+		|| { docker compose -f compose/fullchain-dev.yaml down --remove-orphans; exit 1; }
+	@echo "$(YELLOW)Tearing down fullchain stack...$(NC)"
+	docker compose -f compose/fullchain-dev.yaml down --remove-orphans
+	@echo "$(GREEN)Fullchain tests complete (fast mode)$(NC)"
+
+.PHONY: test-fullchain-no-build
+test-fullchain-no-build: ## Run tests with existing images (skip build, ~5s startup)
+	@echo "$(YELLOW)Starting fullchain stack (no build)...$(NC)"
+	docker compose -f compose/fullchain-dev.yaml up -d
+	@sleep 15
+	E2E_DOCKER_MANAGED=1 \
+	E2E_TLS_CA=/tmp/e2e-tls/server.crt \
+	BIZ_PG_URL=postgres://nssaa:nssaa@localhost:5432/nssaa?sslmode=disable \
+	BIZ_REDIS_URL=redis://localhost:6379 \
+	FULLCHAIN_NRF_URL=http://localhost:8082 \
+	FULLCHAIN_UDM_URL=http://localhost:8083 \
+	$(GOTEST) -tags=e2e -v -count=1 -timeout=10m \
+		./test/e2e/fullchain/... \
+		|| { docker compose -f compose/fullchain-dev.yaml down --remove-orphans; exit 1; }
+	@echo "$(YELLOW)Tearing down fullchain stack...$(NC)"
+	docker compose -f compose/fullchain-dev.yaml down --remove-orphans
+	@echo "$(GREEN)Fullchain tests complete (no-build mode)$(NC)"
 
 # =============================================================================
 # Lint targets
