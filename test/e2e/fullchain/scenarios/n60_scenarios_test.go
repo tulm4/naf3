@@ -17,6 +17,10 @@ import (
 
 // TestN60_HappyPath verifies complete AIW flow with UDM/NRF integration.
 // Spec: TS 29.526 §7.3, TS 23.502 §4.2.9
+//
+// NOTE: For containerized fullchain tests, UDM auth subscriptions are configured
+// via FULLCHAIN_UDM_AUTH_SUBSCRIPTIONS env var at docker compose startup.
+// Test data should be defined in compose/fullchain.yaml or via test setup scripts.
 func TestN60_HappyPath(t *testing.T) {
 	if testing.Short() {
 		t.Skip("E2E tests skipped in short mode")
@@ -27,8 +31,11 @@ func TestN60_HappyPath(t *testing.T) {
 	defer h.Close()
 	h.ResetState()
 
-	// Set auth subscription for SUPI
-	h.UDMMock.SetAuthSubscription("imsi-208046000000001", "EAP_TLS", "radius://mock-aaa-s:1812")
+	// UDM auth subscription configured via env vars at container startup.
+	// See compose/fullchain.yaml FULLCHAIN_UDM_AUTH_SUBSCRIPTIONS.
+	//
+	// For programmatic configuration in tests, use SetUDMAuthSubscription:
+	// h.SetUDMAuthSubscription("imsi-208046000000001", "EAP_TLS", "radius://mock-aaa-s:1812")
 
 	// 1. Create authentication context via HTTP GW (N60 API).
 	body := map[string]interface{}{
