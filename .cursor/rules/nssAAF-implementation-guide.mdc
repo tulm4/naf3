@@ -140,7 +140,7 @@ func (h *Handler) [Method](w http.ResponseWriter, r *http.Request) {
 ## Per-Module Validation Checklist
 
 ### Types
-- [ ] GPSI regex: `^5[0-9]{8,14}$`
+- [ ] GPSI regex: `^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$`
 - [ ] SUPI regex: `^imsi-[0-9]{5,15}$`
 - [ ] Snssai SST: 0-255
 - [ ] Snssai SD: 6 hex chars
@@ -182,7 +182,11 @@ func (h *Handler) [Method](w http.ResponseWriter, r *http.Request) {
 
 ```go
 // GPSI (required for NSSAA)
-gpsiRegex := regexp.MustCompile(`^5[0-9]{8,14}$`)
+// Per TS 29.571 §5.2.2, GPSI has 3 forms:
+// 1. MSISDN-based: msisdn-{5-15 digits}
+// 2. External Identifier: extid-{id}@{realm}
+// 3. Any other string (catch-all)
+gpsiRegex := regexp.MustCompile(`^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$`)
 
 // SUPI (used in AIW)
 supiRegex := regexp.MustCompile(`^imsi-[0-9]{5,15}$`)

@@ -115,7 +115,7 @@ After fixing code, verify tests pass:
 
 ### Task 2: Fix GPSI Regex in Validator (PRIORITY 1)
 **File:** `internal/api/common/validator.go`
-**Action:** Verify regex matches `^5[0-9]{8,14}$`
+**Action:** Verify regex matches `^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$`
 
 ### Task 3: Verify State Machine (PRIORITY 2)
 **Files:** `internal/eap/engine.go`, `internal/api/nssaa/handler.go`

@@ -150,7 +150,7 @@ Operator Network
 
 ### 2.4 GPSI: The Required Subscriber Identifier
 
-GPSI (Generic Public Subscriber Identifier, pattern `^5[0-9]{8,14}$`) is **mandatory** for NSSAA. TS 23.502 §4.2.9.1 states:
+GPSI (Generic Public Subscriber Identifier, pattern `^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$`) is **mandatory** for NSSAA. TS 23.502 §4.2.9.1 states:
 
 > "The NSSAA procedure requires a GPSI."
 
@@ -581,7 +581,7 @@ EAP authentication is inherently multi-round. Timeouts can occur at multiple poi
 
 1. **Shared secret mismatch:** RADIUS shared secret misconfiguration → Message-Authenticator validation fails, all requests rejected. Detection: look for "invalid authenticator" logs.
 
-2. **GPSI format errors:** AMF sends GPSI not matching `^5[0-9]{8,14}$` → 400 Bad Request. Often caused by test UEs or misconfigured AMF.
+2. **GPSI format errors:** AMF sends GPSI not matching `^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$` → 400 Bad Request. Often caused by test UEs or misconfigured AMF.
 
 3. **AAA-S certificate expiry:** EAP-TLS with expired server cert → handshake fails, all slice auths for that AAA-S fail. Mitigation: automated cert renewal monitoring.
 
@@ -727,7 +727,7 @@ NOT_EXECUTED ───(AMF triggers POST /slice-auth)───► PENDING
 
 3. **Skipping Nudm_UECM_Get:** Always look up AMF before reauth/revocation notifications. Otherwise, notifications go to the wrong AMF or are lost.
 
-4. **Hardcoding GPSI format:** Validate against `^5[0-9]{8,14}$`. Non-conforming GPSIs indicate AMF bugs or test data.
+4. **Hardcoding GPSI format:** Validate against `^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$`. Non-conforming GPSIs indicate AMF bugs or test data.
 
 5. **Ignoring circuit breaker state:** If a AAA-S is in OPEN state, don't attempt requests until HALF_OPEN probe.
 

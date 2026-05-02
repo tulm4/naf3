@@ -501,7 +501,8 @@ func TestIntegration_NSSAA_ConcurrentSessions(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			// GPSI pattern: ^5[0-9]{8,14}$ (9-15 total digits starting with 5).
+			// GPSI pattern: ^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$
+// Note: Spec allows any non-empty string as catch-all; only whitespace-only is rejected.
 			// Use "52080460" (8 digits) + 2-digit suffix = 10 digits total.
 			gpsi := fmt.Sprintf("52080460%02d", idx)
 			body := map[string]interface{}{

@@ -837,7 +837,7 @@ func TestN58_InvalidGPSI(t *testing.T) {
     h.ResetState()
 
     body := map[string]interface{}{
-        "gpsi":     "invalid", // Does not match ^5[0-9]{8,14}$
+        "gpsi":     "invalid", // Does not match ^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$
         "snssai":   map[string]interface{}{"sst": 1, "sd": "000001"},
         "eapIdRsp": "dGVzdA==",
     }

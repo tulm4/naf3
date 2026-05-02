@@ -254,7 +254,7 @@ No action required — this is a documentation concern. Consider adding package-
 - `AuthCtx.GPSI` (struct field, line 33) — uppercase
 - `body.Gpsi` (from generated OpenAPI types) — title-case
 - `authCtx.GPSI` in handler (line 347) — **mismatch** (see CRITICAL-C-01)
-- `ValidateGPSI` in `common/validator.go:28` — uses `gpsiRegex` matching `^5[0-9]{8,14}$` — correct per TS 29.571 §5.4.4.3
+- `ValidateGPSI` in `common/validator.go:28` — uses `gpsiRegex` matching `^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$` — correct per TS 29.571 §5.4.4.3
 - SUPI regex in `common/validator.go:18` — `^imsi-[0-9]{5,15}$` — correct per TS 29.571 §5.4.4.2
 - SD regex in `common/validator.go:21` — `^[0-9A-Fa-f]{6}$` — correct (case-insensitive hex, 6 chars)
 

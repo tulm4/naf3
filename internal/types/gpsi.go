@@ -14,7 +14,7 @@ import (
 // GPSI has 3 forms:
 //  1. MSISDN-based: "msisdn-" + 5-15 decimal digits
 //  2. External Identifier-based: "extid-" + <ext-id> + "@" + <realm>
-//  3. Any other string (catch-all for backwards compatibility)
+//  3. Any other string (catch-all per spec)
 //
 // Spec: TS 29.571 §5.2.2 (formerly §5.4.4.61 in older versions)
 var gpsiRegex = regexp.MustCompile(`^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$`)

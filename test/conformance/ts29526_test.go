@@ -162,14 +162,16 @@ func TestTS29526_NSSAA_CreateSlice_MissingGPSI(t *testing.T) {
 }
 
 // TC-NSSAA-003: Invalid GPSI format → 400.
-// Spec: TS 29.571 §5.4.4.3 (GPSI regex: ^5[0-9]{8,14}$)
+// Spec: TS 29.571 §5.4.4.3 (GPSI regex: ^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$)
+// Note: The spec allows any non-empty string in the catch-all form.
+// This test uses an empty GPSI to trigger validation failure.
 func TestTS29526_NSSAA_CreateSlice_InvalidGPSIFormat(t *testing.T) {
 	t.Parallel()
 	store := newNssaaMockStore()
 	h := nssaaHandlerFromStore(store, nssaa.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
-		"gpsi":     "bad-gpsi",
+		"gpsi":     "", // Empty GPSI is invalid
 		"snssai":   map[string]interface{}{"sst": 1},
 		"eapIdRsp": "dGVzdA==",
 	}

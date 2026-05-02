@@ -497,7 +497,7 @@ The RADIUS shared secret is hardcoded as `"testing123"`. While this is a test ut
 **Severity:** INFO
 
 **Description:**
-`handleUEAuth` extracts GPSI from the URL path without validating the format. TS 29.571 specifies GPSI as `^5[0-9]{8,14}$`. The mock accepts any non-empty string as GPSI.
+`handleUEAuth` extracts GPSI from the URL path without validating the format. TS 29.571 specifies GPSI as `^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$`. The mock accepts any non-empty string as GPSI.
 
 **Recommendation:** Add GPSI format validation to match production behavior.
 

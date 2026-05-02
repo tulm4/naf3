@@ -1367,7 +1367,7 @@ slog.Info("session_created",
 | V2 Authentication | yes | OAuth2 JWT validation for SBI (Phase 5 — deferred) |
 | V3 Session Management | yes | `EAPSessionState` encrypted with AES-256-GCM (Phase 4) |
 | V4 Access Control | yes | GPSI hash in logs — prevents PII leakage |
-| V5 Input Validation | yes | GPSI regex (`^5[0-9]{8,14}$`), SUPI regex, Snssai validation (already in `internal/api/common/`) |
+| V5 Input Validation | yes | GPSI regex (`^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$`), SUPI regex, Snssai validation (already in `internal/api/common/`) |
 | V6 Cryptography | yes | AES-256-GCM for session state (Phase 4); KEK/DEK envelope encryption (Phase 5) |
 
 ### Known Threat Patterns for Go HTTP Clients

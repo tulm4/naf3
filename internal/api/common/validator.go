@@ -13,7 +13,7 @@ var (
 	// GPSI pattern per TS 29.571 §5.2.2:
 	// - MSISDN-based: msisdn-{5-15 digits}
 	// - External Identifier: extid-{id}@{realm}
-	// - Any other string (catch-all for backwards compatibility)
+	// - Any other string (catch-all per spec)
 	// Spec: TS 29.571 §5.2.2
 	gpsiRegex = regexp.MustCompile(`^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$`)
 	// SUPI pattern per TS 29.571 §5.4.4.2:

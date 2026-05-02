@@ -63,7 +63,7 @@ aaaProtocol: RADIUS          # RADIUS or Diameter
 
 Always use these canonical names:
 - `Snssai` with `sst` (0-255) and `sd` (3-byte hex string)
-- `Gpsi` pattern: `^5[0-9]{8,14}$`
+- `Gpsi` pattern: `^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$` (catch-all allows any non-empty string)
 - `Supi` pattern: `^imsi-[0-9]{5,15}$`
 - `NssaaStatus` with `snssai` + `status` (AuthStatus enum)
 - `EapMessage` as Base64-encoded string
