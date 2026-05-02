@@ -42,10 +42,13 @@ services:
   # ---------------------------------------------------------------------------
   mock-aaa-s:
     build:
-      context: .
+      context: ..
       dockerfile: Dockerfile.mock-aaa-s
     image: nssaaf-mock-aaa-s:latest
     ports: ["18120:1812", "38680:3868"]
+    environment:
+      # Mode: EAP_TLS_SUCCESS (default), EAP_TLS_CHALLENGE, EAP_TLS_FAILURE
+      AAA_SIM_MODE: "${AAA_SIM_MODE:-EAP_TLS_SUCCESS}"
     networks:
       - default
 

@@ -1,16 +1,17 @@
-# Dockerfile.mock-aaa-s — Mock AAA Server for local development
-# Simulates both RADIUS and Diameter EAP endpoints.
-#
-# In production, this is replaced by a real AAA Server (e.g., FreeRADIUS, OpenDiameter).
-# For local dev, it responds to Access-Request (RADIUS) and DER (Diameter).
-FROM alpine:3.19 AS runtime
+# Dockerfile.mock-aaa-s — Mock AAA Server for test-e2e
+# Fixed: now builds and runs the real aaa-sim binary instead of socat.
+FROM golang:1.22-alpine AS builder
 
-RUN apk --no-cache add socat
+WORKDIR /src
+COPY go.mod go.sum ./
+COPY test/aaa_sim ./test/aaa_sim/
+COPY cmd/aaa-sim ./cmd/aaa-sim/
+COPY internal ./internal/
 
-# RADIUS over TCP port 1812: accept connections and discard (mock response).
-# Diameter over TCP port 3868: accept connections and discard (mock response).
-# TCP avoids Docker's AF_UNSPEC/AF_INET6 issues with socat UDP-LISTEN on some kernels.
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOTOOLCHAIN=auto go build -ldflags="-s -w" -o /mock-aaa-s ./cmd/aaa-sim/
 
-CMD ["sh", "-c", "socat TCP-LISTEN:1812,fork,reuseaddr /dev/null & \
-       socat TCP-LISTEN:3868,fork,reuseaddr /dev/null & \
-       wait"]
+FROM alpine:3.19
+RUN apk --no-cache add ca-certificates
+COPY --from=builder /mock-aaa-s /usr/local/bin/mock-aaa-s
+EXPOSE 1812/udp 3868/tcp
+CMD ["sh", "-c", "mock-aaa-s"]
