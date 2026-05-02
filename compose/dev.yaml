@@ -51,6 +51,12 @@ services:
       AAA_SIM_MODE: "${AAA_SIM_MODE:-EAP_TLS_SUCCESS}"
     networks:
       - default
+    healthcheck:
+      test: ["CMD-SHELL", "echo 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
 
   # ---------------------------------------------------------------------------
   # AAA Gateway — Diameter/RADIUS transport to AAA-S

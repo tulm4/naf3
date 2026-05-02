@@ -14,4 +14,4 @@ FROM alpine:3.19
 RUN apk --no-cache add ca-certificates
 COPY --from=builder /mock-aaa-s /usr/local/bin/mock-aaa-s
 EXPOSE 1812/udp 3868/tcp
-CMD ["sh", "-c", "mock-aaa-s"]
+CMD ["mock-aaa-s"]
