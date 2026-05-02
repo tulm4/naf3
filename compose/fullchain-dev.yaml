@@ -1,0 +1,192 @@
+# compose/fullchain-dev.yaml
+# Dev variant: mounts pre-built binaries for fast iteration.
+# Use with: docker compose -f compose/fullchain-dev.yaml up
+#
+# Services that change frequently get volume mounts (biz, http-gateway, aaa-gateway).
+# Static services (nrf-mock, udm-mock, aaa-sim, redis, postgres) build normally.
+#
+# For fast dev loop: make test-fullchain-fast
+# For no-build mode: make test-fullchain-no-build
+
+services:
+  # ---------------------------------------------------------------------------
+  # Redis — shared session correlation store
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    networks:
+      - default
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL — session and audit data store
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: nssaa
+      POSTGRES_PASSWORD: nssaa
+      POSTGRES_DB: nssaa
+    ports: ["5432:5432"]
+    volumes:
+      - postgres_fullchain_dev_data:/var/lib/postgresql/data
+    networks:
+      - default
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nssaa -d nssaa"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # nrf-mock — NRF mock (static, rebuild only when code changes)
+  # ---------------------------------------------------------------------------
+  nrf-mock:
+    build:
+      context: ..
+      dockerfile: Dockerfile.nrf-mock
+    image: nssaaf-nrf-mock:latest
+    ports: ["8082:8081"]
+    environment:
+      NRF_NF_STATUS: "udm-001:REGISTERED,ausf-001:REGISTERED,aaa-gw-001:REGISTERED"
+      NRF_SERVICE_ENDPOINTS: "UDM:nudm-uem:udm-mock:8081,AUSF:nausf-auth:ausf-mock:8081"
+    networks:
+      - default
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/nnrf-disc/v1 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # udm-mock — UDM mock (static, rebuild only when code changes)
+  # ---------------------------------------------------------------------------
+  udm-mock:
+    build:
+      context: ..
+      dockerfile: Dockerfile.udm-mock
+    image: nssaaf-udm-mock:latest
+    ports: ["8083:8081"]
+    networks:
+      - default
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/nudm-uemm/v1 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # aaa-sim — AAA Server simulator (static, rebuild only when code changes)
+  # ---------------------------------------------------------------------------
+  aaa-sim:
+    build:
+      context: ..
+      dockerfile: Dockerfile.aaa-sim
+    image: nssaaf-aaa-sim:latest
+    ports: ["18120:1812", "38680:3868"]
+    environment:
+      AAA_SIM_MODE: "${AAA_SIM_MODE:-EAP_TLS_SUCCESS}"
+    networks:
+      - default
+
+  # ---------------------------------------------------------------------------
+  # AAA Gateway — with binary mount for fast iteration
+  # ---------------------------------------------------------------------------
+  aaa-gateway:
+    build:
+      context: ..
+      dockerfile: Dockerfile.aaa-gateway
+    image: nssaaf-aaa-gw:latest
+    depends_on:
+      redis:
+        condition: service_healthy
+      aaa-sim:
+        condition: service_started
+    volumes:
+      - ./configs/aaa-gateway.yaml:/etc/nssAAF/aaa-gateway.yaml:ro
+      - ./bin/aaa-gateway:/app/aaa-gateway:ro
+    environment:
+      REDIS_ADDR: "redis:6379"
+      BIZ_URL: "http://biz:8080"
+    ports: ["9090:9090", "18121:1812/udp", "38681:3868"]
+    networks:
+      - default
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9090/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ---------------------------------------------------------------------------
+  # biz — with binary mount for fast iteration
+  # ---------------------------------------------------------------------------
+  biz:
+    build:
+      context: ..
+      dockerfile: Dockerfile.biz
+    image: nssaaf-biz:latest
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      aaa-gateway:
+        condition: service_healthy
+      nrf-mock:
+        condition: service_healthy
+      udm-mock:
+        condition: service_healthy
+    volumes:
+      - ./configs/biz.yaml:/etc/nssAAF/biz.yaml:ro
+      - ./bin/biz:/app/biz:ro
+    environment:
+      MASTER_KEY_HEX: "${MASTER_KEY_HEX:-6767a7ad0416a19ea174608288761dde35dfabba2a8dda9602fc520b80e1af15}"
+      POSTGRES_HOST: "postgres"
+      REDIS_ADDR: "redis:6379"
+      NRF_URL: "http://nrf-mock:8081"
+      UDM_URL: "http://udm-mock:8081"
+      AUSF_URL: "http://biz:8080/n39x"
+      AAA_GW_URL: "http://aaa-gateway:9090"
+    ports: ["8080:8080"]
+    networks:
+      - default
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # ---------------------------------------------------------------------------
+  # http-gateway — with binary mount for fast iteration
+  # ---------------------------------------------------------------------------
+  http-gateway:
+    build:
+      context: ..
+      dockerfile: Dockerfile.http-gateway
+    image: nssaaf-http-gw:latest
+    depends_on:
+      biz:
+        condition: service_healthy
+    volumes:
+      - ./configs/http-gateway.yaml:/etc/nssAAF/http-gateway.yaml:ro
+      - /tmp/e2e-tls:/tmp/e2e-tls:ro
+      - ./bin/http-gateway:/app/http-gateway:ro
+    environment:
+      NAF3_AUTH_DISABLED: "1"
+      BIZ_URL: "http://biz:8080"
+    ports: ["8443:8443"]
+    networks:
+      - default
+
+networks:
+  default:
+    driver: bridge
+
+volumes:
+  postgres_fullchain_dev_data:
