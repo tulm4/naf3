@@ -40,6 +40,17 @@ func NewHarness(t *testing.T) *Harness {
 	}
 }
 
+// NewHarnessOptional creates a fullchain test harness if environment is configured.
+// Returns an error if FULLCHAIN_NRF_URL is not set, allowing tests to skip
+// when the fullchain compose stack is not running.
+func NewHarnessOptional(t *testing.T) (*Harness, error) {
+	if os.Getenv("FULLCHAIN_NRF_URL") == "" {
+		return nil, errors.New("FULLCHAIN_NRF_URL not set - fullchain compose not running")
+	}
+	h := NewHarness(t)
+	return h, nil
+}
+
 // NRFURL returns the containerized NRF mock URL.
 func (h *Harness) NRFURL() string { return h.nrfURL }
 

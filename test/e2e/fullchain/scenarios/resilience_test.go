@@ -139,3 +139,96 @@ func TestResilience_DLQProcessing(t *testing.T) {
 	// 4. Verify message was processed or remains in DLQ with retry_count incremented
 	t.Skip("DLQ test requires metrics endpoint and manual verification")
 }
+
+// TestAAA_SIM_Modes verifies that the aaa-sim container responds to different modes.
+// This test is a placeholder — it documents the expected behavior.
+// Actual implementation depends on aaa-sim having a status/config endpoint.
+//
+// Expected behavior:
+// - EAP_TLS_SUCCESS: immediate Access-Accept
+// - EAP_TLS_CHALLENGE: Access-Challenge then Access-Accept
+// - EAP_TLS_FAILURE: Access-Reject
+//
+// To change mode, restart the container with different AAA_SIM_MODE env var.
+// Future: add a management endpoint to change mode without restart.
+func TestAAA_SIM_Modes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("E2E tests skipped in short mode")
+	}
+
+	// Skip if harness config is not available (fullchain compose not running)
+	h, err := fullchain.NewHarnessOptional(t)
+	if err != nil {
+		t.Skip("Fullchain harness not available: " + err.Error())
+	}
+	defer h.Close()
+
+	// Document the expected behavior:
+	// 1. EAP_TLS_SUCCESS: NSSAAF sends EAP-Request/TLS, aaa-sim responds with
+	//    Access-Accept (EAP-Success) immediately.
+	// 2. EAP_TLS_CHALLENGE: NSSAAF sends EAP-Request/TLS, aaa-sim responds with
+	//    Access-Challenge (EAP-TLS ServerHello), then on client's
+	//    ClientHello responds with Access-Accept.
+	// 3. EAP_TLS_FAILURE: NSSAAF sends EAP-Request/TLS, aaa-sim responds with
+	//    Access-Reject (EAP-Failure).
+
+	t.Skip("aaa-sim mode control via env var only — restart container to change mode")
+}
+
+// TestAAA_SIM_Connectivity verifies that aaa-sim is reachable from aaa-gateway.
+// This is a basic sanity check for the fullchain compose stack.
+func TestAAA_SIM_Connectivity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("E2E tests skipped in short mode")
+	}
+
+	// Skip if harness config is not available (fullchain compose not running)
+	h, err := fullchain.NewHarnessOptional(t)
+	if err != nil {
+		t.Skip("Fullchain harness not available: " + err.Error())
+	}
+	defer h.Close()
+
+	// TODO: Implement actual connectivity test when aaa-sim has a status endpoint.
+	// For now, just verify that the compose stack starts without crashing.
+	t.Skip("aaa-sim has no status endpoint yet — verify via container logs")
+}
+
+// TestResilience_RedisUnavailable verifies that the system handles Redis unavailability.
+// The NSSAAF should return an error when Redis is down.
+func TestResilience_RedisUnavailable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("E2E tests skipped in short mode")
+	}
+
+	// Skip if harness config is not available (fullchain compose not running)
+	h, err := fullchain.NewHarnessOptional(t)
+	if err != nil {
+		t.Skip("Fullchain harness not available: " + err.Error())
+	}
+	defer h.Close()
+
+	// Document expected behavior:
+	// When Redis is unavailable:
+	// - NSSAAF should return 503 Service Unavailable
+	// - Existing sessions should remain in their last known state
+	// - After Redis recovers, sessions should resume
+
+	t.Skip("requires docker compose pause/resume for Redis — implement with test infra")
+}
+
+// TestResilience_PostgresUnavailable verifies that the system handles PostgreSQL unavailability.
+func TestResilience_PostgresUnavailable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("E2E tests skipped in short mode")
+	}
+
+	// Skip if harness config is not available (fullchain compose not running)
+	h, err := fullchain.NewHarnessOptional(t)
+	if err != nil {
+		t.Skip("Fullchain harness not available: " + err.Error())
+	}
+	defer h.Close()
+
+	t.Skip("requires docker compose pause/resume for Postgres — implement with test infra")
+}
