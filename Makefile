@@ -45,6 +45,17 @@ DOCKER_TAG ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "
 DOCKER_BUILD = docker build
 DOCKER_BUILDX = docker buildx build --platform linux/amd64,linux/arm64
 
+# =============================================================================
+# Build Configuration
+# =============================================================================
+
+# Enable BuildKit for faster Docker builds (export for docker compose)
+export DOCKER_BUILDKIT := 1
+COMPOSE_DOCKER_CLI_BUILD := 1
+
+# BuildKit inline cache for CI layer reuse
+BUILDKIT_INLINE_CACHE := 1
+
 # Test coverage
 COVERAGE_FILE = coverage.out
 COVERAGE_HTML = coverage.html
