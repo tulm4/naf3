@@ -4,6 +4,7 @@
 package nrfserver
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -96,6 +97,16 @@ func (s *Server) ListenAndServe(addr string) error {
 	return s.httpSrv.ListenAndServe()
 }
 
+// Close gracefully shuts down the server.
+func (s *Server) Close() error {
+	return s.httpSrv.Close()
+}
+
+// Shutdown gracefully shuts down the server with a context deadline.
+func (s *Server) Shutdown(ctx context.Context) error {
+	return s.httpSrv.Shutdown(ctx)
+}
+
 // ServeHTTP implements http.Handler so Server can be used with httptest.NewServer.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.httpSrv.Handler.ServeHTTP(w, r)
@@ -123,6 +134,7 @@ func (s *Server) handleNfInstancesDisc(w http.ResponseWriter, r *http.Request) {
 		id := strings.TrimPrefix(path, "/")
 		s.handlePutInstance(w, r, id)
 	default:
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, `{"cause":"METHOD_NOT_ALLOWED"}`, http.StatusMethodNotAllowed)
 	}
 }
@@ -146,6 +158,7 @@ func (s *Server) handleNfInstancesNfm(w http.ResponseWriter, r *http.Request) {
 		id := strings.TrimPrefix(path, "/")
 		s.handlePutInstance(w, r, id)
 	default:
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, `{"cause":"METHOD_NOT_ALLOWED"}`, http.StatusMethodNotAllowed)
 	}
 }
@@ -175,10 +188,18 @@ func (s *Server) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	nfStatusCopy := make(map[string]string, len(s.nfStatus))
+	for k, v := range s.nfStatus {
+		nfStatusCopy[k] = v
+	}
+	serviceEndpointsCopy := make(map[string]ServiceEndpointConfig, len(s.serviceEndpoints))
+	for k, v := range s.serviceEndpoints {
+		serviceEndpointsCopy[k] = v
+	}
+	s.mu.Unlock()
 
-	instances := make([]map[string]interface{}, 0, len(s.nfStatus))
-	for id, status := range s.nfStatus {
+	instances := make([]map[string]interface{}, 0, len(nfStatusCopy))
+	for id, status := range nfStatusCopy {
 		match := false
 		for _, p := range prefixes {
 			if p == "" || strings.HasPrefix(id, p) {
@@ -202,7 +223,7 @@ func (s *Server) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 			key := nfType + ":" + svcName
 			ipAddr := "127.0.0.1"
 			port := 8080
-			if ep, ok := s.serviceEndpoints[key]; ok {
+			if ep, ok := serviceEndpointsCopy[key]; ok {
 				ipAddr = ep.IPv4Address
 				port = ep.Port
 			}
@@ -234,10 +255,12 @@ func (s *Server) handleGetInstance(w http.ResponseWriter, r *http.Request, id st
 
 	status, ok := s.nfStatus[id]
 	if !ok {
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, `{"cause":"NF_INSTANCE_NOT_FOUND"}`, http.StatusNotFound)
 		return
 	}
 	if wantedStatus != "" && status != wantedStatus {
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, `{"cause":"NF_INSTANCE_NOT_FOUND"}`, http.StatusNotFound)
 		return
 	}
@@ -257,11 +280,13 @@ func (s *Server) handleGetInstance(w http.ResponseWriter, r *http.Request, id st
 // handlePutInstance handles PUT /nnrf-disc/v1/nf-instances/{id} — Nnrf_NFHeartBeat.
 func (s *Server) handlePutInstance(w http.ResponseWriter, r *http.Request, id string) {
 	if id == "" {
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, `{"cause":"NF_INSTANCE_NOT_FOUND"}`, http.StatusNotFound)
 		return
 	}
 	var payload map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, `{"cause":"INVALID_FORMAT"}`, http.StatusBadRequest)
 		return
 	}
@@ -279,6 +304,7 @@ func (s *Server) handlePutInstance(w http.ResponseWriter, r *http.Request, id st
 func (s *Server) handlePostInstance(w http.ResponseWriter, r *http.Request) {
 	var profile map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&profile); err != nil {
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, `{"cause":"INVALID_FORMAT"}`, http.StatusBadRequest)
 		return
 	}
@@ -290,6 +316,7 @@ func (s *Server) handlePostInstance(w http.ResponseWriter, r *http.Request) {
 // handleSubscription handles PUT /nnrf-disc/v1/subscriptions/{id} — heartbeat subscription.
 func (s *Server) handleSubscription(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, `{"cause":"METHOD_NOT_ALLOWED"}`, http.StatusMethodNotAllowed)
 		return
 	}
