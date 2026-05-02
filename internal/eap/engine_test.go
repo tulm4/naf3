@@ -22,7 +22,7 @@ import (
 // Mock AAA Client
 // ---------------------------------------------------------------------------
 
-// mockAAAClient is a mock implementation of AAAClient for testing.
+// mockAAAClient is a mock implementation of AAARouter for testing.
 type mockAAAClient struct {
 	mu         sync.Mutex
 	responses  map[string][]byte // authCtxID → response bytes
@@ -43,7 +43,7 @@ func newMockAAAClient() *mockAAAClient {
 	}
 }
 
-func (m *mockAAAClient) SendEAP(ctx context.Context, authCtxID string, eapPayload []byte) ([]byte, error) {
+func (m *mockAAAClient) SendEAP(ctx context.Context, session *Session, eapPayload []byte) ([]byte, error) {
 	m.mu.Lock()
 	m.eapPayload = eapPayload
 	m.callCount.Add(1)
@@ -73,7 +73,7 @@ func (m *mockAAAClient) SendEAP(ctx context.Context, authCtxID string, eapPayloa
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if resp, ok := responses[authCtxID]; ok {
+	if resp, ok := responses[session.AuthCtxID]; ok {
 		return resp, nil
 	}
 	return defaultResp, nil

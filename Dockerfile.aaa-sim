@@ -1,19 +1,36 @@
 # Dockerfile.aaa-sim — AAA Server Simulator (EAP-TLS, RADIUS/Diameter)
 # Used by compose/fullchain.yaml for fullchain E2E tests.
-FROM golang:1.22-alpine AS builder
+# FROM golang:1.22-alpine AS builder
 
-WORKDIR /src
+# WORKDIR /src
 
-# Copy only the aaa_sim package and its dependencies.
-COPY go.mod go.sum ./
-COPY test/aaa_sim ./test/aaa_sim/
-COPY cmd/aaa-sim ./cmd/aaa-sim/
-COPY internal ./internal/
+# # Copy only the aaa_sim package and its dependencies.
+# COPY go.mod go.sum ./
+# COPY test/aaa_sim ./test/aaa_sim/
+# COPY cmd/aaa-sim ./cmd/aaa-sim/
+# COPY internal ./internal/
 
-RUN GOTOOLCHAIN=auto go build -ldflags="-s -w" -o /aaa-sim ./cmd/aaa-sim/
+# RUN GOTOOLCHAIN=auto go build -ldflags="-s -w" -o /aaa-sim ./cmd/aaa-sim/
 
-FROM alpine:3.19
-RUN apk --no-cache add ca-certificates
-COPY --from=builder /aaa-sim /usr/local/bin/aaa-sim
+FROM alpine:3.19 AS runtime
+
+RUN apk --no-cache add ca-certificates tzdata curl
+
+RUN adduser -D -g '' appuser
+
+WORKDIR /app
+
+COPY bin/aaa-sim .
+
+RUN chown -R appuser:appuser /app
+
+USER appuser
 EXPOSE 1812/udp 3868/tcp
-CMD ["aaa-sim"]
+ENTRYPOINT ["/app/aaa-sim"]
+
+# FROM alpine:3.19
+# RUN apk --no-cache add ca-certificates
+# # COPY --from=builder /aaa-sim /usr/local/bin/aaa-sim
+# COPY bin/aaa-sim /usr/local/bin/aaa-sim
+# EXPOSE 1812/udp 3868/tcp
+# CMD ["aaa-sim"]

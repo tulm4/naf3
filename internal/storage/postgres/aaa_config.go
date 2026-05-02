@@ -4,16 +4,14 @@ package postgres
 
 import (
 	"context"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"math/big"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/operator/nssAAF/internal/crypto"
 )
 
 // AAAConfig represents an AAA server configuration.
@@ -38,63 +36,27 @@ type AAAConfig struct {
 	UpdatedAt     int64 // Unix timestamp
 }
 
-// SecretEncryptor handles AES encryption/decryption for stored secrets.
-type SecretEncryptor struct {
-	key []byte
-}
-
-// NewSecretEncryptor creates an encryptor from a passphrase using HKDF-SHA256.
-func NewSecretEncryptor(passphrase string) *SecretEncryptor {
-	h := sha256.New()
-	h.Write([]byte(passphrase))
-	key := h.Sum(nil)
-	return &SecretEncryptor{key: key}
-}
-
-// Encrypt encrypts a secret using AES-256-GCM.
-func (e *SecretEncryptor) Encrypt(plaintext []byte) ([]byte, error) {
-	block, err := aes.NewCipher(e.key)
-	if err != nil {
-		return nil, err
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, err
-	}
-	nonce := make([]byte, gcm.NonceSize())
-	if _, err := rand.Read(nonce); err != nil {
-		return nil, err
-	}
-	return gcm.Seal(nonce, nonce, plaintext, nil), nil
-}
-
-// Decrypt decrypts a secret encrypted with Encrypt.
-func (e *SecretEncryptor) Decrypt(ciphertext []byte) ([]byte, error) {
-	block, err := aes.NewCipher(e.key)
-	if err != nil {
-		return nil, err
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, err
-	}
-	ns := gcm.NonceSize()
-	if len(ciphertext) < ns {
-		return nil, errors.New("ciphertext too short")
-	}
-	nonce, ct := ciphertext[:ns], ciphertext[ns:]
-	return gcm.Open(nil, nonce, ct, nil)
-}
-
 // ConfigRepository provides AAA configuration persistence operations.
 type ConfigRepository struct {
-	pool      *Pool
-	encryptor *SecretEncryptor
+	pool *Pool
 }
 
 // NewConfigRepository creates a new AAA config repository.
-func NewConfigRepository(pool *Pool, encryptor *SecretEncryptor) *ConfigRepository {
-	return &ConfigRepository{pool: pool, encryptor: encryptor}
+func NewConfigRepository(pool *Pool) *ConfigRepository {
+	return &ConfigRepository{pool: pool}
+}
+
+// encryptSecret encrypts a shared secret using AES-256-GCM with a passphrase-derived key.
+// The passphrase is stored in the application config (env var or file).
+func encryptSecret(plaintext, passphrase []byte) ([]byte, error) {
+	key := crypto.FromPassphrase(string(passphrase))
+	return crypto.EncryptConcat(plaintext, key)
+}
+
+// decryptSecret decrypts a shared secret encrypted with encryptSecret.
+func decryptSecret(ciphertext, passphrase []byte) ([]byte, error) {
+	key := crypto.FromPassphrase(string(passphrase))
+	return crypto.DecryptConcat(ciphertext, key)
 }
 
 // GetByID retrieves a config by its UUID.
@@ -186,11 +148,10 @@ func (r *ConfigRepository) ListAll(ctx context.Context) ([]*AAAConfig, error) {
 }
 
 // Upsert inserts or updates a configuration.
-func (r *ConfigRepository) Upsert(ctx context.Context, c *AAAConfig) error {
+func (r *ConfigRepository) Upsert(ctx context.Context, c *AAAConfig, passphrase []byte) error {
 	secretB64 := ""
-	if len(c.SharedSecret) > 0 {
-		var err error
-		enc, err := r.encryptor.Encrypt(c.SharedSecret)
+	if len(c.SharedSecret) > 0 && len(passphrase) > 0 {
+		enc, err := encryptSecret(c.SharedSecret, passphrase)
 		if err != nil {
 			return fmt.Errorf("encrypt secret: %w", err)
 		}
@@ -222,15 +183,9 @@ func (r *ConfigRepository) Upsert(ctx context.Context, c *AAAConfig) error {
 			description = EXCLUDED.description,
 			updated_at = NOW()`
 
-	var id string
-	if c.ID == "" {
-		var err error
-		id, err = newUUID()
-		if err != nil {
-			return fmt.Errorf("generate uuid: %w", err)
-		}
-	} else {
-		id = c.ID
+	id := c.ID
+	if id == "" {
+		id = uuid.NewString()
 	}
 
 	var sd interface{} = c.SnssaiSD
@@ -261,24 +216,6 @@ func (r *ConfigRepository) Upsert(ctx context.Context, c *AAAConfig) error {
 
 // ErrConfigNotFound is returned when no matching AAA config is found.
 var ErrConfigNotFound = errors.New("postgres: aaa config not found")
-
-// newUUID generates a new UUID v4 string.
-func newUUID() (string, error) {
-	// Generate 16 random bytes.
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		return "", fmt.Errorf("postgres: rand read: %w", err)
-	}
-	// Set version (4) and variant (RFC 4122).
-	b[6] = (b[6] & 0x0f) | 0x40
-	b[8] = (b[8] & 0x3f) | 0x80
-	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
-		big.NewInt(0).SetBytes(b[:4]).Int64(),
-		big.NewInt(0).SetBytes(b[4:6]).Int64(),
-		big.NewInt(0).SetBytes(b[6:8]).Int64(),
-		big.NewInt(0).SetBytes(b[8:10]).Int64(),
-		big.NewInt(0).SetBytes(b[10:]).Int64()), nil
-}
 
 func (r *ConfigRepository) scanConfig(row pgx.Row) (*AAAConfig, error) {
 	var c AAAConfig
@@ -311,17 +248,6 @@ func (r *ConfigRepository) scanConfig(row pgx.Row) (*AAAConfig, error) {
 
 	c.CreatedAt = createdAt
 	c.UpdatedAt = updatedAt
-
-	if secretB64 != nil && secretB64.(string) != "" {
-		enc, err := base64.StdEncoding.DecodeString(secretB64.(string))
-		if err != nil {
-			return nil, fmt.Errorf("decode secret: %w", err)
-		}
-		c.SharedSecret, err = r.encryptor.Decrypt(enc)
-		if err != nil {
-			return nil, fmt.Errorf("decrypt secret: %w", err)
-		}
-	}
 
 	return &c, nil
 }
@@ -358,16 +284,10 @@ func (r *ConfigRepository) scanConfigFromRows(rows pgx.Rows) (*AAAConfig, error)
 	c.CreatedAt = createdAt
 	c.UpdatedAt = updatedAt
 
-	if secretB64 != nil && secretB64.(string) != "" {
-		enc, err := base64.StdEncoding.DecodeString(secretB64.(string))
-		if err != nil {
-			return nil, fmt.Errorf("decode secret: %w", err)
-		}
-		c.SharedSecret, err = r.encryptor.Decrypt(enc)
-		if err != nil {
-			return nil, fmt.Errorf("decrypt secret: %w", err)
-		}
-	}
-
 	return &c, nil
+}
+
+// generateUUID delegates to github.com/google/uuid for RFC 4122 v4 UUID generation.
+func generateUUID() (string, error) {
+	return uuid.NewString(), nil
 }

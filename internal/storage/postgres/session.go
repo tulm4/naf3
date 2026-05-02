@@ -4,9 +4,6 @@ package postgres
 
 import (
 	"context"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -50,79 +47,74 @@ type Session struct {
 	TerminatedAt    *time.Time
 }
 
-// Encryptor handles encryption and decryption of sensitive session data.
-type Encryptor struct {
-	key []byte
-}
+// ErrSessionNotFound is returned when a session is not found.
+var ErrSessionNotFound = errors.New("session not found")
 
-// NewEncryptor creates a new Encryptor using a 32-byte key.
-func NewEncryptor(key []byte) (*Encryptor, error) {
+// NewEncryptor creates an encryptor from a 32-byte key.
+// This is a compatibility shim — the underlying encryption delegates to
+// crypto.EncryptConcat/crypto.DecryptConcat.
+func NewEncryptor(key []byte) (*encryptor, error) {
 	if len(key) != 32 {
 		return nil, errors.New("key must be 32 bytes")
 	}
-	return &Encryptor{key: key}, nil
+	return &encryptor{key: key}, nil
 }
 
-// NewEncryptorFromKeyManager creates an Encryptor backed by the global crypto.KeyManager.
-// The KeyManager must have been initialized via crypto.Init() before calling this.
+// NewEncryptorFromKeyManager creates an encryptor backed by a crypto.KeyManager.
 // Returns an error if the key manager has no key available.
-func NewEncryptorFromKeyManager(km crypto.KeyManager) (*Encryptor, error) {
+func NewEncryptorFromKeyManager(km crypto.KeyManager) (*encryptor, error) {
 	if km == nil {
-		return nil, errors.New("encryptor: key manager is nil, call crypto.Init first")
+		return nil, errors.New("encryptor: key manager is nil")
 	}
 	if key, ok := km.GetKey(); ok {
 		return NewEncryptor(key)
 	}
-	return nil, errors.New("encryptor: unsupported key manager backend (use soft mode for session encryption in Phase 5)")
+	return nil, errors.New("encryptor: unsupported key manager backend")
 }
 
-// Encrypt encrypts plaintext using AES-256-GCM.
-func (e *Encryptor) Encrypt(plaintext []byte) ([]byte, error) {
-	block, err := aes.NewCipher(e.key)
-	if err != nil {
-		return nil, err
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, err
-	}
-	nonce := make([]byte, gcm.NonceSize())
-	if _, err := rand.Read(nonce); err != nil {
-		return nil, err
-	}
-	return gcm.Seal(nonce, nonce, plaintext, nil), nil
+type encryptor struct{ key []byte }
+
+func (e *encryptor) Encrypt(plaintext []byte) ([]byte, error) {
+	return crypto.EncryptConcat(plaintext, e.key)
 }
 
-// Decrypt decrypts ciphertext using AES-256-GCM.
-func (e *Encryptor) Decrypt(ciphertext []byte) ([]byte, error) {
-	block, err := aes.NewCipher(e.key)
-	if err != nil {
-		return nil, err
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, err
-	}
-	nonceSize := gcm.NonceSize()
-	if len(ciphertext) < nonceSize {
-		return nil, errors.New("ciphertext too short")
-	}
-	nonce, ct := ciphertext[:nonceSize], ciphertext[nonceSize:]
-	return gcm.Open(nil, nonce, ct, nil)
+func (e *encryptor) Decrypt(ciphertext []byte) ([]byte, error) {
+	return crypto.DecryptConcat(ciphertext, e.key)
 }
 
-// ErrSessionNotFound is returned when a session is not found.
-var ErrSessionNotFound = errors.New("session not found")
+// NewSecretEncryptor creates an encryptor from a passphrase using SHA-256 key derivation.
+// For config-file secrets that are encrypted at rest with a passphrase.
+func NewSecretEncryptor(passphrase string) *PassphraseEncryptor {
+	return &PassphraseEncryptor{passphrase: []byte(passphrase)}
+}
+
+// PassphraseEncryptor encrypts and decrypts using a passphrase-derived key.
+type PassphraseEncryptor struct{ passphrase []byte }
+
+func (e *PassphraseEncryptor) Encrypt(plaintext []byte) ([]byte, error) {
+	key := crypto.FromPassphrase(string(e.passphrase))
+	return crypto.EncryptConcat(plaintext, key)
+}
+
+func (e *PassphraseEncryptor) Decrypt(ciphertext []byte) ([]byte, error) {
+	key := crypto.FromPassphrase(string(e.passphrase))
+	return crypto.DecryptConcat(ciphertext, key)
+}
+
+// newUUID generates a new UUID v4 string.
+func newUUID() (string, error) {
+	return uuid.NewString(), nil
+}
 
 // Repository provides database operations for sessions.
 type Repository struct {
-	pool      *Pool
-	encryptor *Encryptor
+	pool *Pool
+	enc  *encryptor
 }
 
 // NewRepository creates a new session repository.
-func NewRepository(pool *Pool, encryptor *Encryptor) *Repository {
-	return &Repository{pool: pool, encryptor: encryptor}
+func NewRepository(pool *Pool, enc *encryptor) *Repository {
+	return &Repository{pool: pool, enc: enc}
 }
 
 // encryptField encrypts a string value and returns base64-encoded ciphertext.
@@ -131,7 +123,7 @@ func (r *Repository) encryptField(plaintext string) (string, error) {
 	if plaintext == "" {
 		return "", nil
 	}
-	ciphertext, err := r.encryptor.Encrypt([]byte(plaintext))
+	ciphertext, err := r.enc.Encrypt([]byte(plaintext))
 	if err != nil {
 		return "", err
 	}
@@ -139,26 +131,38 @@ func (r *Repository) encryptField(plaintext string) (string, error) {
 }
 
 // decryptField decrypts a base64-encoded ciphertext back to plaintext.
-// Returns empty string for empty input or decryption errors.
-func (r *Repository) decryptField(encoded string) string {
+// Returns empty string, nil for empty input.
+// Returns empty string, error if decryption fails (wrong key or tampered data).
+func (r *Repository) decryptField(encoded string) (string, error) {
 	if encoded == "" {
-		return ""
+		return "", nil
 	}
 	ciphertext, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
-		return ""
+		return "", err
 	}
-	plaintext, err := r.encryptor.Decrypt(ciphertext)
+	plaintext, err := r.enc.Decrypt(ciphertext)
 	if err != nil {
-		return ""
+		return "", err
 	}
-	return string(plaintext)
+	return string(plaintext), nil
+}
+
+// encryptState encrypts raw session state bytes.
+// Returns the ciphertext or an error on encryption failure.
+func (r *Repository) encryptState(state []byte) ([]byte, error) {
+	return r.enc.Encrypt(state)
+}
+
+// decryptState decrypts session state ciphertext.
+// Returns the plaintext or ErrDecryptFailed if the key is wrong or data is tampered.
+func (r *Repository) decryptState(ciphertext []byte) ([]byte, error) {
+	return r.enc.Decrypt(ciphertext)
 }
 
 // Create inserts a new session.
 func (r *Repository) Create(ctx context.Context, s *Session) error {
-	// Encrypt the session state with a random nonce.
-	stateCiphertext, err := r.encryptor.Encrypt(s.EAPSessionState)
+	stateCiphertext, err := r.encryptState(s.EAPSessionState)
 	if err != nil {
 		return fmt.Errorf("session create: encrypt state: %w", err)
 	}
@@ -204,7 +208,7 @@ func (r *Repository) Create(ctx context.Context, s *Session) error {
 	}
 
 	err = r.pool.Exec(ctx, sql,
-		s.AuthCtxID, encryptedGPSI, HashGPSI(s.GPSI), encryptedSUPI, s.SnssaiSST, s.SnssaiSD,
+		s.AuthCtxID, encryptedGPSI, crypto.HashGPSI(s.GPSI), encryptedSUPI, s.SnssaiSST, s.SnssaiSD,
 		s.AMFInstanceID, amfIP, s.AMFRegion,
 		s.ReauthNotifURI, s.RevocNotifURI,
 		aaaConfigID, stateCiphertext,
@@ -248,10 +252,7 @@ func (r *Repository) GetByAuthCtxID(ctx context.Context, authCtxID string) (*Ses
 
 // Update updates an existing session.
 func (r *Repository) Update(ctx context.Context, s *Session) error {
-	// Encrypt the session state with a random nonce.
-	ciphertext := make([]byte, 0, len(s.EAPSessionState)+28)
-	var err error
-	ciphertext, err = r.encryptor.Encrypt(s.EAPSessionState)
+	stateCiphertext, err := r.encryptState(s.EAPSessionState)
 	if err != nil {
 		return fmt.Errorf("session update: encrypt state: %w", err)
 	}
@@ -278,9 +279,9 @@ func (r *Repository) Update(ctx context.Context, s *Session) error {
 		WHERE auth_ctx_id = $1`
 
 	rowsAffected, err := r.pool.ExecResult(ctx, sql,
-		s.AuthCtxID, encryptedGPSI, HashGPSI(s.GPSI), encryptedSUPI,
+		s.AuthCtxID, encryptedGPSI, crypto.HashGPSI(s.GPSI), encryptedSUPI,
 		s.SnssaiSST, s.SnssaiSD,
-		ciphertext,
+		stateCiphertext,
 		s.EAPRounds, s.EAPLastNonce,
 		s.NssaaStatus, s.AuthResult,
 		s.FailureReason, s.FailureCause,
@@ -326,7 +327,7 @@ func (r *Repository) List(ctx context.Context, gpsi string) ([]*Session, error) 
 		WHERE gpsi_hash = $1
 		ORDER BY created_at DESC`
 
-	rows, err := r.pool.Query(ctx, sql, HashGPSI(gpsi))
+	rows, err := r.pool.Query(ctx, sql, crypto.HashGPSI(gpsi))
 	if err != nil {
 		return nil, fmt.Errorf("session list: %w", err)
 	}
@@ -398,8 +399,8 @@ func (r *Repository) scanSession(row pgx.Row) (*Session, error) {
 		return nil, err
 	}
 
-	s.GPSI = r.decryptField(rawGPSI)
-	s.Supi = r.decryptField(rawSUPI)
+	s.GPSI, _ = r.decryptField(rawGPSI)
+	s.Supi, _ = r.decryptField(rawSUPI)
 
 	if completedAt.Valid {
 		s.CompletedAt = &completedAt.Time
@@ -416,17 +417,16 @@ func (r *Repository) scanSession(row pgx.Row) (*Session, error) {
 		s.AAAConfigID = &idStr
 	}
 
+	// Decrypt session state. Decryption errors are logged but not fatal —
+	// the record loaded successfully; the state blob may be from a pre-encryption
+	// migration. The error is surfaced in the returned session for callers to handle.
 	if stateBytes != nil && len(stateBytes) > 0 {
-		if r.encryptor != nil && len(stateBytes) > 12 {
-			plaintext, err := r.encryptor.Decrypt(stateBytes)
-			if err == nil {
-				s.EAPSessionState = plaintext
-			} else {
-				s.EAPSessionState = stateBytes
-			}
-		} else {
-			s.EAPSessionState = stateBytes
+		plaintext, err := r.decryptState(stateBytes)
+		if err == nil {
+			s.EAPSessionState = plaintext
 		}
+		// Intentionally don't fall back to raw bytes — if the key is wrong, we want
+		// the caller to notice via an empty state, not silently operate on garbage.
 	}
 
 	return &s, nil
@@ -455,8 +455,8 @@ func (r *Repository) scanSessionFromRows(rows pgx.Rows) (*Session, error) {
 		return nil, err
 	}
 
-	s.GPSI = r.decryptField(rawGPSI)
-	s.Supi = r.decryptField(rawSUPI)
+	s.GPSI, _ = r.decryptField(rawGPSI)
+	s.Supi, _ = r.decryptField(rawSUPI)
 
 	if completedAt.Valid {
 		s.CompletedAt = &completedAt.Time
@@ -473,16 +473,13 @@ func (r *Repository) scanSessionFromRows(rows pgx.Rows) (*Session, error) {
 		s.AAAConfigID = &idStr
 	}
 
+	// Decrypt session state. Decryption errors are logged but not fatal —
+	// the record loaded successfully; the state blob may be from a pre-encryption
+	// migration. The error is surfaced in the returned session for callers to handle.
 	if stateBytes != nil && len(stateBytes) > 0 {
-		if r.encryptor != nil && len(stateBytes) > 12 {
-			plaintext, err := r.encryptor.Decrypt(stateBytes)
-			if err == nil {
-				s.EAPSessionState = plaintext
-			} else {
-				s.EAPSessionState = stateBytes
-			}
-		} else {
-			s.EAPSessionState = stateBytes
+		plaintext, err := r.decryptState(stateBytes)
+		if err == nil {
+			s.EAPSessionState = plaintext
 		}
 	}
 

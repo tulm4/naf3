@@ -68,14 +68,14 @@ func newHTTPAAAClientForTest(aaaGatewayURL, podID, version string, httpClient *h
 	}
 }
 
-// SendEAP satisfies eap.AAAClient.
+// SendEAP satisfies eap.AAARouter.
 // Spec: PHASE §1.1 pattern
-func (c *httpAAAClient) SendEAP(ctx context.Context, authCtxID string, eapPayload []byte) ([]byte, error) {
+func (c *httpAAAClient) SendEAP(ctx context.Context, session *eap.Session, eapPayload []byte) ([]byte, error) {
 	// 1. Build forward request
 	req := &proto.AaaForwardRequest{
 		Version:       c.version,
-		SessionID:     fmt.Sprintf("nssAAF;%d;%s", time.Now().UnixNano(), authCtxID),
-		AuthCtxID:     authCtxID,
+		SessionID:     fmt.Sprintf("nssAAF;%d;%s", time.Now().UnixNano(), session.AuthCtxID),
+		AuthCtxID:     session.AuthCtxID,
 		TransportType: proto.TransportRADIUS, // Default to RADIUS; Biz Router determines actual type
 		Direction:     proto.DirectionClientInitiated,
 		Payload:       eapPayload,
@@ -170,4 +170,4 @@ func (c *httpAAAClient) Close() error {
 	return nil
 }
 
-var _ eap.AAAClient = (*httpAAAClient)(nil)
+var _ eap.AAARouter = (*httpAAAClient)(nil)

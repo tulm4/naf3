@@ -65,7 +65,7 @@ type Engine struct {
 	cfg            Config
 	sessionManager *sessionManager
 	fragmentMgr    *FragmentManager
-	aaaClient      AAAClient
+	aaaClient      AAARouter
 	logger         Logger
 
 	// TLS config for EAP-TLS
@@ -73,7 +73,7 @@ type Engine struct {
 }
 
 // NewEngine creates a new EAP engine with the given configuration.
-func NewEngine(cfg Config, aaaClient AAAClient, logger *slog.Logger) *Engine {
+func NewEngine(cfg Config, aaaClient AAARouter, logger *slog.Logger) *Engine {
 	if cfg.MaxRounds == 0 {
 		cfg.MaxRounds = DefaultMaxRounds
 	}
@@ -346,7 +346,7 @@ func (e *Engine) forwardToAAA(ctx context.Context, session *Session, eapPayload 
 		"rounds", session.Rounds,
 	)
 
-	response, err := e.aaaClient.SendEAP(ctx, session.AuthCtxID, eapPayload)
+	response, err := e.aaaClient.SendEAP(ctx, session, eapPayload)
 	if err != nil {
 		e.logger.Error("eap_aaa_error",
 			"auth_ctx_id", session.AuthCtxID,

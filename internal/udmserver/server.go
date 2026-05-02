@@ -63,6 +63,7 @@ func NewServer() *Server {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/nudm-uemm/v1/", s.handleRegistration)
+	mux.HandleFunc("/nudm-uemm/v1/health", s.handleHealth)
 	mux.HandleFunc("/nudm-uem/v1/subscribers/", s.handleAuthContexts)
 	s.httpSrv = &http.Server{Handler: mux}
 	return s
@@ -125,6 +126,16 @@ func (s *Server) Shutdown(ctx context.Context) error {
 // ServeHTTP implements http.Handler so Server can be used with httptest.NewServer.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.httpSrv.Handler.ServeHTTP(w, r)
+}
+
+// handleHealth handles GET /nudm-uemm/v1/health for container healthchecks.
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"cause":"METHOD_NOT_SUPPORTED"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 // handleRegistration handles GET /nudm-uemm/v1/{supi}/registration.

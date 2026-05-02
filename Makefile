@@ -34,6 +34,8 @@ HTTPGW_BINARY = $(BINARY_DIR)/http-gateway
 AAAGW_BINARY = $(BINARY_DIR)/aaa-gateway
 NRM_BINARY = $(BINARY_DIR)/nrm
 AAASIM_BINARY = $(BINARY_DIR)/aaa-sim
+NRFMOCK_BINARY = $(BINARY_DIR)/nrf-mock
+UDMMOCK_BINARY = $(BINARY_DIR)/udm-mock
 
 # Linting
 LINTER = golangci-lint
@@ -91,8 +93,10 @@ build: build-all ## Build all 3 component binaries
 	@echo "  aaa-gateway → $(AAAGW_BINARY)"
 	@echo "  nrm → $(NRM_BINARY)"
 	@echo "  aaa-sim → $(AAASIM_BINARY)"
+	@echo "  nrf-mock → $(NRFMOCK_BINARY)"
+	@echo "  aaa-sim → $(UDMMOCK_BINARY)"
 
-build-all: build-biz build-http-gateway build-aaa-gateway build-nrm build-aaa-sim ## Build all 3 binaries
+build-all: build-biz build-http-gateway build-aaa-gateway build-nrm build-aaa-sim build-nrf-mock build-udm-mock ## Build all 3 binaries
 
 .PHONY: build-biz
 build-biz: ## Build Biz Pod binary
@@ -124,8 +128,20 @@ build-aaa-sim: ## Build AAA sim binary
 	@mkdir -p $(BINARY_DIR)
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GOBUILD) -ldflags="-s -w" -o $(AAASIM_BINARY) ./cmd/aaa-sim/
 
+.PHONY: build-nrf-mock
+build-nrf-mock: ## Build NRF MOCK binary
+	@echo "$(YELLOW)Building nrf-mock...$(NC)"
+	@mkdir -p $(BINARY_DIR)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GOBUILD) -ldflags="-s -w" -o $(NRFMOCK_BINARY) ./cmd/nrf-mock/
+
+.PHONY: build-udm-mock
+build-udm-mock: ## Build UDM mock binary
+	@echo "$(YELLOW)Building udm-mock...$(NC)"
+	@mkdir -p $(BINARY_DIR)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GOBUILD) -ldflags="-s -w" -o $(UDMMOCK_BINARY) ./cmd/udm-mock/
+
 .PHONY: build-debug
-build-debug: build-debug-biz build-debug-http-gateway build-debug-aaa-gateway build-debug-aaa-sim build-debug-nrm ## Build all with debug symbols
+build-debug: build-debug-biz build-debug-http-gateway build-debug-aaa-gateway build-debug-aaa-sim build-debug-nrm build-debug-nrf-mock build-debug-udm-mock ## Build all with debug symbols
 
 build-debug-biz:
 	$(GOBUILD) -o $(BIZ_BINARY) ./cmd/biz/
@@ -141,6 +157,12 @@ build-debug-aaa-sim:
 
 build-debug-nrm:
 	$(GOBUILD) -o $(NRM_BINARY) ./cmd/nrm/
+
+build-debug-nrf-mock:
+	$(GOBUILD) -o $(NRFMOCK_BINARY) ./cmd/nrf-mock/
+
+build-debug-udm-mock:
+	$(GOBUILD) -o $(UDMMOCK_BINARY) ./cmd/udm-mock/
 
 # =============================================================================
 # Test targets

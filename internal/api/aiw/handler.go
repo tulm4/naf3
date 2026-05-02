@@ -16,13 +16,14 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/operator/nssAAF/internal/api/common"
+	"github.com/operator/nssAAF/internal/eap"
 	aiwnats "github.com/operator/nssAAF/oapi-gen/gen/aiw"
 )
 
-// AAARouter forwards EAP payloads to AAA-S (RADIUS or Diameter).
-type AAARouter interface {
-	SendEAP(ctx context.Context, authCtxID string, eapPayload []byte) ([]byte, error)
-}
+// AAARouter is the interface for forwarding EAP payloads to AAA-S.
+// Aliased from eap.AAARouter for handler convenience.
+// Spec: TS 29.561 §16-17
+type AAARouter = eap.AAARouter
 
 // AuthContext represents an AIW authentication context.
 // Spec: TS 29.526 §7.3

@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS slice_auth_sessions (
 ) PARTITION BY RANGE (created_at);
 
 CREATE INDEX IF NOT EXISTS idx_sessions_gpsi_snssai
-    ON slice_auth_sessions(gpsi_hash, snssai_sst, snssai_sd);
+    ON slice_auth_sessions(gpsi, snssai_sst, snssai_sd);
 
 CREATE INDEX IF NOT EXISTS idx_sessions_nssaa_status
     ON slice_auth_sessions(nssaa_status)

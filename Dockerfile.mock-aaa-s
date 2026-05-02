@@ -1,17 +1,18 @@
 # Dockerfile.mock-aaa-s — Mock AAA Server for test-e2e
 # Fixed: now builds and runs the real aaa-sim binary instead of socat.
-FROM golang:1.22-alpine AS builder
+# FROM golang:1.22-alpine AS builder
 
-WORKDIR /src
-COPY go.mod go.sum ./
-COPY test/aaa_sim ./test/aaa_sim/
-COPY cmd/aaa-sim ./cmd/aaa-sim/
-COPY internal ./internal/
+# WORKDIR /src
+# COPY go.mod go.sum ./
+# COPY test/aaa_sim ./test/aaa_sim/
+# COPY cmd/aaa-sim ./cmd/aaa-sim/
+# COPY internal ./internal/
 
-RUN GOTOOLCHAIN=auto CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /mock-aaa-s ./cmd/aaa-sim/
+# RUN GOTOOLCHAIN=auto CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /mock-aaa-s ./cmd/aaa-sim/
 
 FROM alpine:3.19
 RUN apk --no-cache add ca-certificates
-COPY --from=builder /mock-aaa-s /usr/local/bin/mock-aaa-s
+# COPY --from=builder /mock-aaa-s /usr/local/bin/mock-aaa-s
+COPY bin/aaa-sim /usr/local/bin/mock-aaa-s
 EXPOSE 1812/udp 3868/tcp
 CMD ["mock-aaa-s"]

@@ -52,13 +52,15 @@ services:
       dockerfile: Dockerfile.nrf-mock
     image: nssaaf-nrf-mock:latest
     ports: ["8082:8081"]
+    volumes:
+      - ../bin/nrf-mock:/app/nrf-mock:ro
     environment:
       NRF_NF_STATUS: "udm-001:REGISTERED,ausf-001:REGISTERED,aaa-gw-001:REGISTERED"
       NRF_SERVICE_ENDPOINTS: "UDM:nudm-uem:udm-mock:8081,AUSF:nausf-auth:ausf-mock:8081"
     networks:
       - default
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/nnrf-disc/v1 || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/nnrf-disc/v1/nf-instances || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -72,10 +74,12 @@ services:
       dockerfile: Dockerfile.udm-mock
     image: nssaaf-udm-mock:latest
     ports: ["8083:8081"]
+    volumes:
+      - ../bin/udm-mock:/app/udm-mock:ro
     networks:
       - default
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/nudm-uemm/v1 || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/nudm-uemm/v1/health || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -89,6 +93,8 @@ services:
       dockerfile: Dockerfile.aaa-sim
     image: nssaaf-aaa-sim:latest
     ports: ["18120:1812", "38680:3868"]
+    volumes:
+      - ../bin/aaa-sim:/app/aaa-sim:ro
     environment:
       AAA_SIM_MODE: "${AAA_SIM_MODE:-EAP_TLS_SUCCESS}"
     networks:
@@ -109,7 +115,7 @@ services:
         condition: service_started
     volumes:
       - ./configs/aaa-gateway.yaml:/etc/nssAAF/aaa-gateway.yaml:ro
-      - ./bin/aaa-gateway:/app/aaa-gateway:ro
+      - ../bin/aaa-gateway:/app/aaa-gateway:ro
     environment:
       REDIS_ADDR: "redis:6379"
       BIZ_URL: "http://biz:8080"
@@ -143,7 +149,7 @@ services:
         condition: service_healthy
     volumes:
       - ./configs/biz.yaml:/etc/nssAAF/biz.yaml:ro
-      - ./bin/biz:/app/biz:ro
+      - ../bin/biz:/app/biz:ro
     environment:
       MASTER_KEY_HEX: "${MASTER_KEY_HEX:-6767a7ad0416a19ea174608288761dde35dfabba2a8dda9602fc520b80e1af15}"
       POSTGRES_HOST: "postgres"
@@ -156,7 +162,7 @@ services:
     networks:
       - default
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/healthz/live || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -176,13 +182,18 @@ services:
     volumes:
       - ./configs/http-gateway.yaml:/etc/nssAAF/http-gateway.yaml:ro
       - /tmp/e2e-tls:/tmp/e2e-tls:ro
-      - ./bin/http-gateway:/app/http-gateway:ro
+      - ../bin/http-gateway:/app/http-gateway:ro
     environment:
       NAF3_AUTH_DISABLED: "1"
       BIZ_URL: "http://biz:8080"
     ports: ["8443:8443"]
     networks:
       - default
+    healthcheck:
+      test: ["CMD-SHELL", "curl -skf https://localhost:8443/healthz/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
 networks:
   default:

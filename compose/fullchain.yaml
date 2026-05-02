@@ -54,7 +54,7 @@ services:
     networks:
       - default
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/nnrf-disc/v1 || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/nnrf-disc/v1/nf-instances || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -71,7 +71,7 @@ services:
     networks:
       - default
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/nudm-uemm/v1 || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/nudm-uemm/v1/health || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -150,7 +150,7 @@ services:
     networks:
       - default
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/healthz/live || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -176,6 +176,11 @@ services:
     ports: ["8443:8443"]
     networks:
       - default
+    healthcheck:
+      test: ["CMD-SHELL", "curl -skf https://localhost:8443/healthz/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
 networks:
   default:

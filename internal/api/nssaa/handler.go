@@ -7,25 +7,24 @@
 package nssaa
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 
 	"github.com/google/uuid"
 	"github.com/operator/nssAAF/internal/api/common"
+	"github.com/operator/nssAAF/internal/eap"
 	"github.com/operator/nssAAF/internal/udm"
 	nssaanats "github.com/operator/nssAAF/oapi-gen/gen/nssaa"
 	"github.com/operator/nssAAF/oapi-gen/gen/specs"
 )
 
-// AAARouter forwards EAP payloads to AAA-S (RADIUS or Diameter).
-type AAARouter interface {
-	SendEAP(ctx context.Context, authCtxID string, eapPayload []byte) ([]byte, error)
-}
+// AAARouter is the interface for forwarding EAP payloads to AAA-S.
+// Aliased from eap.AAARouter for handler convenience.
+// Spec: TS 29.561 §16-17
+type AAARouter = eap.AAARouter
 
 // AuthCtx represents a slice authentication context stored in NSSAAF.
 type AuthCtx struct {
@@ -158,26 +157,11 @@ var _ http.Handler = (*Handler)(nil)
 func (h *Handler) CreateSliceAuthenticationContext(w http.ResponseWriter, r *http.Request) {
 	reqID := common.GetRequestID(r.Context())
 
-	// Read body once for both raw presence check and typed decode.
-	bodyBytes, err := io.ReadAll(r.Body)
+	body, present, err := common.ReadRequestBody[nssaanats.SliceAuthInfo](w, r)
 	if err != nil {
-		common.WriteProblem(w, common.ValidationProblem("body", err.Error()))
 		return
 	}
-
-	// Check whether snssai field is present (detect missing vs zero-value).
-	var raw map[string]interface{}
-	if err := json.Unmarshal(bodyBytes, &raw); err != nil {
-		common.WriteProblem(w, common.ValidationProblem("body", err.Error()))
-		return
-	}
-	_, snssaiPresent := raw["snssai"]
-
-	var body nssaanats.SliceAuthInfo
-	if err := json.Unmarshal(bodyBytes, &body); err != nil {
-		common.WriteProblem(w, common.ValidationProblem("body", err.Error()))
-		return
-	}
+	snssaiPresent := present["snssai"]
 
 	if err := common.ValidateGPSI(string(body.Gpsi)); err != nil {
 		var pd *common.ProblemDetails
@@ -245,7 +229,7 @@ func (h *Handler) CreateSliceAuthenticationContext(w http.ResponseWriter, r *htt
 	}
 
 	// Phase 2: forward to AAA-S and get next EAP challenge.
-	// h.aaa.SendEAP(r.Context(), authCtxID, authCtx.EapPayload)
+	// nextEap, err := h.aaa.SendEAP(r.Context(), authCtx, authCtx.EapPayload)
 	// Phase 1: echo back the identity response as the next challenge.
 	nextEap := *body.EapIdRsp
 
@@ -278,26 +262,11 @@ func (h *Handler) ConfirmSliceAuthentication(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Read body once for both raw presence check and typed decode.
-	bodyBytes, err := io.ReadAll(r.Body)
+	body, present, err := common.ReadRequestBody[nssaanats.SliceAuthConfirmationData](w, r)
 	if err != nil {
-		common.WriteProblem(w, common.ValidationProblem("body", err.Error()))
 		return
 	}
-
-	// Check whether snssai field is present (detect missing vs zero-value).
-	var raw map[string]interface{}
-	if err := json.Unmarshal(bodyBytes, &raw); err != nil {
-		common.WriteProblem(w, common.ValidationProblem("body", err.Error()))
-		return
-	}
-	_, snssaiPresent := raw["snssai"]
-
-	var body nssaanats.SliceAuthConfirmationData
-	if err := json.Unmarshal(bodyBytes, &body); err != nil {
-		common.WriteProblem(w, common.ValidationProblem("body", err.Error()))
-		return
-	}
+	snssaiPresent := present["snssai"]
 
 	if err := common.ValidateGPSI(string(body.Gpsi)); err != nil {
 		var pd *common.ProblemDetails

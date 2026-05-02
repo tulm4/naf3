@@ -21,9 +21,8 @@ type Store struct {
 }
 
 // NewSessionStore creates a new PostgreSQL-backed session store for NSSAA.
-// D-06: This is the factory function required by the implementation plan.
-func NewSessionStore(pool *Pool, encryptor *Encryptor) *Store {
-	return &Store{repo: NewRepository(pool, encryptor)}
+func NewSessionStore(pool *Pool, enc *encryptor) *Store {
+	return &Store{repo: NewRepository(pool, enc)}
 }
 
 // Load retrieves a slice authentication context by authCtxID.
@@ -99,9 +98,8 @@ type AIWStore struct {
 }
 
 // NewAIWSessionStore creates a new PostgreSQL-backed session store for AIW.
-// D-06: This is the factory function required by the implementation plan.
-func NewAIWSessionStore(pool *Pool, encryptor *Encryptor) *AIWStore {
-	return &AIWStore{repo: NewAIWRepository(pool, encryptor)}
+func NewAIWSessionStore(pool *Pool, enc *encryptor) *AIWStore {
+	return &AIWStore{repo: NewAIWRepository(pool, enc)}
 }
 
 // Load retrieves an AIW authentication context by authCtxID.

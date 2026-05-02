@@ -4,8 +4,6 @@ package postgres
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"time"
 )
@@ -49,14 +47,6 @@ type AuditEntry struct {
 	ClientIP      string
 	UserAgent     string
 	CreatedAt     time.Time
-}
-
-// HashGPSI hashes a GPSI for storage in the audit log.
-// Uses SHA-256, takes first 16 bytes, hex-encodes.
-// This protects subscriber privacy while allowing audit lookups.
-func HashGPSI(gpsi string) string {
-	h := sha256.Sum256([]byte(gpsi))
-	return hex.EncodeToString(h[:16])
 }
 
 // AuditRepository provides audit log persistence.

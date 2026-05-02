@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/operator/nssAAF/internal/crypto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -113,23 +114,23 @@ func TestSessionDefaultValues(t *testing.T) {
 
 func TestHashGPSI(t *testing.T) {
 	gpsi := "52080460000001"
-	hash := HashGPSI(gpsi)
+	hash := crypto.HashGPSI(gpsi)
 
 	// SHA-256 first 16 bytes hex → 32 characters.
 	assert.Len(t, hash, 32)
 
 	// Deterministic.
-	assert.Equal(t, hash, HashGPSI(gpsi))
+	assert.Equal(t, hash, crypto.HashGPSI(gpsi))
 
 	// Different GPSI → different hash.
-	assert.NotEqual(t, hash, HashGPSI("52080460000002"))
+	assert.NotEqual(t, hash, crypto.HashGPSI("52080460000002"))
 
 	// Not reversible.
 	assert.NotContains(t, hash, "52080460000001")
 }
 
 func TestHashGPSIEmpty(t *testing.T) {
-	hash := HashGPSI("")
+	hash := crypto.HashGPSI("")
 	assert.Len(t, hash, 32)
 }
 
@@ -225,7 +226,7 @@ func TestSecretEncryptorDifferentPassphrase(t *testing.T) {
 func TestAuditEntryFields(t *testing.T) {
 	e := &AuditEntry{
 		AuthCtxID:     "auth-123",
-		GPSIHash:      HashGPSI("52080460000001"),
+		GPSIHash:      crypto.HashGPSI("52080460000001"),
 		SnssaiSST:     1,
 		SnssaiSD:      "ABCDEF",
 		AMFInstanceID: "amf-1",
