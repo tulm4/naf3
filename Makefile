@@ -196,6 +196,22 @@ test-conformance: ## Run 3GPP conformance tests against live services
 test-all: test-unit test-integration test-e2e test-conformance ## Run all test layers in sequence
 	@echo "$(GREEN)All tests passed$(NC)"
 
+.PHONY: test-fullchain
+test-fullchain: gen-certs build ## Run E2E fullchain tests against docker compose
+	@echo "$(YELLOW)Starting docker compose infrastructure...$(NC)"
+	docker compose -f compose/dev.yaml up -d --quiet-pull
+	@sleep 10
+	E2E_DOCKER_MANAGED=1 \
+	E2E_TLS_CA=/tmp/e2e-tls/server.crt \
+	BIZ_PG_URL=postgres://nssaa:nssaa@localhost:5432/nssaa?sslmode=disable \
+	BIZ_REDIS_URL=redis://localhost:6379 \
+	$(GOTEST) -tags=e2e -v -count=1 -timeout=5m \
+		./test/e2e/fullchain/... \
+		|| { docker compose -f compose/dev.yaml down --remove-orphans; exit 1; }
+	@echo "$(YELLOW)Tearing down docker compose infrastructure...$(NC)"
+	docker compose -f compose/dev.yaml down --remove-orphans
+	@echo "$(GREEN)Fullchain tests complete$(NC)"
+
 # =============================================================================
 # Lint targets
 # =============================================================================

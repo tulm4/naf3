@@ -1,0 +1,64 @@
+# .github/workflows/fullchain-tests.yml
+name: E2E Full Chain Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  GO_VERSION: "1.22"
+
+jobs:
+  fullchain-tests:
+    name: Full Chain E2E
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Generate TLS certificates
+        run: |
+          mkdir -p /tmp/e2e-tls
+          openssl req -x509 -nodes -newkey rsa:2048 \
+            -keyout /tmp/e2e-tls/server.key \
+            -out /tmp/e2e-tls/server.crt \
+            -days 365 \
+            -subj "/CN=localhost/O=nssAAF/C=US" \
+            2>/dev/null || \
+          openssl req -x509 -nodes -newkey rsa:2048 \
+            -keyout /tmp/e2e-tls/server.key \
+            -out /tmp/e2e-tls/server.crt \
+            -days 365 \
+            -subj "/CN=localhost/O=nssAAF/C=US"
+
+      - name: Build binaries
+        run: make build
+
+      - name: Run fullchain tests
+        run: |
+          docker compose -f compose/dev.yaml up -d --quiet-pull
+          sleep 10
+          E2E_DOCKER_MANAGED=1 \
+          E2E_TLS_CA=/tmp/e2e-tls/server.crt \
+          BIZ_PG_URL=postgres://nssaa:nssaa@localhost:5432/nssaa?sslmode=disable \
+          BIZ_REDIS_URL=redis://localhost:6379 \
+          go test -tags=e2e -v -count=1 -timeout=5m \
+            ./test/e2e/fullchain/... \
+            || { docker compose -f compose/dev.yaml down --remove-orphans; exit 1; }
+          docker compose -f compose/dev.yaml down --remove-orphans
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fullchain-test-logs
+          path: test/e2e/logs/
+          retention-days: 7
