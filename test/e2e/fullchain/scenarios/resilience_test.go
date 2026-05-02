@@ -29,7 +29,12 @@ func TestResilience_CircuitBreaker(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	h := fullchain.NewHarness(t)
+
+	// Skip if harness config is not available (fullchain compose not running)
+	h, err := fullchain.NewHarnessOptional(t)
+	if err != nil {
+		t.Skip("Fullchain harness not available: " + err.Error())
+	}
 	defer h.Close()
 	h.ResetState()
 
@@ -74,6 +79,10 @@ func TestResilience_CircuitBreaker(t *testing.T) {
 	// Circuit breaker should reject fast (under 1s vs 30s normal timeout)
 	assert.Less(t, elapsed.Milliseconds(), int64(1000),
 		"circuit breaker should reject fast, got %dms", elapsed.Milliseconds())
+
+	// Verify circuit opened: should return 503 when circuit is open
+	assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode,
+		"should return 503 when circuit is open")
 }
 
 // TestResilience_RedisDown verifies fallback to PostgreSQL when Redis is unavailable.
@@ -89,7 +98,12 @@ func TestResilience_RedisDown(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	h := fullchain.NewHarness(t)
+
+	// Skip if harness config is not available (fullchain compose not running)
+	h, err := fullchain.NewHarnessOptional(t)
+	if err != nil {
+		t.Skip("Fullchain harness not available: " + err.Error())
+	}
 	defer h.Close()
 	h.ResetState()
 
@@ -114,9 +128,9 @@ func TestResilience_RedisDown(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
-	// Should return a valid HTTP response (not crash)
-	assert.True(t, resp.StatusCode >= 200 && resp.StatusCode < 600,
-		"should return valid HTTP response, got %d", resp.StatusCode)
+	// Should return 503 when Redis is down (graceful degradation)
+	assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode,
+		"should return 503 when Redis is down")
 }
 
 // TestResilience_DLQProcessing verifies dead letter queue for failed notifications.
