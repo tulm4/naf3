@@ -26,6 +26,9 @@ Thumbs.db
 # Build
 dist/
 
+# BuildKit cache
+.docker/
+
 # Logs
 *.log
 
