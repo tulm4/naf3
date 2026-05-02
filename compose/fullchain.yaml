@@ -53,6 +53,11 @@ services:
       NRF_SERVICE_ENDPOINTS: "UDM:nudm-uem:udm-mock:8081,AUSF:nausf-auth:ausf-mock:8081"
     networks:
       - default
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/nnrf-disc/v1 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   # ---------------------------------------------------------------------------
   # udm-mock — UDM mock for auth subscription lookup
@@ -65,6 +70,11 @@ services:
     ports: ["8083:8081"]
     networks:
       - default
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/nudm-uemm/v1 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   # ---------------------------------------------------------------------------
   # aaa-sim — AAA Server simulator (EAP-TLS, RADIUS/Diameter)
@@ -123,9 +133,9 @@ services:
       aaa-gateway:
         condition: service_healthy
       nrf-mock:
-        condition: service_started
+        condition: service_healthy
       udm-mock:
-        condition: service_started
+        condition: service_healthy
     volumes:
       - ./configs/biz.yaml:/etc/nssAAF/biz.yaml:ro
     environment:
@@ -139,6 +149,12 @@ services:
     ports: ["8080:8080"]
     networks:
       - default
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
 
   # ---------------------------------------------------------------------------
   # http-gateway — TLS terminator, routes AMF → biz
@@ -150,7 +166,7 @@ services:
     image: nssaaf-http-gw:latest
     depends_on:
       biz:
-        condition: service_started
+        condition: service_healthy
     volumes:
       - ./configs/http-gateway.yaml:/etc/nssAAF/http-gateway.yaml:ro
       - /tmp/e2e-tls:/tmp/e2e-tls:ro
