@@ -23,13 +23,17 @@ var composeManaged int32
 // sharedHarness is the single Harness instance shared by all tests in this run.
 var sharedHarness *Harness
 
+// sharedDriver is the driver selected by TestMain based on E2E_PROFILE.
+var sharedDriver Driver
+
 // TestMain coordinates the shared lifecycle for the entire E2E test suite:
 //
 //  1. (if E2E_DOCKER_MANAGED not set) docker compose up — managed by Makefile
-//  2. connect to docker compose services  (sharedHarness via NewHarness)
-//  3. each test: NewHarnessForTest() → run
-//  4. Close() sharedHarness (close DB/Redis connections and mocks)
-//  5. (if E2E_DOCKER_MANAGED not set) docker compose down — managed by Makefile
+//  2. select driver (ContainerDriver with compose/fullchain-dev.yaml)
+//  3. connect to docker compose services (sharedHarness via NewHarnessFromDriver)
+//  4. each test: NewHarnessForTest() → run
+//  5. Close() sharedHarness (close DB/Redis connections and mocks)
+//  6. (if E2E_DOCKER_MANAGED not set) docker compose down — managed by Makefile
 //
 // This avoids the O(n) compose cycle cost where each test case would
 // independently start and tear down the infrastructure.
@@ -37,15 +41,37 @@ var sharedHarness *Harness
 // Supported environment variables:
 //
 //	E2E_DOCKER_MANAGED  if set, skip compose up/down (Makefile owns lifecycle)
-//	DOCKER_COMPOSE       additional flags for docker compose (e.g. "-f compose/dev.yaml")
-//	BIZ_BINARY           path to Biz Pod binary
-//	HTTPGW_BINARY       path to HTTP Gateway binary
-//	AAAGW_BINARY        path to AAA Gateway binary
+//	E2E_PROFILE         "fullchain" (default) — ContainerDriver + fullchain-dev.yaml
+//	DOCKER_COMPOSE      additional flags for docker compose (e.g. "-f compose/other.yaml")
 func TestMain(m *testing.M) {
 	dockerManaged := os.Getenv("E2E_DOCKER_MANAGED") == "1"
-	composeFile := os.Getenv("DOCKER_COMPOSE")
-	if composeFile == "" {
-		composeFile = "-f compose/dev.yaml"
+	profile := os.Getenv("E2E_PROFILE")
+
+	// Determine compose file and driver.
+	// Default: fullchain profile with ContainerDriver + compose/fullchain-dev.yaml.
+	// E2E_PROFILE is retained for backward compatibility with skip logic in test files.
+	var composeFile string
+	if profile == "" {
+		profile = "fullchain"
+	}
+	if profile == "fullchain" {
+		composeFile = "-f compose/fullchain-dev.yaml"
+		sharedDriver = NewContainerDriver()
+		if sharedDriver == nil {
+			fmt.Fprintf(os.Stderr, "E2E_PROFILE=fullchain but FULLCHAIN_NRF_URL is not set\n")
+			fmt.Fprintf(os.Stderr, "Set FULLCHAIN_NRF_URL and FULLCHAIN_UDM_URL environment variables\n")
+			os.Exit(1)
+		}
+	} else {
+		// E2E_PROFILE=mock: in-process mocks only (unit-level testing).
+		// Requires mock_driver.go which will be removed.
+		fmt.Fprintf(os.Stderr, "E2E_PROFILE=%q is no longer supported; use E2E_PROFILE=fullchain\n", profile)
+		os.Exit(1)
+	}
+
+	// Override compose file via DOCKER_COMPOSE env var if set.
+	if envCompose := os.Getenv("DOCKER_COMPOSE"); envCompose != "" {
+		composeFile = envCompose
 	}
 
 	// 1. Bring up docker compose if not already managed by Makefile.
@@ -59,13 +85,15 @@ func TestMain(m *testing.M) {
 		atomic.StoreInt32(&composeManaged, 1)
 	}
 
-	// 2. Create the shared Harness (connects to pre-started compose containers).
+	// 2. Create the shared Harness with the selected driver.
 	// This harness is reused across all tests. DB/Redis connections are closed
 	// once by FinalizeHarness() below, after all tests finish.
-	// Individual tests must call NewHarnessForTest() to get a clean slate.
-	sharedHarness = NewHarnessForTest(&testing.T{})
+	sharedHarness = NewHarnessFromDriver(&testing.T{}, sharedDriver)
 	defer func() {
 		FinalizeHarness()
+		if sharedDriver != nil {
+			sharedDriver.Close()
+		}
 	}()
 
 	// 3. Run all tests.
@@ -89,7 +117,7 @@ func dockerComposeUp(ctx context.Context, composeFile string) error {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("compose up: %v\n%s", err, out)
 	}
-	// Wait for containers to be healthy (match compose/dev.yaml healthcheck intervals).
+	// Wait for containers to be healthy (match fullchain-dev.yaml healthcheck intervals).
 	time.Sleep(10 * time.Second)
 	return nil
 }
@@ -133,8 +161,9 @@ func NewHarnessForTest(t *testing.T) *Harness {
 	defer sharedHarnessMu.Unlock()
 	if sharedHarness == nil {
 		// First call: lazily initialize the shared harness.
-		// This calls the real NewHarness which waits for docker compose services.
-		// Pass a fresh *testing.T so fatal errors don't corrupt the caller's test.
+		// This calls NewHarness which uses the default MockDriver.
+		// TestMain sets sharedHarness directly, so this is only for
+		// direct binary runs (not through TestMain).
 		sharedHarness = NewHarness(&testing.T{})
 	}
 	sharedHarness.t = t

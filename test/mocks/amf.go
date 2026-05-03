@@ -27,7 +27,7 @@ type NssaaNotification struct {
 // AMFMock is an httptest.Server implementing the AMF callback receiver.
 // Spec: TS 23.502 §4.2.9.3
 type AMFMock struct {
-	Server *httptest.Server
+	httpServer *httptest.Server
 
 	mu            sync.Mutex
 	notifications []NssaaNotification
@@ -44,18 +44,23 @@ func NewAMFMock() *AMFMock {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/namf-callback/v1/", m.handleNotification)
-	m.Server = httptest.NewServer(mux)
+	m.httpServer = httptest.NewServer(mux)
 	return m
 }
 
 // Close shuts down the mock server.
 func (m *AMFMock) Close() {
-	m.Server.Close()
+	m.httpServer.Close()
 }
 
 // URL returns the mock server's base URL.
 func (m *AMFMock) URL() string {
-	return m.Server.URL
+	return m.httpServer.URL
+}
+
+// Server returns the underlying httptest.Server.
+func (m *AMFMock) Server() *httptest.Server {
+	return m.httpServer
 }
 
 // GetNotifications returns all received notifications.

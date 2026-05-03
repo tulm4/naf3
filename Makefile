@@ -194,61 +194,46 @@ test-unit: ## Run unit tests only (fast, no infra required)
 .PHONY: test-integration
 test-integration: ## Run integration tests against real PostgreSQL and Redis via docker compose
 	@echo "$(YELLOW)Starting test infrastructure...$(NC)"
-	docker compose -f compose/dev.yaml up -d --quiet-pull
+	docker compose -f compose/fullchain-dev.yaml up -d --quiet-pull
 	@echo "$(YELLOW)Waiting for infrastructure to be healthy...$(NC)"
 	@sleep 5
 	@TEST_DATABASE_URL="postgres://nssaa:nssaa@localhost:5432/nssaa?sslmode=disable" \
 	TEST_REDIS_URL="redis://localhost:6379" \
-	$(GOTEST) -race -v ./test/integration/... || { docker compose -f compose/dev.yaml down; exit 1; }
+	$(GOTEST) -race -v ./test/integration/... || { docker compose -f compose/fullchain-dev.yaml down; exit 1; }
 	@echo "$(YELLOW)Tearing down test infrastructure...$(NC)"
-	docker compose -f compose/dev.yaml down
+	docker compose -f compose/fullchain-dev.yaml down
 	@echo "$(GREEN)Integration tests complete$(NC)"
-
-.PHONY: test-e2e
-test-e2e: gen-certs build ## Run E2E tests with mocks (fast dev loop)
-	# Uses httptest mocks for NRF/UDM/AAA-S/AMF/AUSF inside the test binary.
-	# Use 'make test-fullchain' for full chain with real containerized mocks.
-	@echo "$(YELLOW)Starting docker compose infrastructure...$(NC)"
-	docker compose -f compose/dev.yaml up -d --quiet-pull
-	@sleep 10
-	E2E_DOCKER_MANAGED=1 \
-	E2E_TLS_CA=/tmp/e2e-tls/server.crt \
-	BIZ_PG_URL=postgres://nssaa:nssaa@localhost:5432/nssaa?sslmode=disable \
-	BIZ_REDIS_URL=redis://localhost:6379 \
-	$(GOTEST) -tags=e2e -v -count=1 \
-		./test/e2e/... \
-		|| { docker compose -f compose/dev.yaml down --remove-orphans; exit 1; }
-	@echo "$(YELLOW)Tearing down docker compose infrastructure...$(NC)"
-	docker compose -f compose/dev.yaml down --remove-orphans
-	@echo "$(GREEN)E2E tests complete$(NC)"
-
 .PHONY: test-conformance
 test-conformance: ## Run 3GPP conformance tests against live services
 	@echo "$(YELLOW)Running conformance tests...$(NC)"
 	$(GOTEST) -race -v ./test/conformance/...
 
 .PHONY: test-all
-test-all: test-unit test-integration test-e2e test-conformance ## Run all test layers in sequence
+test-all: test-unit test-integration test-conformance ## Run all test layers in sequence
 	@echo "$(GREEN)All tests passed$(NC)"
 
 .PHONY: test-fullchain
 test-fullchain: gen-certs build ## Run fullchain E2E tests (real containers for NRF/UDM/AAA-SIM)
+	# E2E_PROFILE=fullchain: ContainerDriver + compose/fullchain-dev.yaml
 	@echo "$(YELLOW)Starting fullchain docker compose stack...$(NC)"
-	docker compose -f compose/fullchain.yaml build \
+	docker compose -f compose/fullchain-dev.yaml build \
 		--build-arg BUILDKIT_INLINE_CACHE=1
-	docker compose -f compose/fullchain.yaml up -d --quiet-pull
+	docker compose -f compose/fullchain-dev.yaml up -d --quiet-pull
 	@sleep 15
 	E2E_DOCKER_MANAGED=1 \
+	E2E_PROFILE=fullchain \
 	E2E_TLS_CA=/tmp/e2e-tls/server.crt \
 	BIZ_PG_URL=postgres://nssaa:nssaa@localhost:5432/nssaa?sslmode=disable \
 	BIZ_REDIS_URL=redis://localhost:6379 \
 	FULLCHAIN_NRF_URL=http://localhost:8082 \
 	FULLCHAIN_UDM_URL=http://localhost:8083 \
+	FULLCHAIN_AAA_SIM_URL=http://localhost:18120 \
+	FULLCHAIN_NRM_URL=http://localhost:8084 \
 	$(GOTEST) -tags=e2e -v -count=1 -timeout=10m \
-		./test/e2e/fullchain/... \
-		|| { docker compose -f compose/fullchain.yaml down --remove-orphans; exit 1; }
+		./test/e2e/... \
+		|| { docker compose -f compose/fullchain-dev.yaml down --remove-orphans; exit 1; }
 	@echo "$(YELLOW)Tearing down fullchain stack...$(NC)"
-	docker compose -f compose/fullchain.yaml down --remove-orphans
+	docker compose -f compose/fullchain-dev.yaml down --remove-orphans
 	@echo "$(GREEN)Fullchain tests complete$(NC)"
 
 # =============================================================================
@@ -257,19 +242,23 @@ test-fullchain: gen-certs build ## Run fullchain E2E tests (real containers for 
 
 .PHONY: test-fullchain-fast
 test-fullchain-fast: gen-certs ## Fast dev loop: binary mount pattern for ~15-30s iteration
+	# E2E_PROFILE=fullchain: ContainerDriver + compose/fullchain-dev.yaml
 	@echo "$(YELLOW)Starting fullchain docker compose stack (fast mode)...$(NC)"
 	@echo "$(YELLOW)Using pre-built binaries from bin/ with volume mounts...$(NC)"
 	docker compose -f compose/fullchain-dev.yaml build
 	docker compose -f compose/fullchain-dev.yaml up -d --quiet-pull
 	@sleep 15
 	E2E_DOCKER_MANAGED=1 \
+	E2E_PROFILE=fullchain \
 	E2E_TLS_CA=/tmp/e2e-tls/server.crt \
 	BIZ_PG_URL=postgres://nssaa:nssaa@localhost:5432/nssaa?sslmode=disable \
 	BIZ_REDIS_URL=redis://localhost:6379 \
 	FULLCHAIN_NRF_URL=http://localhost:8082 \
 	FULLCHAIN_UDM_URL=http://localhost:8083 \
+	FULLCHAIN_AAA_SIM_URL=http://localhost:18120 \
+	FULLCHAIN_NRM_URL=http://localhost:8084 \
 	$(GOTEST) -tags=e2e -v -count=1 -timeout=10m \
-		./test/e2e/fullchain/... \
+		./test/e2e/... \
 		|| { docker compose -f compose/fullchain-dev.yaml down --remove-orphans; exit 1; }
 	@echo "$(YELLOW)Tearing down fullchain stack...$(NC)"
 	docker compose -f compose/fullchain-dev.yaml down --remove-orphans
@@ -277,17 +266,21 @@ test-fullchain-fast: gen-certs ## Fast dev loop: binary mount pattern for ~15-30
 
 .PHONY: test-fullchain-no-build
 test-fullchain-no-build: ## Run tests with existing images (skip build, ~5s startup)
+	# E2E_PROFILE=fullchain: ContainerDriver + compose/fullchain-dev.yaml
 	@echo "$(YELLOW)Starting fullchain stack (no build)...$(NC)"
 	docker compose -f compose/fullchain-dev.yaml up -d
 	@sleep 15
 	E2E_DOCKER_MANAGED=1 \
+	E2E_PROFILE=fullchain \
 	E2E_TLS_CA=/tmp/e2e-tls/server.crt \
 	BIZ_PG_URL=postgres://nssaa:nssaa@localhost:5432/nssaa?sslmode=disable \
 	BIZ_REDIS_URL=redis://localhost:6379 \
 	FULLCHAIN_NRF_URL=http://localhost:8082 \
 	FULLCHAIN_UDM_URL=http://localhost:8083 \
+	FULLCHAIN_AAA_SIM_URL=http://localhost:18120 \
+	FULLCHAIN_NRM_URL=http://localhost:8084 \
 	$(GOTEST) -tags=e2e -v -count=1 -timeout=10m \
-		./test/e2e/fullchain/... \
+		./test/e2e/... \
 		|| { docker compose -f compose/fullchain-dev.yaml down --remove-orphans; exit 1; }
 	@echo "$(YELLOW)Tearing down fullchain stack...$(NC)"
 	docker compose -f compose/fullchain-dev.yaml down --remove-orphans

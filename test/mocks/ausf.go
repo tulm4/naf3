@@ -23,7 +23,7 @@ type UeAuthData struct {
 // AUSFMock is an httptest.Server implementing the AUSF N60 API.
 // Spec: TS 29.526 §7.3, TS 29.518 §6.1.3.2
 type AUSFMock struct {
-	Server *httptest.Server
+	httpServer *httptest.Server
 
 	mu sync.Mutex
 	// authData maps GPSI → UeAuthData
@@ -40,18 +40,23 @@ func NewAUSFMock() *AUSFMock {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/nausf-auth/v1/ue-identities/", m.handleUEAuth)
-	m.Server = httptest.NewServer(mux)
+	m.httpServer = httptest.NewServer(mux)
 	return m
 }
 
 // Close shuts down the mock server.
 func (m *AUSFMock) Close() {
-	m.Server.Close()
+	m.httpServer.Close()
 }
 
 // URL returns the mock server's base URL.
 func (m *AUSFMock) URL() string {
-	return m.Server.URL
+	return m.httpServer.URL
+}
+
+// Server returns the underlying httptest.Server.
+func (m *AUSFMock) Server() *httptest.Server {
+	return m.httpServer
 }
 
 // SetUEAuthData configures the UE authentication data for a given GPSI.

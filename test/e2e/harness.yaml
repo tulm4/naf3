@@ -10,7 +10,7 @@ services:
   httpGatewayUrl: "https://localhost:8443"
   bizPodUrl: "http://localhost:8080"
   aaaGatewayUrl: "http://localhost:9090"
-  nrmUrl: "http://localhost:8081"
+  nrmUrl: "http://localhost:8084"
 
 binaries:
   # No longer used when E2E_DOCKER_MANAGED=1; kept for reference only.

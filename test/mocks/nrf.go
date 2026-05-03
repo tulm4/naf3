@@ -9,25 +9,30 @@ import (
 
 // NRFMock is an httptest.Server wrapper around nrfserver.Server.
 type NRFMock struct {
-	*httptest.Server
-	server *nrfserver.Server
+	httpServer *httptest.Server
+	server     *nrfserver.Server
 }
 
 // NewNRFMock creates an NRF mock server with default profiles.
 func NewNRFMock() *NRFMock {
 	srv := nrfserver.NewServer()
 	ts := httptest.NewServer(srv)
-	return &NRFMock{Server: ts, server: srv}
+	return &NRFMock{httpServer: ts, server: srv}
 }
 
 // Close shuts down the mock server.
 func (m *NRFMock) Close() {
-	m.Server.Close()
+	m.httpServer.Close()
 }
 
 // URL returns the mock server's base URL.
 func (m *NRFMock) URL() string {
-	return m.Server.URL
+	return m.httpServer.URL
+}
+
+// Server returns the underlying httptest.Server.
+func (m *NRFMock) Server() *httptest.Server {
+	return m.httpServer
 }
 
 // SetNFStatus forwards to the underlying server.

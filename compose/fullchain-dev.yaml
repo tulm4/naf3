@@ -147,6 +147,8 @@ services:
         condition: service_healthy
       udm-mock:
         condition: service_healthy
+      nrm:
+        condition: service_healthy
     volumes:
       - ./configs/biz.yaml:/etc/nssAAF/biz.yaml:ro
       - ../bin/biz:/app/biz:ro
@@ -157,6 +159,7 @@ services:
       NRF_URL: "http://nrf-mock:8081"
       UDM_URL: "http://udm-mock:8081"
       AUSF_URL: "http://biz:8080/n39x"
+      NRM_URL: "http://nrm:8084"
       AAA_GW_URL: "http://aaa-gateway:9090"
     ports: ["8080:8080"]
     networks:
@@ -191,6 +194,28 @@ services:
       - default
     healthcheck:
       test: ["CMD-SHELL", "curl -skf https://localhost:8443/healthz/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ---------------------------------------------------------------------------
+  # NRM — Network Resource Manager / RESTCONF server
+  # ---------------------------------------------------------------------------
+  nrm:
+    build:
+      context: ..
+      dockerfile: Dockerfile.nrm
+    image: nssaaf-nrm:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./configs/nrm.yaml:/etc/nssAAF/nrm.yaml:ro
+    ports: ["8084:8081"]
+    networks:
+      - default
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/healthz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3

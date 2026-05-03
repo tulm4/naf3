@@ -18,25 +18,30 @@ type (
 // UDMMock is an httptest.Server implementing the UDM Nudm_UECM API.
 // Spec: TS 29.526 §7.2
 type UDMMock struct {
-	*httptest.Server
-	server *udmserver.Server
+	httpServer *httptest.Server
+	server     *udmserver.Server
 }
 
 // NewUDMMock creates a UDM mock server.
 func NewUDMMock() *UDMMock {
 	srv := udmserver.NewServer()
 	ts := httptest.NewServer(srv)
-	return &UDMMock{Server: ts, server: srv}
+	return &UDMMock{httpServer: ts, server: srv}
 }
 
 // Close shuts down the mock server.
 func (m *UDMMock) Close() {
-	m.Server.Close()
+	m.httpServer.Close()
 }
 
 // URL returns the mock server's base URL.
 func (m *UDMMock) URL() string {
-	return m.Server.URL
+	return m.httpServer.URL
+}
+
+// Server returns the underlying httptest.Server.
+func (m *UDMMock) Server() *httptest.Server {
+	return m.httpServer
 }
 
 // SetRegistration sets the registration data for a given SUPI.

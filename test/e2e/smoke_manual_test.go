@@ -2,7 +2,7 @@
 // +build e2e
 
 // Package e2e provides manual E2E smoke tests against the running NSSAAF stack
-// via docker compose containers managed by `make test-e2e`.
+// via docker compose containers managed by `make test-fullchain`.
 //
 // Run with: go test -tags=e2e -count=1 ./test/e2e/
 //
@@ -68,7 +68,7 @@ func skipIfServicesNotUp(t *testing.T) {
 	}{
 		{"HTTP Gateway", "https://localhost:8443/healthz/", true},
 		{"Biz Pod", "http://localhost:8080/healthz/live", false},
-		{"NRM", "http://localhost:8081/healthz", false},
+		{"NRM", "http://localhost:8084/healthz", false},
 	} {
 		initTLSClient()
 		var client *http.Client

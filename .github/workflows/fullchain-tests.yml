@@ -26,7 +26,7 @@ jobs:
 
       - name: Build Docker images with cache
         run: |
-          docker compose -f compose/fullchain.yaml build \
+          docker compose -f compose/fullchain-dev.yaml build \
             --build-arg BUILDKIT_INLINE_CACHE=1 \
             --cache-from type=gha,mode=max \
             --cache-to type=gha,mode=max
@@ -51,7 +51,7 @@ jobs:
 
       - name: Run fullchain tests
         run: |
-          docker compose -f compose/fullchain.yaml up -d --quiet-pull
+          docker compose -f compose/fullchain-dev.yaml up -d --quiet-pull
           sleep 10
           E2E_DOCKER_MANAGED=1 \
           E2E_TLS_CA=/tmp/e2e-tls/server.crt \
@@ -59,10 +59,11 @@ jobs:
           BIZ_REDIS_URL=redis://localhost:6379 \
           FULLCHAIN_NRF_URL=http://localhost:8082 \
           FULLCHAIN_UDM_URL=http://localhost:8083 \
+          FULLCHAIN_NRM_URL=http://localhost:8084 \
           go test -tags=e2e -v -count=1 -timeout=5m \
-            ./test/e2e/fullchain/... \
-            || { docker compose -f compose/fullchain.yaml down --remove-orphans; exit 1; }
-          docker compose -f compose/fullchain.yaml down --remove-orphans
+            ./test/e2e/... \
+            || { docker compose -f compose/fullchain-dev.yaml down --remove-orphans; exit 1; }
+          docker compose -f compose/fullchain-dev.yaml down --remove-orphans
 
       - name: Upload logs on failure
         if: failure()

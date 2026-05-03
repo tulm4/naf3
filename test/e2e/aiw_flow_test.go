@@ -40,7 +40,7 @@ func TestE2E_AIW_BasicFlow(t *testing.T) {
 	req.Header.Set("X-Request-ID", "aiw-basic-test")
 
 	client := h.TLSClient()
-	resp, err := client.Do(req)
+	resp, err := client.Do(req.WithContext(requireTestContext(t)))
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -51,7 +51,7 @@ func TestE2E_AIW_BasicFlow(t *testing.T) {
 	var authResp map[string]interface{}
 	err = json.NewDecoder(resp.Body).Decode(&authResp)
 	require.NoError(t, err)
-	authCtxID, ok := authResp["authCtxId"].(string)
+	authCtxID, ok := ParseAuthCtxID(authResp)
 	require.True(t, ok, "authCtxId must be present in response")
 	assert.NotEmpty(t, authCtxID, "authCtxId must not be empty")
 
@@ -76,12 +76,33 @@ func TestE2E_AIW_BasicFlow(t *testing.T) {
 	req2.Header.Set("Content-Type", "application/json")
 
 	bizClient := &http.Client{Timeout: 30 * time.Second}
-	resp2, err := bizClient.Do(req2)
+	resp2, err := bizClient.Do(req2.WithContext(requireTestContext(t)))
 	require.NoError(t, err)
 	defer resp2.Body.Close()
 
 	// Should get 200 OK.
 	assert.Equal(t, http.StatusOK, resp2.StatusCode, "AIW confirm should return 200")
+
+	// Verify response body contains expected fields.
+	var confirmResp map[string]interface{}
+	err = json.NewDecoder(resp2.Body).Decode(&confirmResp)
+	require.NoError(t, err, "confirm response should be valid JSON")
+
+	// Verify authResult is present per TS 29.526 §7.3
+	hasAuthResult := confirmResp["authResult"] != nil
+	hasEapMessage := confirmResp["eapMessage"] != nil
+	assert.True(t, hasAuthResult || hasEapMessage,
+		"confirm response should contain authResult or eapMessage")
+
+	// Verify authResult is EAP_SUCCESS per TS 29.526 §7.3
+	if authResult, ok := confirmResp["authResult"].(string); ok {
+		assert.Equal(t, "EAP_SUCCESS", authResult,
+			"authResult should be EAP_SUCCESS on successful auth")
+	}
+
+	// Verify PvsInfo is present on success per TS 29.526 §7.3
+	assert.NotNil(t, confirmResp["pvsInfo"],
+		"PvsInfo should be present in successful auth response (TS 29.526 §7.3)")
 }
 
 // TestE2E_AIW_MSKExtraction verifies that the MSK is exactly 64 octets
@@ -120,7 +141,7 @@ func TestE2E_AIW_EAPFailure(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 
 	client := h.TLSClient()
-	resp, err := client.Do(req)
+	resp, err := client.Do(req.WithContext(requireTestContext(t)))
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
@@ -129,7 +150,7 @@ func TestE2E_AIW_EAPFailure(t *testing.T) {
 	var authResp map[string]interface{}
 	err = json.NewDecoder(resp.Body).Decode(&authResp)
 	require.NoError(t, err)
-	authCtxID, ok := authResp["authCtxId"].(string)
+	authCtxID, ok := ParseAuthCtxID(authResp)
 	require.True(t, ok, "authCtxId must be present")
 	t.Logf("AIW EAP-Failure: authCtxID=%s", authCtxID)
 
@@ -144,7 +165,7 @@ func TestE2E_AIW_EAPFailure(t *testing.T) {
 	req2.Header.Set("Content-Type", "application/json")
 
 	bizClient := &http.Client{Timeout: 30 * time.Second}
-	resp2, err := bizClient.Do(req2)
+	resp2, err := bizClient.Do(req2.WithContext(requireTestContext(t)))
 	require.NoError(t, err)
 	defer resp2.Body.Close()
 
@@ -247,7 +268,7 @@ func TestE2E_AIW_TTLS(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 
 	client := h.TLSClient()
-	resp, err := client.Do(req)
+	resp, err := client.Do(req.WithContext(requireTestContext(t)))
 	require.NoError(t, err)
 	defer resp.Body.Close()
 

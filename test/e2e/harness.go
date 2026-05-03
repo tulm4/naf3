@@ -33,7 +33,6 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -62,11 +61,12 @@ type Harness struct {
 	aaagwURL  string
 	nrmURL    string
 
-	ausfMock *mocks.AUSFMock
-	amfMock  *mocks.AMFMock
+	// driver provides mock/container backend for AMF and AUSF.
+	// Use Driver() to access it. Initialized by NewHarnessFromDriver().
+	driver Driver
 
-	pgConn *pgxpool.Pool   // direct PG connection for ResetState
-	redis  *redis.Client   // direct Redis connection for ResetState
+	pgConn *pgxpool.Pool // direct PG connection for ResetState
+	redis  *redis.Client // direct Redis connection for ResetState
 
 	mu    sync.Mutex
 	clean bool
@@ -182,10 +182,28 @@ func LoadHarnessConfig(path string) (*HarnessConfig, error) {
 // start or stop docker compose — that is managed once by TestMain in e2e.go
 // (via `make test-e2e`). It also does NOT start any binary processes.
 //
+// NewHarness uses ContainerDriver (E2E_PROFILE=fullchain or unset).
+// For custom drivers, use NewHarnessFromDriver directly.
+//
 // The caller must call h.Close() when done.
 // Each test case MUST call h.ResetState() before running to ensure a clean DB
 // and Redis state.
 func NewHarness(t *testing.T) *Harness {
+	t.Helper()
+
+	driver := NewContainerDriver()
+	h := NewHarnessFromDriver(t, driver)
+
+	return h
+}
+
+// NewHarnessFromDriver connects to a pre-started docker compose stack with a
+// custom driver. This is the low-level constructor used by ContainerDriver.
+//
+// The caller must call h.Close() when done.
+// Each test case MUST call h.ResetState() before running to ensure a clean DB
+// and Redis state.
+func NewHarnessFromDriver(t *testing.T, driver Driver) *Harness {
 	t.Helper()
 
 	// Load harness config from test/e2e/harness.yaml (next to this file).
@@ -198,6 +216,7 @@ func NewHarness(t *testing.T) *Harness {
 	h := &Harness{
 		t:         t,
 		config:    cfg,
+		driver:    driver,
 		httpGWURL: cfg.Services.HTTPGatewayUrl,
 		bizURL:    cfg.Services.BizPodUrl,
 		aaagwURL:  cfg.Services.AAAGatewayUrl,
@@ -339,11 +358,8 @@ func (h *Harness) Close() {
 	h.clean = true
 	h.mu.Unlock()
 
-	if h.ausfMock != nil {
-		h.ausfMock.Close()
-	}
-	if h.amfMock != nil {
-		h.amfMock.Close()
+	if h.driver != nil {
+		h.driver.Close()
 	}
 }
 
@@ -383,18 +399,39 @@ func (h *Harness) AAAGWURL() string { return h.aaagwURL }
 // NRMURL returns the NRM RESTCONF base URL.
 func (h *Harness) NRMURL() string { return h.nrmURL }
 
-// StartAUSFMock starts an AUSF httptest.Server and returns it.
-// The returned server should be closed by the caller.
-func (h *Harness) StartAUSFMock() *httptest.Server {
-	h.ausfMock = mocks.NewAUSFMock()
-	return h.ausfMock.Server
+// Driver returns the harness's driver (ContainerDriver).
+func (h *Harness) Driver() Driver {
+	return h.driver
 }
 
-// StartAMFMock starts an AMF httptest.Server and returns it.
+// StartAUSFMock starts an AUSF mock via the harness driver and returns the server.
 // The returned server should be closed by the caller.
-func (h *Harness) StartAMFMock() *httptest.Server {
-	h.amfMock = mocks.NewAMFMock()
-	return h.amfMock.Server
+func (h *Harness) StartAUSFMock() *mocks.AUSFMock {
+	driver := h.driver.SetupAUSFMock()
+	return driver.(*mocks.AUSFMock)
+}
+
+// StartAMFMock starts an AMF mock via the harness driver and returns the server.
+// The returned server should be closed by the caller.
+func (h *Harness) StartAMFMock() *mocks.AMFMock {
+	driver := h.driver.SetupAMFMock()
+	return driver.(*mocks.AMFMock)
+}
+
+// ─── Shared test helpers ─────────────────────────────────────────────────────
+
+// requireTestContext returns a context with a short timeout for E2E HTTP requests.
+func requireTestContext(t *testing.T) context.Context {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	t.Cleanup(cancel)
+	return ctx
+}
+
+// ParseAuthCtxID extracts authCtxId from a NSSAA/AIW API response body map.
+// Returns the ID and true if found, empty string and false otherwise.
+func ParseAuthCtxID(body map[string]interface{}) (string, bool) {
+	id, ok := body["authCtxId"].(string)
+	return id, ok && id != ""
 }
 
 // ─── Internal helpers ───────────────────────────────────────────────────────
