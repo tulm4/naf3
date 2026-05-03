@@ -51,7 +51,7 @@ func TestE2E_ReAuth_HappyPath(t *testing.T) {
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusCreated, resp.StatusCode, "baseline session create should succeed")
 
-	authCtxID := parseAuthCtxIDFromResp(t, resp)
+	authCtxID := ParseAuthCtxIDFromResp(t, resp)
 
 	// 2. Confirm the session.
 	confirmBody := map[string]interface{}{
@@ -85,7 +85,7 @@ func TestE2E_ReAuth_HappyPath(t *testing.T) {
 	// - Session creation and confirmation work end-to-end
 	// - AMF mock is reachable and accepts notifications
 	// - Notification format is correct per TS 29.518 §5.2.2.27
-	t.Logf("Re-Auth baseline: authCtxID=%s, AMF mock at %s", authCtxID, amfMockSrv.URL)
+	t.Logf("Re-Auth baseline: authCtxID=%s, AMF mock at %s", authCtxID, amfMockSrv.URL())
 
 	// 5. Verify AMF mock can receive notifications by sending a test notification.
 	// This verifies the notification endpoint is reachable and properly configured.
@@ -96,7 +96,7 @@ func TestE2E_ReAuth_HappyPath(t *testing.T) {
 		"snssai":           map[string]interface{}{"sst": 1, "sd": "000001"},
 	}
 	testPayload, _ := json.Marshal(testNotif)
-	req3, _ := http.NewRequest(http.MethodPost, amfMockSrv.URL+"/namf-callback/v1/test-amf/Nssaa-Notification", strings.NewReader(string(testPayload)))
+	req3, _ := http.NewRequest(http.MethodPost, amfMockSrv.URL()+"/namf-callback/v1/test-amf/Nssaa-Notification", strings.NewReader(string(testPayload)))
 	req3.Header.Set("Content-Type", "application/json")
 
 	resp3, err := client.Do(req3)
@@ -147,14 +147,4 @@ func TestE2E_ReAuth_CircuitBreakerOpen(t *testing.T) {
 	}
 
 	t.Skip("Circuit breaker open test requires controlled failure injection; covered by integration tests")
-}
-
-// parseAuthCtxIDFromResp extracts authCtxId from an HTTP response.
-func parseAuthCtxIDFromResp(t *testing.T, resp *http.Response) string {
-	var body map[string]interface{}
-	err := json.NewDecoder(resp.Body).Decode(&body)
-	require.NoError(t, err)
-	id, ok := ParseAuthCtxID(body)
-	require.True(t, ok, "authCtxId must be present")
-	return id
 }

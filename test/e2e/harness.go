@@ -29,6 +29,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -44,8 +45,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/operator/nssAAF/internal/storage/postgres"
-	"github.com/operator/nssAAF/test/mocks"
 	"github.com/redis/go-redis/v9"
+	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )
 
@@ -404,18 +405,16 @@ func (h *Harness) Driver() Driver {
 	return h.driver
 }
 
-// StartAUSFMock starts an AUSF mock via the harness driver and returns the server.
-// The returned server should be closed by the caller.
-func (h *Harness) StartAUSFMock() *mocks.AUSFMock {
-	driver := h.driver.SetupAUSFMock()
-	return driver.(*mocks.AUSFMock)
+// StartAUSFMock starts an AUSF mock via the harness driver and returns it.
+// The caller should close the returned driver.
+func (h *Harness) StartAUSFMock() AUSFDriver {
+	return h.driver.SetupAUSFMock()
 }
 
-// StartAMFMock starts an AMF mock via the harness driver and returns the server.
-// The returned server should be closed by the caller.
-func (h *Harness) StartAMFMock() *mocks.AMFMock {
-	driver := h.driver.SetupAMFMock()
-	return driver.(*mocks.AMFMock)
+// StartAMFMock starts an AMF mock via the harness driver and returns it.
+// The caller should close the returned driver.
+func (h *Harness) StartAMFMock() AMFDriver {
+	return h.driver.SetupAMFMock()
 }
 
 // ─── Shared test helpers ─────────────────────────────────────────────────────
@@ -432,6 +431,17 @@ func requireTestContext(t *testing.T) context.Context {
 func ParseAuthCtxID(body map[string]interface{}) (string, bool) {
 	id, ok := body["authCtxId"].(string)
 	return id, ok && id != ""
+}
+
+// ParseAuthCtxIDFromResp extracts authCtxId from an HTTP response body.
+func ParseAuthCtxIDFromResp(t *testing.T, resp *http.Response) string {
+	t.Helper()
+	var body map[string]interface{}
+	err := json.NewDecoder(resp.Body).Decode(&body)
+	require.NoError(t, err)
+	id, ok := ParseAuthCtxID(body)
+	require.True(t, ok, "authCtxId must be present in response")
+	return id
 }
 
 // ─── Internal helpers ───────────────────────────────────────────────────────

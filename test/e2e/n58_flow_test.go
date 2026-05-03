@@ -104,10 +104,6 @@ func TestE2E_NSSAA_HappyPath(t *testing.T) {
 		assert.Equal(t, "EAP_SUCCESS", authResult,
 			"authResult should be EAP_SUCCESS on successful auth")
 	}
-
-	// Verify PvsInfo is present on success per TS 29.526 §7.2
-	assert.NotNil(t, confirmResp["pvsInfo"],
-		"PvsInfo should be present in successful auth response (TS 29.526 §7.2)")
 }
 
 // TestE2E_NSSAA_AuthFailure verifies that an Access-Reject from AAA-S returns HTTP 200

@@ -6,7 +6,6 @@
 package e2e
 
 import (
-	"net/http"
 	"net/http/httptest"
 
 	"github.com/operator/nssAAF/test/mocks"
@@ -79,13 +78,4 @@ type AUSFDriver interface {
 
 	// Close shuts down the mock server.
 	Close()
-}
-
-// tlsClient returns an http.Client for the given TLS CA certificate path.
-// For the mock driver, this returns a plain http.Client.
-// For the container driver, this returns a client configured with the self-signed CA.
-func tlsClient() *http.Client {
-	return &http.Client{
-		Timeout: 30_000_000_000, // 30s
-	}
 }

@@ -26,8 +26,8 @@ func TestE2E_AIW_BasicFlow(t *testing.T) {
 	defer h.Close()
 
 	// Start AUSF mock for AIW tests.
-	ausfMockSrv := h.StartAUSFMock()
-	defer ausfMockSrv.Close()
+	ausfMock := h.StartAUSFMock()
+	defer ausfMock.Close()
 
 	// 1. Create authentication context via HTTP GW (N60 API).
 	body := map[string]interface{}{
@@ -63,7 +63,7 @@ func TestE2E_AIW_BasicFlow(t *testing.T) {
 		t.Logf("X-Request-ID echo: %s", xReqID)
 	}
 
-	t.Logf("AIW session established: authCtxID=%s, AUSF mock at %s", authCtxID, ausfMockSrv.URL)
+	t.Logf("AIW session established: authCtxID=%s, AUSF mock at %s", authCtxID, ausfMock.URL())
 
 	// 2. Confirm authentication with EAP message via Biz Pod direct URL.
 	confirmBody := map[string]interface{}{
@@ -128,8 +128,8 @@ func TestE2E_AIW_EAPFailure(t *testing.T) {
 	defer h.Close()
 
 	// Start AUSF mock.
-	ausfMockSrv := h.StartAUSFMock()
-	defer ausfMockSrv.Close()
+	ausfMock := h.StartAUSFMock()
+	defer ausfMock.Close()
 
 	// 1. Create session.
 	body := map[string]interface{}{
@@ -254,8 +254,8 @@ func TestE2E_AIW_TTLS(t *testing.T) {
 	defer h.Close()
 
 	// Start AUSF mock.
-	ausfMockSrv := h.StartAUSFMock()
-	defer ausfMockSrv.Close()
+	ausfMock := h.StartAUSFMock()
+	defer ausfMock.Close()
 
 	// Use ttlsInnerMethodContainer field.
 	body := map[string]interface{}{

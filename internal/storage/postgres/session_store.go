@@ -76,6 +76,8 @@ func sessionToAuthCtx(s *Session) *nssaa.AuthCtx {
 // authCtxToSession converts nssaa.AuthCtx → Session (DB).
 func authCtxToSession(a *nssaa.AuthCtx) *Session {
 	now := time.Now()
+	// Default: 5-minute session lifetime for NSSAA per biz.yaml eap.sessionTtl.
+	expiresAt := now.Add(5 * time.Minute)
 	return &Session{
 		AuthCtxID:       a.AuthCtxID,
 		GPSI:            a.GPSI,
@@ -88,6 +90,7 @@ func authCtxToSession(a *nssaa.AuthCtx) *Session {
 		NssaaStatus:     types.NssaaStatusNotExecuted,
 		CreatedAt:       now,
 		UpdatedAt:       now,
+		ExpiresAt:       expiresAt,
 	}
 }
 

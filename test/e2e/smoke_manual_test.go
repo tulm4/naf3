@@ -169,7 +169,7 @@ func TestE2E_00_AllServicesHealthy(t *testing.T) {
 	}
 
 	// NRM health
-	resp = doRequest(t, http.MethodGet, "http://localhost:8081/healthz", nil)
+	resp = doRequest(t, http.MethodGet, "http://localhost:8084/healthz", nil)
 	if resp != nil {
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
@@ -422,7 +422,7 @@ func TestE2E_06_AIW_InvalidSupi(t *testing.T) {
 func TestE2E_07_NRM_RESTCONF_GET(t *testing.T) {
 	skipIfServicesNotUp(t)
 
-	resp := doRequest(t, http.MethodGet, "http://localhost:8081/restconf/data/3gpp-nssaaf-nrm:nssaa-function", nil)
+	resp := doRequest(t, http.MethodGet, "http://localhost:8084/restconf/data/3gpp-nssaaf-nrm:nssaa-function", nil)
 	if resp == nil {
 		return
 	}
@@ -445,7 +445,7 @@ func TestE2E_07_NRM_RESTCONF_GET(t *testing.T) {
 func TestE2E_08_NRM_RESTCONF_Alarms(t *testing.T) {
 	skipIfServicesNotUp(t)
 
-	resp := doRequest(t, http.MethodGet, "http://localhost:8081/restconf/data/3gpp-nssaaf-nrm:alarms", nil)
+	resp := doRequest(t, http.MethodGet, "http://localhost:8084/restconf/data/3gpp-nssaaf-nrm:alarms", nil)
 	if resp == nil {
 		return
 	}

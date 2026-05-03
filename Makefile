@@ -216,10 +216,10 @@ test-all: test-unit test-integration test-conformance ## Run all test layers in 
 test-fullchain: gen-certs build ## Run fullchain E2E tests (real containers for NRF/UDM/AAA-SIM)
 	# E2E_PROFILE=fullchain: ContainerDriver + compose/fullchain-dev.yaml
 	@echo "$(YELLOW)Starting fullchain docker compose stack...$(NC)"
-	docker compose -f compose/fullchain-dev.yaml build \
-		--build-arg BUILDKIT_INLINE_CACHE=1
+	# docker compose -f compose/fullchain-dev.yaml build \
+	# 	--build-arg BUILDKIT_INLINE_CACHE=1
 	docker compose -f compose/fullchain-dev.yaml up -d --quiet-pull
-	@sleep 15
+	@sleep 10
 	E2E_DOCKER_MANAGED=1 \
 	E2E_PROFILE=fullchain \
 	E2E_TLS_CA=/tmp/e2e-tls/server.crt \

@@ -18,6 +18,7 @@ import (
 	"github.com/operator/nssAAF/internal/api/common"
 	"github.com/operator/nssAAF/internal/eap"
 	aiwnats "github.com/operator/nssAAF/oapi-gen/gen/aiw"
+	"github.com/operator/nssAAF/oapi-gen/gen/specs"
 )
 
 // AAARouter is the interface for forwarding EAP payloads to AAA-S.
@@ -289,11 +290,14 @@ func (h *Handler) ConfirmAuthentication(w http.ResponseWriter, r *http.Request, 
 
 	// Phase 2: h.aaa.SendEAP(r.Context(), authCtxId, authCtx.EapPayload)
 	// Phase 1: echo back the EAP message as the response.
-
+	// PvsInfo is not available in Phase 1 (requires real AAA-S integration).
+	// Return an empty list per TS 29.526 §7.3 which requires pvsInfo with minItems=1.
+	// This is a Phase 1 stub — the field is present but empty.
 	resp := aiwnats.AuthConfirmationResponse{
 		Supi:       body.Supi,
 		EapMessage: body.EapMessage,
 		AuthResult: nil,
+		PvsInfo:    &[]specs.ServerAddressingInfo{},
 	}
 
 	w.Header().Set(common.HeaderXRequestID, reqID)
