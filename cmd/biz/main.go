@@ -4,35 +4,19 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"flag"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
-	"github.com/operator/nssAAF/internal/amf"
-	"github.com/operator/nssAAF/internal/api/aiw"
 	"github.com/operator/nssAAF/internal/api/common"
-	"github.com/operator/nssAAF/internal/api/nssaa"
-	"github.com/operator/nssAAF/internal/ausf"
-	"github.com/operator/nssAAF/internal/cache/redis"
 	"github.com/operator/nssAAF/internal/config"
-	"github.com/operator/nssAAF/internal/crypto"
-	"github.com/operator/nssAAF/internal/metrics"
-	"github.com/operator/nssAAF/internal/nrf"
 	"github.com/operator/nssAAF/internal/proto"
-	"github.com/operator/nssAAF/internal/resilience"
-	"github.com/operator/nssAAF/internal/storage/postgres"
-	"github.com/operator/nssAAF/internal/tracing"
-	"github.com/operator/nssAAF/internal/udm"
 	goredis "github.com/redis/go-redis/v9"
 )
 
@@ -68,222 +52,39 @@ func main() {
 		"use_mtls", cfg.Biz.UseMTLS,
 	)
 
-	// Initialize OpenTelemetry tracing — D-01
-	tracingShutdown := tracing.Init("nssAAF-biz", cfg.Version, podID)
-	defer tracingShutdown()
-
 	// Context for initialization (long-running operations)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Build API root URL
-	apiRoot := cfg.Server.Addr
-	if !hasScheme(apiRoot) {
-		apiRoot = "http://" + apiRoot
-	}
-
-	// ─── PostgreSQL pool + session stores ────────────────────────────────
-	// REQ-09: PostgreSQL session store replaces in-memory store
-	pgPool, err := postgres.NewPool(ctx, postgres.Config{
-		DSN: fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
-			cfg.Database.User, cfg.Database.Password, cfg.Database.Host,
-			cfg.Database.Port, cfg.Database.Name, cfg.Database.SSLMode),
-		MaxConns:          int32(cfg.Database.MaxConns),
-		MinConns:          int32(cfg.Database.MinConns),
-		MaxConnLifetime:   cfg.Database.ConnMaxLifetime,
-		MaxConnIdleTime:   10 * time.Minute,
-		HealthCheckPeriod: 30 * time.Second,
-	})
+	// Build BizPod using factory
+	factory := NewBizPodFactory(cfg,
+		WithLogger(logger),
+		WithPodID(podID),
+	)
+	pod, podCleanup, err := factory.Build(ctx)
 	if err != nil {
-		slog.Error("postgres pool", "error", err)
+		slog.Error("failed to build BizPod", "error", err)
 		os.Exit(1)
 	}
-	defer pgPool.Close()
-
-	// ─── Run database migrations ───────────────────────────────────────────
-	// REQ-09: Auto-migrate schema on startup (idempotent - safe to re-run)
-	migrator := postgres.NewMigrator(pgPool)
-	if err := migrator.Migrate(ctx); err != nil {
-		slog.Error("database migration failed", "error", err)
-		os.Exit(1)
-	}
-
-	// Initialize crypto key manager — Phase 5 envelope encryption.
-	// crypto.Init must succeed; session data must not be stored with an empty key.
-	var vaultCfg *crypto.VaultConfig
-	if cfg.Crypto.VaultConfig != nil {
-		vaultCfg = &crypto.VaultConfig{
-			Address:    cfg.Crypto.VaultConfig.Address,
-			KeyName:    cfg.Crypto.VaultConfig.KeyName,
-			AuthMethod: cfg.Crypto.VaultConfig.AuthMethod,
-			K8sRole:    cfg.Crypto.VaultConfig.K8sRole,
-			Token:      cfg.Crypto.VaultConfig.Token,
-			TokenFile:  cfg.Crypto.VaultConfig.TokenFile,
-		}
-	}
-	if initErr := crypto.Init(&crypto.Config{
-		KeyManager:     cfg.Crypto.KeyManager,
-		MasterKeyHex:   cfg.Crypto.MasterKeyHex,
-		KEKOverlapDays: cfg.Crypto.KEKOverlapDays,
-		Vault:          vaultCfg,
-		SoftHSM:        nil, // SoftHSM config not wired in Phase 5
-	}); initErr != nil {
-		slog.Error("crypto.Init failed", "error", initErr)
-		os.Exit(1)
-	}
-
-	// Build encryptor using the initialized key manager.
-	encryptor, err := postgres.NewEncryptorFromKeyManager(crypto.KM())
-	if err != nil {
-		slog.Error("session encryptor initialization failed", "error", err)
-		os.Exit(1)
-	}
-
-	// REQ-09: NewSessionStore/NewAIWSessionStore per D-06
-	nssaaStore := postgres.NewSessionStore(pgPool, encryptor)
-	aiwStore := postgres.NewAIWSessionStore(pgPool, encryptor)
-
-	// ─── Redis pool + DLQ ───────────────────────────────────────────────
-	redisPool, err := redis.NewPool(ctx, redis.Config{
-		Addrs:        []string{cfg.Redis.Addr},
-		Password:     cfg.Redis.Password,
-		DB:           cfg.Redis.DB,
-		PoolSize:     cfg.Redis.PoolSize,
-		MinIdleConns: 10,
-		DialTimeout:  100 * time.Millisecond,
-		ReadTimeout:  100 * time.Millisecond,
-		WriteTimeout: 100 * time.Millisecond,
-	})
-	if err != nil {
-		slog.Error("redis pool", "error", err)
-		os.Exit(1)
-	}
-	defer func() { _ = redisPool.Close() }()
-
-	// REQ-10: DLQ for AMF notification failures
-	dlq := redis.NewDLQ(redisPool)
-	go dlq.Process(ctx)
+	defer podCleanup()
 
 	// Wire health check closures
-	pgHealth = pgPool.Ping
+	pgHealth = pod.Pool.Ping
 	redisHealth = func(ctx context.Context) error {
-		return redisPool.Client().Ping(ctx).Err()
+		return pod.RedisPool.Client().Ping(ctx).Err()
 	}
+	nrfHealth = pod.NRFClient
 
-	// ─── Resilience ─────────────────────────────────────────────────────
-	// REQ-11: Per host:port circuit breaker registry
-	cbRegistry := resilience.NewRegistry(
-		cfg.AAA.FailureThreshold,
-		cfg.AAA.RecoveryTimeout,
-		3*time.Second, // successThreshold: 3 consecutive successes to close
-	)
-
-	// ─── NRF client ──────────────────────────────────────────────────────
-	// REQ-01 / D-04: Startup in degraded mode — NRF registration in background
-	nrf := nrf.NewClient(cfg.NRF)
-	go nrf.RegisterAsync(ctx)
-	go nrf.StartHeartbeat(ctx)
-	nrfHealth = nrf
-
-	// ─── UDM client ─────────────────────────────────────────────────────
-	udmClient := udm.NewClient(cfg.UDM, nrf)
-
-	// ─── AUSF client ────────────────────────────────────────────────────
-	ausfClient := ausf.NewClient(cfg.AUSF)
-
-	// ─── AMF notifier ──────────────────────────────────────────────────
-	// amfClient sends AMF re-auth/revocation notifications with retry + DLQ
-	// Wire to handler via amf.WithClient in future phases
-	_ = amf.NewClient(30*time.Second, cbRegistry, dlq)
-
-	// ─── HTTP AAA client (satisfies eap.AAAClient = AAARouter) ────────────────
-	tlsCfg := &tls.Config{}
-	if cfg.Biz.UseMTLS {
-		tlsCfg.RootCAs = mustLoadCertPool(cfg.Biz.TLSCA)
-		tlsCfg.Certificates = []tls.Certificate{mustLoadCert(cfg.Biz.TLSCert, cfg.Biz.TLSKey)}
-		tlsCfg.ServerName = "aaa-gateway" // SNI for AAA Gateway cert verification
-		slog.Info("mTLS configured for AAA Gateway",
-			"ca", cfg.Biz.TLSCA,
-			"cert", cfg.Biz.TLSCert,
-			"sni", "aaa-gateway",
-		)
-	}
-	aaaClient := newHTTPAAAClient(
-		cfg.Biz.AAAGatewayURL,
-		cfg.Redis.Addr,
-		podID,
-		cfg.Version,
-		&http.Client{
-			Transport: &http.Transport{TLSClientConfig: tlsCfg},
-			Timeout:   30 * time.Second,
-		},
-	)
-
-	// ─── N58: Nnssaaf_NSSAA ────────────────────────────────────────────────
-	// REQ-04: UDM Nudm_UECM_Get wired to N58 handler via WithUDMClient
-	// REQ-01: NRF client for service discovery via WithNRFClient
-	nssaaHandler := nssaa.NewHandler(nssaaStore,
-		nssaa.WithAPIRoot(apiRoot),
-		nssaa.WithAAA(aaaClient),
-		nssaa.WithNRFClient(nrf),
-		nssaa.WithUDMClient(udmClient),
-	)
-	nssaaRouter := nssaa.NewRouter(nssaaHandler, apiRoot)
-
-	// ─── N60: Nnssaaf_AIW ─────────────────────────────────────────────────
-	// REQ-08: AUSF client wired to AIW handler via WithAUSFClient
-	aiwHandler := aiw.NewHandler(aiwStore,
-		aiw.WithAPIRoot(apiRoot),
-		aiw.WithAUSFClient(ausfClient),
-	)
-	aiwRouter := aiw.NewRouter(aiwHandler, apiRoot)
-
-	// ─── Internal AAA forwarding endpoints (for AAA Gateway) ─────────────────
-	mux := http.NewServeMux()
-	// handleAaaForward: stub endpoint for Biz Pod receiving forwarded requests from AAA GW.
-	// Not implemented in Phase 5 — AAA GW communicates via direct Redis/RADIUS/Diameter.
-	// Registration kept for future extensibility (e.g., AAA GW → Biz direct HTTP).
-	mux.HandleFunc("/aaa/forward", handleAaaForward)
-	mux.HandleFunc("/aaa/server-initiated", handleServerInitiated)
-
-	// ─── Compose with N58/N60 handlers ────────────────────────────────────
-	// Do NOT use http.StripPrefix here. The chi routers (nssaaRouter, aiwRouter)
-	// are registered with chi at /nnssaaf-nssaa/v1 and /nnssaaf-aiw/v1 respectively,
-	// and http.StripPrefix was stripping too much (/nnssaaf-nssaa) causing 404s
-	// when the HTTP Gateway forwards /nnssaaf-nssaa/v1/... unchanged.
-	mux.Handle("/nnssaaf-nssaa/", nssaaRouter)
-	mux.Handle("/nnssaaf-aiw/", aiwRouter)
-
-	// ─── OAM endpoints ─────────────────────────────────────────────────────
-	mux.HandleFunc("/healthz/live", handleLiveness)
-	mux.HandleFunc("/healthz/ready", handleReadiness)
-	mux.Handle("/metrics", metrics.Handler())
-
-	// ─── Middleware stack ─────────────────────────────────────────────────
-	var handler http.Handler = mux
-	handler = common.RecoveryMiddleware(handler)
-	handler = common.RequestIDMiddleware(handler)
-	handler = common.MetricsMiddleware(handler)
-	handler = common.LoggingMiddleware(handler)
-	handler = common.CORSMiddleware(handler)
-
-	srv := &http.Server{
-		Addr:         cfg.Server.Addr,
-		Handler:      handler,
-		ReadTimeout:  cfg.Server.ReadTimeout,
-		WriteTimeout: cfg.Server.WriteTimeout,
-		IdleTimeout:  cfg.Server.IdleTimeout,
-	}
-
+	// Start HTTP server
 	errCh := make(chan error, 1)
 	go func() {
-		slog.Info("biz HTTP server listening", "addr", srv.Addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		slog.Info("biz HTTP server listening", "addr", pod.Server.Addr)
+		if err := pod.Server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			errCh <- err
 		}
 	}()
 
-	// ─── Biz Pod heartbeat: register pod in Redis SET ──────────────────────
+	// Biz Pod heartbeat: register pod in Redis SET
 	go podHeartbeat(context.Background(), cfg.Redis.Addr, podID)
 
 	select {
@@ -292,30 +93,12 @@ func main() {
 		os.Exit(1)
 	case <-signalReceived():
 		slog.Info("shutdown signal received")
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		// Graceful shutdown: deregister from NRF
-		if nrf != nil {
-			nrfCtx, nrfCancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer nrfCancel()
-			_ = nrf.Deregister(nrfCtx) // best-effort
-		}
-
-		_ = srv.Shutdown(ctx)
-		_ = aaaClient.Close()
+		pod.Close()
 	}
 }
 
 // handleAaaForward forwards a request from the AAA Gateway to the Biz Pod.
-// This endpoint is reserved for future AAA-initiated callbacks (e.g., NAS re-auth
-// triggered by AAA-S without a preceding Nnssaaf_NSSAA_Authenticate request).
-//
-// Currently not implemented — AAA-initiated flows are handled via the
-// /aaa/server-initiated endpoint instead. This route exists as a placeholder
-// for the N59-like reverse direction and will be implemented when the
-// AAA Gateway needs to push requests to the Biz Pod without a correlating
-// outbound call.
+// This endpoint is reserved for future AAA-initiated callbacks.
 func handleAaaForward(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "aaa-forward is not implemented; use /aaa/server-initiated", http.StatusNotImplemented)
 }
@@ -345,9 +128,6 @@ func handleServerInitiated(w http.ResponseWriter, r *http.Request) {
 	case proto.MessageTypeCoA:
 		respPayload = handleCoA(r.Context(), &req)
 	default:
-		// Enum exhaustiveness: future protocol additions (e.g., Session-Timeout-Request,
-		// Resource-Reallocation-Request per TS 29.561) will be caught here and logged
-		// before returning 400, preventing silent fallthrough to other handlers.
 		slog.Warn("handle_server_initiated: unknown message type",
 			"message_type", req.MessageType,
 			"session_id", req.SessionID,
@@ -383,12 +163,10 @@ func handleCoA(_ context.Context, req *proto.AaaServerInitiatedRequest) []byte {
 }
 
 // podHeartbeat registers the Biz Pod in the Redis SET and refreshes every 30 seconds.
-// On context cancellation, it removes the pod from the SET.
 func podHeartbeat(ctx context.Context, redisAddr, podID string) {
 	rdb := goredis.NewClient(&goredis.Options{Addr: redisAddr})
 	defer func() { _ = rdb.Close() }()
 
-	// Register immediately on startup
 	if err := rdb.SAdd(ctx, proto.PodsKey, podID).Err(); err != nil {
 		slog.Warn("failed to register pod in Redis", "error", err, "pod_id", podID)
 	}
@@ -407,51 +185,17 @@ func podHeartbeat(ctx context.Context, redisAddr, podID string) {
 	}
 }
 
-// hasScheme returns true if s already contains a URL scheme prefix.
-// Handles both http:// and https:// schemes.
-func hasScheme(s string) bool {
-	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://")
-}
-
-// mustLoadCertPool loads and parses a CA certificate file into an x509.CertPool.
-// Panics on error — called during startup validation only.
-func mustLoadCertPool(caPath string) *x509.CertPool {
-	data, err := os.ReadFile(caPath)
-	if err != nil {
-		panic("failed to read TLS CA cert: " + err.Error())
-	}
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(data) {
-		panic("failed to parse TLS CA cert from: " + caPath)
-	}
-	return pool
-}
-
-// mustLoadCert loads a client certificate and key for mTLS.
-// Panics on error — called during startup validation only.
-func mustLoadCert(certPath, keyPath string) tls.Certificate {
-	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
-	if err != nil {
-		panic("failed to load TLS cert/key pair: " + err.Error())
-	}
-	return cert
-}
-
 // handleLiveness implements /healthz/live — always 200, no dependency checks.
-// REQ-18 / D-07: Liveness probe, process alive only.
 func handleLiveness(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(common.HeaderContentType, common.MediaTypeJSONVersion)
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.WriteString(w, `{"status":"ok","service":"nssAAF-biz"}`)
 }
 
-// handleReadiness implements /healthz/ready — checks PostgreSQL, Redis, AAA GW, NRF.
-// REQ-18 / D-07: Readiness probe with dependency checks.
-// Returns 503 if any critical dependency is unhealthy.
+// handleReadiness implements /healthz/ready — checks PostgreSQL, Redis, NRF.
 func handleReadiness(w http.ResponseWriter, r *http.Request) {
 	checks := map[string]string{}
 
-	// PostgreSQL (pgHealth set in main after pool creation)
 	if pgHealth != nil {
 		if err := pgHealth(r.Context()); err != nil {
 			checks["postgres"] = "unhealthy: " + err.Error()
@@ -459,11 +203,9 @@ func handleReadiness(w http.ResponseWriter, r *http.Request) {
 			checks["postgres"] = "ok"
 		}
 	} else {
-		//nolint:goconst // degraded string reflects actual runtime health check status
 		checks["postgres"] = "degraded (not initialized)"
 	}
 
-	// Redis (redisHealth set in main after pool creation)
 	if redisHealth != nil {
 		if err := redisHealth(r.Context()); err != nil {
 			checks["redis"] = "unhealthy: " + err.Error()
@@ -474,14 +216,12 @@ func handleReadiness(w http.ResponseWriter, r *http.Request) {
 		checks["redis"] = "degraded (not initialized)"
 	}
 
-	// NRF registration (degraded, not unhealthy per D-04)
 	if nrfHealth != nil && nrfHealth.IsRegistered() {
 		checks["nrf_registration"] = "ok"
 	} else {
 		checks["nrf_registration"] = "degraded (retrying)"
 	}
 
-	// Determine overall status
 	allOk := true
 	for _, v := range checks {
 		if v != "ok" && v != "degraded (retrying)" && v != "degraded (not initialized)" {
