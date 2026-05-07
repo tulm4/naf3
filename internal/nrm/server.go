@@ -4,6 +4,7 @@ package nrm
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -127,7 +128,7 @@ func handleEvents(alarmMgr *AlarmManager) http.HandlerFunc {
 			common.WriteProblem(w, common.NewProblem(
 				http.StatusMethodNotAllowed,
 				"METHOD_NOT_ALLOWED",
-				"method not allowed",
+				fmt.Sprintf("POST required, got: %s", r.Method),
 			))
 			return
 		}
@@ -135,19 +136,19 @@ func handleEvents(alarmMgr *AlarmManager) http.HandlerFunc {
 			common.WriteProblem(w, common.NewProblem(
 				http.StatusUnsupportedMediaType,
 				"UNSUPPORTED_MEDIA_TYPE",
-				"unsupported media type",
+				fmt.Sprintf("expected Content-Type: application/json, got: %s", r.Header.Get("Content-Type")),
 			))
 			return
 		}
 
 		var event AlarmEvent
 		if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
-			common.WriteProblem(w, common.ValidationProblem("body", err.Error()))
+			common.WriteProblem(w, common.ValidationProblem("body", "invalid JSON format"))
 			return
 		}
 
 		if alarmMgr == nil {
-			common.WriteProblem(w, common.ServiceUnavailableProblem("alarm manager not initialized"))
+			common.WriteProblem(w, common.InternalServerProblem("alarm manager not initialized"))
 			return
 		}
 		alarmMgr.Evaluate(&event)
