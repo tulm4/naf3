@@ -9,7 +9,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/operator/nssAAF/internal/metrics"
 	"github.com/operator/nssAAF/internal/proto"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // ProxyMode represents the AAA routing mode.
@@ -97,15 +99,30 @@ type Router struct {
 	mu sync.RWMutex
 }
 
-// Metrics holds Biz Pod metrics (extends aaa.Metrics).
-// Spec: PHASE §2.1
-type Metrics struct{}
+// Metrics holds Biz Pod AAA metrics backed by Prometheus collectors.
+// Spec: REQ-14
+type Metrics struct {
+	requestsTotal *prometheus.CounterVec
+	latencyHist   *prometheus.HistogramVec
+}
+
+// NewMetrics creates a new Metrics instance backed by the global metrics registry.
+func NewMetrics() *Metrics {
+	return &Metrics{
+		requestsTotal: metrics.AaaRequestsTotal,
+		latencyHist:   metrics.AaaRequestDuration,
+	}
+}
 
 // RecordAAARequest records an AAA request metric.
-func (m *Metrics) RecordAAARequest(protocol, host, result string) {}
+func (m *Metrics) RecordAAARequest(protocol, host, result string) {
+	m.requestsTotal.WithLabelValues(protocol, host, result).Inc()
+}
 
 // RecordAAALatency records AAA request latency.
-func (m *Metrics) RecordAAALatency(protocol, host string, d time.Duration) {}
+func (m *Metrics) RecordAAALatency(protocol, host string, d time.Duration) {
+	m.latencyHist.WithLabelValues(protocol, host).Observe(d.Seconds())
+}
 
 // RouterOption configures a Router.
 type RouterOption func(*Router)
@@ -124,6 +141,11 @@ func NewRouter(cfg SnssaiConfig, logger *slog.Logger, opts ...RouterOption) *Rou
 
 	for _, opt := range opts {
 		opt(r)
+	}
+
+	// Default to real metrics if not provided
+	if r.metrics == nil {
+		r.metrics = NewMetrics()
 	}
 
 	return r
