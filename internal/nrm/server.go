@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/operator/nssAAF/internal/api/common"
 	"github.com/operator/nssAAF/internal/restconf"
 )
 
@@ -123,22 +124,30 @@ func (s *Server) Addr() string {
 func handleEvents(alarmMgr *AlarmManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			common.WriteProblem(w, common.NewProblem(
+				http.StatusMethodNotAllowed,
+				"METHOD_NOT_ALLOWED",
+				"method not allowed",
+			))
 			return
 		}
 		if r.Header.Get("Content-Type") != "application/json" {
-			http.Error(w, "unsupported media type", http.StatusUnsupportedMediaType)
+			common.WriteProblem(w, common.NewProblem(
+				http.StatusUnsupportedMediaType,
+				"UNSUPPORTED_MEDIA_TYPE",
+				"unsupported media type",
+			))
 			return
 		}
 
 		var event AlarmEvent
 		if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			common.WriteProblem(w, common.ValidationProblem("body", err.Error()))
 			return
 		}
 
 		if alarmMgr == nil {
-			http.Error(w, "alarm manager not initialized", http.StatusServiceUnavailable)
+			common.WriteProblem(w, common.ServiceUnavailableProblem("alarm manager not initialized"))
 			return
 		}
 		alarmMgr.Evaluate(&event)

@@ -1,0 +1,4 @@
+FROM alpine:3.19 AS runtime
+
+RUN apk --no-cache add ca-certificates tzdata curl
+
