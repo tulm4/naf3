@@ -280,6 +280,9 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 
 // Close releases all resources held by BizPod.
 func (bp *BizPod) Close() {
+	if bp.Pool != nil {
+		bp.Pool.Close()
+	}
 	if bp.NRFClient != nil {
 		nrfCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
