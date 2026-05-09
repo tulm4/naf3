@@ -3,7 +3,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"flag"
@@ -17,63 +16,10 @@ import (
 
 	"github.com/operator/nssAAF/internal/auth"
 	"github.com/operator/nssAAF/internal/config"
-	"github.com/operator/nssAAF/internal/proto"
+	"github.com/operator/nssAAF/internal/httpclient"
 )
 
 var configPath = flag.String("config", "configs/http-gateway.yaml", "path to YAML configuration file")
-
-// httpBizClient satisfies proto.BizServiceClient.
-type httpBizClient struct {
-	bizServiceURL string
-	httpClient    *http.Client
-	version       string
-}
-
-// ForwardRequest satisfies proto.BizServiceClient.
-func (c *httpBizClient) ForwardRequest(ctx context.Context, path, method string, body []byte) ([]byte, int, error) {
-	url := c.bizServiceURL + path
-
-	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body))
-	if err != nil {
-		return nil, 0, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(proto.HeaderName, c.version)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return nil, 503, err
-		}
-		return nil, 502, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, _ := io.ReadAll(resp.Body)
-	return respBody, resp.StatusCode, nil
-}
-
-var _ proto.BizServiceClient = (*httpBizClient)(nil)
-
-// forwardToBiz forwards an HTTP request to the Biz Pod via httpBizClient.
-func (c *httpBizClient) forwardToBiz(w http.ResponseWriter, r *http.Request) {
-	var body []byte
-	if r.Body != nil {
-		body, _ = io.ReadAll(r.Body)
-	}
-
-	respBody, status, err := c.ForwardRequest(r.Context(), r.URL.Path, r.Method, body)
-	if err != nil {
-		slog.Error("forward to biz failed", "error", err, "path", r.URL.Path)
-		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
-		return
-	}
-
-	w.WriteHeader(status)
-	if len(respBody) > 0 {
-		_, _ = w.Write(respBody)
-	}
-}
 
 func main() {
 	flag.Parse()
@@ -120,13 +66,7 @@ func main() {
 	}
 	slog.Info("auth initialized", "jwks_url", jwksURL)
 
-	bizClient := &httpBizClient{
-		bizServiceURL: cfg.HTTPgw.BizServiceURL,
-		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
-		},
-		version: cfg.Version,
-	}
+	bizClient := httpclient.NewFactory(cfg.InternalComm).NewBizServiceClient(cfg.HTTPgw.BizServiceURL)
 
 	// Use a mux for path-based auth scoping.
 	mux := http.NewServeMux()
@@ -139,14 +79,44 @@ func main() {
 	// N58: Nnssaaf_NSSAA — requires nnssaaf-nssaa scope
 	mux.Handle("/nnssaaf-nssaa/", auth.NewAuthMiddleware(authCfg)(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			bizClient.forwardToBiz(w, r)
+			var body []byte
+			if r.Body != nil {
+				body, _ = io.ReadAll(r.Body)
+			}
+
+			respBody, status, err := bizClient.ForwardRequest(r.Context(), r.URL.Path, r.Method, body)
+			if err != nil {
+				slog.Error("forward to biz failed", "error", err, "path", r.URL.Path)
+				http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+				return
+			}
+
+			w.WriteHeader(status)
+			if len(respBody) > 0 {
+				_, _ = w.Write(respBody)
+			}
 		}),
 	))
 
 	// N60: Nnssaaf_AIW — requires nnssaaf-aiw scope
 	mux.Handle("/nnssaaf-aiw/", auth.NewAuthMiddleware(authCfg)(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			bizClient.forwardToBiz(w, r)
+			var body []byte
+			if r.Body != nil {
+				body, _ = io.ReadAll(r.Body)
+			}
+
+			respBody, status, err := bizClient.ForwardRequest(r.Context(), r.URL.Path, r.Method, body)
+			if err != nil {
+				slog.Error("forward to biz failed", "error", err, "path", r.URL.Path)
+				http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+				return
+			}
+
+			w.WriteHeader(status)
+			if len(respBody) > 0 {
+				_, _ = w.Write(respBody)
+			}
 		}),
 	))
 
