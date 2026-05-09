@@ -54,7 +54,7 @@ func NewNativeAAAClient(aaaGatewayURL string, cfg config.NativeCommConfig) *Nati
 			Transport: &http.Transport{
 				MaxIdleConns:        cfg.Pool.MaxIdleConns,
 				MaxIdleConnsPerHost: cfg.Pool.MaxIdleConnsPerHost,
-				IdleConnTimeout:      cfg.Pool.IdleConnTimeout,
+				IdleConnTimeout:     cfg.Pool.IdleConnTimeout,
 				TLSClientConfig:     tlsCfg,
 			},
 			Timeout: 20 * time.Second, // Stricter timeout for AAA
@@ -194,7 +194,7 @@ func (c *NativeAAAClient) doPost(ctx context.Context, body []byte, version strin
 	if err != nil {
 		return nil, 503, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

@@ -203,10 +203,10 @@ func TestFactory_NewAAAClient_Istio(t *testing.T) {
 
 func TestFactory_ModeMethod(t *testing.T) {
 	tests := []struct {
-		name       string
-		mode       string
-		istioEnv   bool
-		wantMode   Mode
+		name     string
+		mode     string
+		istioEnv bool
+		wantMode Mode
 	}{
 		{
 			name:     "native mode from config",

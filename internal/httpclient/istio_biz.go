@@ -39,7 +39,7 @@ func (c *istioBizClient) ForwardRequest(ctx context.Context, path, method string
 		}
 		return nil, 503, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

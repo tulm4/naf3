@@ -14,7 +14,7 @@ import (
 // Minimal client - Istio handles retries, circuit breaking, mTLS.
 type istioAAAClient struct {
 	aaaGatewayURL string
-	client       *http.Client
+	client        *http.Client
 }
 
 func newIstioAAAClient(aaaGatewayURL string) *istioAAAClient {
@@ -45,7 +45,7 @@ func (c *istioAAAClient) ForwardEAP(ctx context.Context, req *proto.AaaForwardRe
 		}
 		return nil, fmt.Errorf("aaa gateway unavailable: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("aaa gateway returned %d", resp.StatusCode)

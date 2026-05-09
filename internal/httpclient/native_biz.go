@@ -57,8 +57,8 @@ func newNativeBizClient(baseURL string, cfg config.NativeCommConfig) *nativeBizC
 	}
 
 	return &nativeBizClient{
-		baseURL:    baseURL,
-		source:     "nssAAF",
+		baseURL: baseURL,
+		source:  "nssAAF",
 		httpClient: &http.Client{
 			Transport: &http.Transport{
 				MaxIdleConns:        poolCfg.MaxIdleConns,
@@ -165,7 +165,7 @@ func (c *nativeBizClient) doRequest(ctx context.Context, path, method string, bo
 	if err != nil {
 		return nil, 503, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
