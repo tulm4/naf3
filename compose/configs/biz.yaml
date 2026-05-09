@@ -99,3 +99,18 @@ crypto:
 # These are set by the deployment tooling (docker-compose, k8s, etc.)
 env:
   MASTER_KEY_HEX: ""  # 64-char hex string; REQUIRED for soft mode (set via K8s secret or docker-compose env)
+
+internalComm:
+  mode: native
+  native:
+    retry:
+      maxAttempts: 2
+      baseDelay: 500ms
+      maxDelay: 10s
+    circuitBreaker:
+      failureThreshold: 3
+      recoveryTimeout: 15s
+      successThreshold: 2
+    connectionPool:
+      maxIdleConnsPerHost: 50
+      idleConnTimeout: 60s

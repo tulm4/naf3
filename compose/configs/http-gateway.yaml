@@ -35,3 +35,18 @@ crypto:
 
 env:
   ISTIO_MTLS: "0"
+
+internalComm:
+  mode: native
+  native:
+    retry:
+      maxAttempts: 3
+      baseDelay: 1s
+      maxDelay: 4s
+    circuitBreaker:
+      failureThreshold: 5
+      recoveryTimeout: 30s
+      successThreshold: 3
+    connectionPool:
+      maxIdleConnsPerHost: 100
+      idleConnTimeout: 90s
