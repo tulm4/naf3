@@ -61,6 +61,7 @@ make run-aaa-gateway  # AAA GW on :9090
 | Phase 5: Security & Crypto | ✅ DONE | `internal/auth/` (JWT validation, JWKS cache, scope enforcement), `internal/crypto/` (AES-256-GCM, KEK/DEK, KeyManager, VaultKeyManager, SoftHSMKeyManager, secret encryption) |
 | Phase 6: Integration Testing & NRM | ✅ DONE | `test/`, `internal/nrm/` (NRM RESTCONF + AlarmManager — COMPLETE, 15/15 UAT tests PASS) |
 | Phase 7: Kubernetes Deployment | ⏳ PENDING | `deployments/helm/`, `deployments/kustomize/`, `deployments/argo/` |
+| Phase 7.1: Internal Comm Dual-Mode | ⏳ PENDING | `internal/httpclient/`, `internal/config/`, `cmd/*/` |
 | Phase 8: Performance & Load Testing | ⏳ PENDING | `test/load/`, chaos testing |
 
 ---
@@ -97,6 +98,7 @@ make run-aaa-gateway  # AAA GW on :9090
 | `internal/auth/` | `docs/design/15_sbi_security.md`, `docs/design/16_aaa_security.md`, `docs/roadmap/PHASE_5_Security_Crypto.md` | 5 | TBD |
 | `internal/crypto/` | `docs/design/17_crypto.md`, `docs/roadmap/PHASE_5_Security_Crypto.md` | 5 | TBD |
 | `internal/nrm/` | `docs/design/18_nrm_fcaps.md`, `docs/roadmap/PHASE_6_Testing_NRM.md` | 6 | READY — NRM RESTCONF + AlarmManager (Wave 2) |
+| `internal/httpclient/` | `docs/design/26_internal_comm_dual_mode.md` | 7.1 | TBD |
 | *(cross-cutting)* | `docs/design/19_observability.md` | 4 | TBD |
 | *(cross-cutting)* | `docs/design/20_config_management.md` | ALL | TBD |
 | *(cross-cutting)* | `docs/design/24_test_strategy.md` | 6 | READY |
@@ -164,6 +166,18 @@ make run-aaa-gateway  # AAA GW on :9090
 - [ ] ServiceMonitor for Prometheus (all components)
 - [ ] Kustomize overlays: dev, staging, production
 - [ ] ArgoCD ApplicationSet syncs to production
+
+### Phase 7.1: Internal Communication Dual-Mode
+- [ ] `go build ./...` compiles
+- [ ] `go test ./internal/httpclient/...` passes
+- [ ] Native mode: retry on 5xx errors
+- [ ] Native mode: circuit breaker opens after N failures
+- [ ] Native mode: connection pool reuses connections
+- [ ] Istio mode: `ISTIO_MTLS=1` activates Istio clients
+- [ ] Config: `mode: native` / `mode: istio` works
+- [ ] Metrics: `nssaa_internal_request_duration_seconds` exposed
+- [ ] HTTP GW → Biz Pod load balancing works
+- [ ] Biz Pod → AAA GW load balancing works
 
 ### Phase 8: Performance & Load Testing
 - [ ] 50K concurrent sessions sustained
@@ -265,6 +279,7 @@ nssAAF/
 | Phase 5 details | `docs/roadmap/PHASE_5_Security_Crypto.md` |
 | Phase 6 details | `docs/roadmap/PHASE_6_Testing_NRM.md` |
 | Phase 7 details | `docs/roadmap/PHASE_7_K8s.md` |
+| Phase 7.1 details | `docs/roadmap/PHASE_7-1_internal_comm.md` |
 | Module details | `docs/roadmap/module_index.md` |
 | Quick reference | `docs/quickref.md` |
 | API spec | `docs/design/02_nssaa_api.md` |
