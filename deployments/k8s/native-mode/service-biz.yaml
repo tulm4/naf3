@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nssaa-biz
+  namespace: nssaa
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http
+  selector:
+    app: nssaa-biz
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nssaa-biz-headless
+  namespace: nssaa
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - port: 8080
+      targetPort: 8080
+  publishNotReadyAddresses: true
+  selector:
+    app: nssaa-biz

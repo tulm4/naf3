@@ -1,0 +1,19 @@
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: nssaa-biz
+  namespace: nssaa
+spec:
+  hosts:
+    - nssaa-biz
+  http:
+    - route:
+        - destination:
+            host: nssaa-biz
+            port:
+              number: 8080
+      retries:
+        attempts: 3
+        perTryTimeout: 10s
+        retryOn: 5xx,reset,connect-failure,retriable-4xx
+      timeout: 30s

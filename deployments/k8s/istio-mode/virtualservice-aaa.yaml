@@ -1,0 +1,19 @@
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: nssaa-aaa-gateway
+  namespace: nssaa
+spec:
+  hosts:
+    - nssaa-aaa-gateway
+  http:
+    - route:
+        - destination:
+            host: nssaa-aaa-gateway
+            port:
+              number: 8080
+      retries:
+        attempts: 2
+        perTryTimeout: 5s
+        retryOn: 5xx,reset,connect-failure
+      timeout: 30s
