@@ -143,7 +143,7 @@ type Registry struct {
 }
 
 // NewRegistry creates a circuit breaker registry with defaults.
-func NewRegistry(failureThreshold int, recoveryTimeout, successThreshold time.Duration) *Registry {
+func NewRegistry(failureThreshold int, recoveryTimeout time.Duration, successThreshold int) *Registry {
 	if failureThreshold == 0 {
 		failureThreshold = 5
 	}
@@ -157,7 +157,7 @@ func NewRegistry(failureThreshold int, recoveryTimeout, successThreshold time.Du
 		breakers:                make(map[string]*CircuitBreaker),
 		defaultFailureThreshold: failureThreshold,
 		defaultRecoveryTimeout:  recoveryTimeout,
-		defaultSuccessThreshold: int(successThreshold),
+		defaultSuccessThreshold: successThreshold,
 	}
 }
 

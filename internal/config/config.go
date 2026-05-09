@@ -38,7 +38,8 @@ type Config struct {
 	NRF       NRFConfig       `yaml:"nrf"`
 	UDM       UDMConfig       `yaml:"udm"`
 	AUSF      AUSFConfig      `yaml:"ausf"`
-	Crypto    CryptoConfig    `yaml:"crypto"`
+	Crypto       CryptoConfig       `yaml:"crypto"`
+	InternalComm InternalCommConfig `yaml:"internalComm"`
 
 	// Per-component config (only one is non-nil based on Component field)
 	Biz    *BizConfig    `yaml:"biz,omitempty"`
