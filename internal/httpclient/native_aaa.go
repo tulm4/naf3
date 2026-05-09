@@ -3,10 +3,13 @@ package httpclient
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 
@@ -16,9 +19,9 @@ import (
 	"github.com/operator/nssAAF/internal/resilience"
 )
 
-// nativeAAAClient implements proto.BizAAAClient with stricter retry + circuit breaker.
+// NativeAAAClient implements proto.BizAAAClient with stricter retry + circuit breaker.
 // AAA protocol is more sensitive: fewer retries, faster circuit breaker.
-type nativeAAAClient struct {
+type NativeAAAClient struct {
 	aaaGatewayURL string
 	httpClient    *http.Client
 	cbRegistry    *resilience.Registry
@@ -26,7 +29,7 @@ type nativeAAAClient struct {
 	source        string
 }
 
-func newNativeAAAClient(aaaGatewayURL string, cfg config.NativeCommConfig) *nativeAAAClient {
+func NewNativeAAAClient(aaaGatewayURL string, cfg config.NativeCommConfig) *NativeAAAClient {
 	// Stricter settings for AAA protocol
 	cfg.Retry.MaxAttempts = 2
 	cfg.Retry.MaxDelay = 10 * time.Second
@@ -42,7 +45,9 @@ func newNativeAAAClient(aaaGatewayURL string, cfg config.NativeCommConfig) *nati
 		cfg.Pool.MaxIdleConnsPerHost = 50
 	}
 
-	return &nativeAAAClient{
+	tlsCfg := buildTLSConfig(cfg.TLS)
+
+	return &NativeAAAClient{
 		aaaGatewayURL: aaaGatewayURL,
 		source:        "nssAAF",
 		httpClient: &http.Client{
@@ -50,6 +55,7 @@ func newNativeAAAClient(aaaGatewayURL string, cfg config.NativeCommConfig) *nati
 				MaxIdleConns:        cfg.Pool.MaxIdleConns,
 				MaxIdleConnsPerHost: cfg.Pool.MaxIdleConnsPerHost,
 				IdleConnTimeout:      cfg.Pool.IdleConnTimeout,
+				TLSClientConfig:     tlsCfg,
 			},
 			Timeout: 20 * time.Second, // Stricter timeout for AAA
 		},
@@ -66,8 +72,34 @@ func newNativeAAAClient(aaaGatewayURL string, cfg config.NativeCommConfig) *nati
 	}
 }
 
+// buildTLSConfig constructs a *tls.Config from NativeCommConfig.TLS settings.
+func buildTLSConfig(cfg *config.TLSClientConfig) *tls.Config {
+	if cfg == nil {
+		return nil
+	}
+	tlsCfg := &tls.Config{ServerName: cfg.ServerName}
+
+	if cfg.CACert != "" {
+		caCert, err := os.ReadFile(cfg.CACert)
+		if err == nil {
+			caCertPool := x509.NewCertPool()
+			caCertPool.AppendCertsFromPEM(caCert)
+			tlsCfg.RootCAs = caCertPool
+		}
+	}
+
+	if cfg.ClientCert != "" && cfg.ClientKey != "" {
+		cert, err := tls.LoadX509KeyPair(cfg.ClientCert, cfg.ClientKey)
+		if err == nil {
+			tlsCfg.Certificates = []tls.Certificate{cert}
+		}
+	}
+
+	return tlsCfg
+}
+
 // ForwardEAP implements proto.BizAAAClient with retry + circuit breaker.
-func (c *nativeAAAClient) ForwardEAP(ctx context.Context, req *proto.AaaForwardRequest) (*proto.AaaForwardResponse, error) {
+func (c *NativeAAAClient) ForwardEAP(ctx context.Context, req *proto.AaaForwardRequest) (*proto.AaaForwardResponse, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
@@ -86,7 +118,7 @@ func (c *nativeAAAClient) ForwardEAP(ctx context.Context, req *proto.AaaForwardR
 	var prevCBState resilience.State
 
 	err = resilience.Do(ctx, c.retryCfg, func() error {
-		respBody, status, err := c.doPost(ctx, body)
+		respBody, status, err := c.doPost(ctx, body, req.Version)
 		if err != nil {
 			lastErr = err
 			return err
@@ -148,7 +180,7 @@ func (c *nativeAAAClient) ForwardEAP(ctx context.Context, req *proto.AaaForwardR
 	return &resp, nil
 }
 
-func (c *nativeAAAClient) doPost(ctx context.Context, body []byte) ([]byte, int, error) {
+func (c *NativeAAAClient) doPost(ctx context.Context, body []byte, version string) ([]byte, int, error) {
 	url := c.aaaGatewayURL + "/aaa/forward"
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {
@@ -156,6 +188,7 @@ func (c *nativeAAAClient) doPost(ctx context.Context, body []byte) ([]byte, int,
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Length", strconv.Itoa(len(body)))
+	req.Header.Set(proto.HeaderName, version)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -170,4 +203,4 @@ func (c *nativeAAAClient) doPost(ctx context.Context, body []byte) ([]byte, int,
 	return respBody, resp.StatusCode, nil
 }
 
-var _ proto.BizAAAClient = (*nativeAAAClient)(nil)
+var _ proto.BizAAAClient = (*NativeAAAClient)(nil)

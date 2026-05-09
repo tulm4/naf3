@@ -54,6 +54,6 @@ func (f *Factory) NewAAAClient(aaaGatewayURL string) proto.BizAAAClient {
 	case ModeIstio:
 		return newIstioAAAClient(aaaGatewayURL)
 	default:
-		return newNativeAAAClient(aaaGatewayURL, f.cfg.Native)
+		return NewNativeAAAClient(aaaGatewayURL, f.cfg.Native)
 	}
 }

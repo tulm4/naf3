@@ -24,6 +24,21 @@ type NativeCommConfig struct {
 	CB CircuitBreakerConfig `yaml:"circuitBreaker"`
 	// Pool configures http.Transport connection pool
 	Pool ConnectionPoolConfig `yaml:"connectionPool"`
+	// TLS holds mTLS client certificate settings.
+	// Use when the target service requires client certificate authentication.
+	TLS *TLSClientConfig `yaml:"tls,omitempty"`
+}
+
+// TLSClientConfig for mTLS client authentication.
+type TLSClientConfig struct {
+	// CACert is the root CA certificate to verify the server certificate.
+	CACert string `yaml:"caCert"`
+	// ClientCert is the client certificate file (PEM-encoded).
+	ClientCert string `yaml:"clientCert"`
+	// ClientKey is the client private key file (PEM-encoded).
+	ClientKey string `yaml:"clientKey"`
+	// ServerName is the SNI value for TLS handshake.
+	ServerName string `yaml:"serverName"`
 }
 
 // RetryConfig for exponential backoff retry.

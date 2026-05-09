@@ -6,11 +6,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/operator/nssAAF/internal/config"
 	"github.com/operator/nssAAF/internal/eap"
 	"github.com/operator/nssAAF/internal/proto"
 )
@@ -49,7 +49,7 @@ func TestSendEAP_Success(t *testing.T) {
 		server.URL,
 		"test-pod",
 		proto.CurrentVersion,
-		&http.Client{Timeout: 5 * time.Second},
+		config.InternalCommConfig{},
 		nil, // no Redis in unit tests
 	)
 	defer func() { _ = c.Close() }()
@@ -72,7 +72,7 @@ func TestSendEAP_Non200Error(t *testing.T) {
 		server.URL,
 		"test-pod",
 		proto.CurrentVersion,
-		&http.Client{Timeout: 5 * time.Second},
+		config.InternalCommConfig{},
 		nil,
 	)
 	defer func() { _ = c.Close() }()
@@ -80,7 +80,7 @@ func TestSendEAP_Non200Error(t *testing.T) {
 	_, err := c.SendEAP(context.Background(), &eap.Session{AuthCtxID: "auth-ctx-fail"}, []byte{1, 2, 3})
 
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "aaa gateway returned 502")
+	assert.Contains(t, err.Error(), "retryable status: 502")
 }
 
 // TestSendEAP_InvalidJSONResponse verifies that SendEAP returns an error
@@ -97,7 +97,7 @@ func TestSendEAP_InvalidJSONResponse(t *testing.T) {
 		server.URL,
 		"test-pod",
 		proto.CurrentVersion,
-		&http.Client{Timeout: 5 * time.Second},
+		config.InternalCommConfig{},
 		nil,
 	)
 	defer func() { _ = c.Close() }()
@@ -105,7 +105,7 @@ func TestSendEAP_InvalidJSONResponse(t *testing.T) {
 	_, err := c.SendEAP(context.Background(), &eap.Session{AuthCtxID: "auth-ctx-badjson"}, []byte{1, 2, 3})
 
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to decode response")
+	assert.Contains(t, err.Error(), "failed to unmarshal response")
 }
 
 // TestSendEAP_BuildsSessionID verifies that SendEAP includes a session ID
@@ -134,7 +134,7 @@ func TestSendEAP_BuildsSessionID(t *testing.T) {
 		server.URL,
 		"test-pod",
 		proto.CurrentVersion,
-		&http.Client{Timeout: 5 * time.Second},
+		config.InternalCommConfig{},
 		nil,
 	)
 	defer func() { _ = c.Close() }()
@@ -169,7 +169,7 @@ func TestSendEAP_PassesXVersionHeader(t *testing.T) {
 		server.URL,
 		"test-pod",
 		"1.2.3",
-		&http.Client{Timeout: 5 * time.Second},
+		config.InternalCommConfig{},
 		nil,
 	)
 	defer func() { _ = c.Close() }()

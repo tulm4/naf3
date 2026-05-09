@@ -1,30 +1,29 @@
-// Package main is the entry point for the NSSAAF Biz Pod.
-// Spec: TS 29.526 v18.7.0
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"sync"
 	"time"
 
+	"github.com/operator/nssAAF/internal/config"
 	"github.com/operator/nssAAF/internal/eap"
+	"github.com/operator/nssAAF/internal/httpclient"
 	"github.com/operator/nssAAF/internal/proto"
-	"github.com/redis/go-redis/v9"
+	goredis "github.com/redis/go-redis/v9"
 )
 
-// httpAAAClient satisfies eap.AAAClient by forwarding EAP messages to the AAA Gateway via HTTP.
-// It also subscribes to the nssaa:aaa-response Redis channel for response routing.
+// httpAAAClient satisfies eap.AAAClient by forwarding EAP messages to the AAA Gateway.
+// It embeds httpclient.NativeAAAClient for ForwardEAP with built-in retry + circuit breaker.
+// It also subscribes to the nssaa:aaa-response Redis channel for server-initiated response routing.
 type httpAAAClient struct {
-	aaaGatewayURL string
-	httpClient    *http.Client
-	version       string
-	redis         *redis.Client
-	podID         string
+	*httpclient.NativeAAAClient // Embed for ForwardEAP (retry + circuit breaker)
+
+	redis   *goredis.Client
+	podID   string
+	version string
 
 	// pending maps SessionID → response channel.
 	// This is used by subscribeResponses to dispatch Redis pub/sub events.
@@ -34,21 +33,19 @@ type httpAAAClient struct {
 }
 
 // newHTTPAAAClient creates a new HTTP AAA client.
-// The httpClient parameter must be configured by the caller (cmd/biz/main.go) based on
-// biz.useMTLS config — either a plain http.Client or one with TLS configured.
-func newHTTPAAAClient(aaaGatewayURL, redisAddr, podID, version string, httpClient *http.Client) *httpAAAClient {
+// It embeds httpclient.NativeAAAClient for ForwardEAP with retry + circuit breaker.
+// The caller must pass InternalCommConfig to configure the native HTTP client.
+// Redis pub/sub subscription runs in background for server-initiated responses.
+func newHTTPAAAClient(aaaGatewayURL, redisAddr, podID, version string, cfg config.InternalCommConfig) *httpAAAClient {
+	native := httpclient.NewNativeAAAClient(aaaGatewayURL, cfg.Native)
 	c := &httpAAAClient{
-		aaaGatewayURL: aaaGatewayURL,
-		httpClient:    httpClient,
-		version:       version,
-		redis: redis.NewClient(&redis.Options{
-			Addr: redisAddr,
-		}),
-		podID:   podID,
-		pending: make(map[string]chan []byte),
+		NativeAAAClient: native,
+		redis: goredis.NewClient(&goredis.Options{Addr: redisAddr}),
+		podID:           podID,
+		version:         version,
+		pending:         make(map[string]chan []byte),
 	}
 
-	// Start Redis subscription in background
 	go c.subscribeResponses(context.Background())
 	return c
 }
@@ -57,21 +54,20 @@ func newHTTPAAAClient(aaaGatewayURL, redisAddr, podID, version string, httpClien
 // This is for unit tests that need to inject a mock Redis client.
 //
 //nolint:unparam // podID parameter is always "test-pod" in test calls
-func newHTTPAAAClientForTest(aaaGatewayURL, podID, version string, httpClient *http.Client, redisClient *redis.Client) *httpAAAClient {
+func newHTTPAAAClientForTest(aaaGatewayURL, podID, version string, cfg config.InternalCommConfig, redisClient *goredis.Client) *httpAAAClient {
+	native := httpclient.NewNativeAAAClient(aaaGatewayURL, cfg.Native)
 	return &httpAAAClient{
-		aaaGatewayURL: aaaGatewayURL,
-		httpClient:    httpClient,
-		version:       version,
-		redis:         redisClient,
-		podID:         podID,
-		pending:       make(map[string]chan []byte),
+		NativeAAAClient: native,
+		redis:           redisClient,
+		podID:           podID,
+		version:         version,
+		pending:         make(map[string]chan []byte),
 	}
 }
 
 // SendEAP satisfies eap.AAARouter.
 // Spec: PHASE §1.1 pattern
 func (c *httpAAAClient) SendEAP(ctx context.Context, session *eap.Session, eapPayload []byte) ([]byte, error) {
-	// 1. Build forward request
 	req := &proto.AaaForwardRequest{
 		Version:       c.version,
 		SessionID:     fmt.Sprintf("nssAAF;%d;%s", time.Now().UnixNano(), session.AuthCtxID),
@@ -81,35 +77,12 @@ func (c *httpAAAClient) SendEAP(ctx context.Context, session *eap.Session, eapPa
 		Payload:       eapPayload,
 	}
 
-	body, err := json.Marshal(req)
+	resp, err := c.NativeAAAClient.ForwardEAP(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal forward request: %w", err)
+		return nil, err
 	}
 
-	// 2. POST to AAA Gateway
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.aaaGatewayURL+"/aaa/forward", bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set(proto.HeaderName, c.version)
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("aaa gateway unavailable: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("aaa gateway returned %d", resp.StatusCode)
-	}
-
-	var fwdResp proto.AaaForwardResponse
-	if err := json.NewDecoder(resp.Body).Decode(&fwdResp); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	return fwdResp.Payload, nil
+	return resp.Payload, nil
 }
 
 // subscribeResponses listens to nssaa:aaa-response and dispatches to pending channels.

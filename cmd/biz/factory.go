@@ -195,26 +195,32 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 	_ = amf.NewClient(30*time.Second, cbRegistry, dlq)
 
 	// ─── HTTP AAA client ────────────────────────────────────────────────
-	tlsCfg := &tls.Config{}
 	if f.cfg.Biz.UseMTLS {
-		tlsCfg.RootCAs = mustLoadCertPool(f.cfg.Biz.TLSCA)
-		tlsCfg.Certificates = []tls.Certificate{mustLoadCert(f.cfg.Biz.TLSCert, f.cfg.Biz.TLSKey)}
-		tlsCfg.ServerName = "aaa-gateway"
 		f.logger.Info("mTLS configured for AAA Gateway",
 			"ca", f.cfg.Biz.TLSCA,
 			"cert", f.cfg.Biz.TLSCert,
 			"sni", "aaa-gateway",
 		)
 	}
+	// Populate TLS config from BizConfig for NativeCommConfig
+	commCfg := f.cfg.InternalComm
+	if commCfg.Native.TLS == nil {
+		commCfg.Native.TLS = &config.TLSClientConfig{}
+	}
+	if f.cfg.Biz.UseMTLS {
+		commCfg.Native.TLS = &config.TLSClientConfig{
+			CACert:     f.cfg.Biz.TLSCA,
+			ClientCert: f.cfg.Biz.TLSCert,
+			ClientKey:  f.cfg.Biz.TLSKey,
+			ServerName: "aaa-gateway",
+		}
+	}
 	aaaClient := newHTTPAAAClient(
 		f.cfg.Biz.AAAGatewayURL,
 		f.cfg.Redis.Addr,
 		f.podID,
 		f.cfg.Version,
-		&http.Client{
-			Transport: &http.Transport{TLSClientConfig: tlsCfg},
-			Timeout:   30 * time.Second,
-		},
+		commCfg,
 	)
 
 	// ─── N58: Nnssaaf_NSSAA ─────────────────────────────────────────────

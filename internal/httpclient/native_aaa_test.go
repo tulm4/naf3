@@ -29,7 +29,7 @@ func TestNativeAAAClient_HappyPath(t *testing.T) {
 	defer server.Close()
 
 	cfg := config.NativeCommConfig{}
-	client := newNativeAAAClient(server.URL, cfg)
+	client := NewNativeAAAClient(server.URL, cfg)
 
 	req := &proto.AaaForwardRequest{
 		Version:   "1.0",
@@ -60,7 +60,7 @@ func TestNativeAAAClient_StrictRetry(t *testing.T) {
 	defer server.Close()
 
 	cfg := config.NativeCommConfig{}
-	client := newNativeAAAClient(server.URL, cfg)
+	client := NewNativeAAAClient(server.URL, cfg)
 
 	req := &proto.AaaForwardRequest{
 		Version:   "1.0",
