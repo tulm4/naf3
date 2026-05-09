@@ -177,7 +177,7 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 	cbRegistry := resilience.NewRegistry(
 		f.cfg.AAA.FailureThreshold,
 		f.cfg.AAA.RecoveryTimeout,
-		3*time.Second,
+		3,
 	)
 
 	// ─── NRF client ─────────────────────────────────────────────────────

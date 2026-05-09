@@ -162,6 +162,31 @@ var (
 		Name: "nssAAF_dlq_processed_total",
 		Help: "Total DLQ items processed",
 	}, nil)
+
+	// HTTPClientRequestDuration tracks internal HTTP client request latency.
+	HTTPClientRequestDuration = newHistogramVec(prometheus.HistogramOpts{
+		Name:    "nssAAF_httpclient_request_duration_seconds",
+		Help:    "Internal HTTP client request latency",
+		Buckets: []float64{.005, .01, .025, .05, .1, .25, .5, 1},
+	}, []string{"source", "destination", "status"})
+
+	// HTTPClientRequestRetries tracks retry counts for internal HTTP requests.
+	HTTPClientRequestRetries = newCounterVec(prometheus.CounterOpts{
+		Name: "nssAAF_httpclient_request_retries_total",
+		Help: "Total internal HTTP request retries",
+	}, []string{"source", "destination"})
+
+	// HTTPClientCircuitBreakerState tracks circuit breaker state per destination.
+	HTTPClientCircuitBreakerState = newGaugeVec(prometheus.GaugeOpts{
+		Name: "nssAAF_httpclient_circuit_breaker_state",
+		Help: "Circuit breaker state per destination (0=closed, 1=open, 2=half-open)",
+	}, []string{"destination"})
+
+	// HTTPClientCircuitBreakerTransitions tracks circuit breaker state transitions.
+	HTTPClientCircuitBreakerTransitions = newCounterVec(prometheus.CounterOpts{
+		Name: "nssAAF_httpclient_circuit_breaker_transitions_total",
+		Help: "Total circuit breaker state transitions",
+	}, []string{"destination", "from_state", "to_state"})
 )
 
 // Handler returns an HTTP handler that exposes all registered NSSAAF metrics.

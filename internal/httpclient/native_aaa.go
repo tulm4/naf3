@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/operator/nssAAF/internal/config"
+	"github.com/operator/nssAAF/internal/metrics"
 	"github.com/operator/nssAAF/internal/proto"
 	"github.com/operator/nssAAF/internal/resilience"
 )
@@ -22,6 +23,7 @@ type nativeAAAClient struct {
 	httpClient    *http.Client
 	cbRegistry    *resilience.Registry
 	retryCfg      resilience.RetryConfig
+	source        string
 }
 
 func newNativeAAAClient(aaaGatewayURL string, cfg config.NativeCommConfig) *nativeAAAClient {
@@ -42,6 +44,7 @@ func newNativeAAAClient(aaaGatewayURL string, cfg config.NativeCommConfig) *nati
 
 	return &nativeAAAClient{
 		aaaGatewayURL: aaaGatewayURL,
+		source:        "nssAAF",
 		httpClient: &http.Client{
 			Transport: &http.Transport{
 				MaxIdleConns:        cfg.Pool.MaxIdleConns,
@@ -72,11 +75,15 @@ func (c *nativeAAAClient) ForwardEAP(ctx context.Context, req *proto.AaaForwardR
 
 	cb := c.cbRegistry.Get(c.aaaGatewayURL)
 	if !cb.Allow() {
+		metrics.HTTPClientCircuitBreakerState.WithLabelValues(c.aaaGatewayURL).Set(float64(cb.State()))
+		metrics.HTTPClientRequestDuration.WithLabelValues(c.source, c.aaaGatewayURL, "circuit_open").Observe(0)
 		return nil, fmt.Errorf("circuit breaker open for %s", c.aaaGatewayURL)
 	}
 
 	var lastBody []byte
 	var lastErr error
+	var retryCount int
+	var prevCBState resilience.State
 
 	err = resilience.Do(ctx, c.retryCfg, func() error {
 		respBody, status, err := c.doPost(ctx, body)
@@ -95,6 +102,8 @@ func (c *nativeAAAClient) ForwardEAP(ctx context.Context, req *proto.AaaForwardR
 
 		// Retry 5xx errors
 		if resilience.IsRetryable(status) {
+			retryCount++
+			prevCBState = cb.State()
 			lastErr = fmt.Errorf("retryable status: %d", status)
 			return lastErr
 		}
@@ -102,11 +111,35 @@ func (c *nativeAAAClient) ForwardEAP(ctx context.Context, req *proto.AaaForwardR
 		return nil
 	})
 
+	start := time.Now()
+	defer func() {
+		duration := time.Since(start).Seconds()
+		statusStr := "success"
+		if lastErr != nil {
+			statusStr = "error"
+		}
+		metrics.HTTPClientRequestDuration.WithLabelValues(c.source, c.aaaGatewayURL, statusStr).Observe(duration)
+	}()
+
 	if err != nil {
+		prevCBState = cb.State()
 		cb.RecordFailure()
+		currCBState := cb.State()
+		if prevCBState != currCBState {
+			metrics.HTTPClientCircuitBreakerTransitions.WithLabelValues(c.aaaGatewayURL, prevCBState.String(), currCBState.String()).Inc()
+		}
+		metrics.HTTPClientCircuitBreakerState.WithLabelValues(c.aaaGatewayURL).Set(float64(currCBState))
 		return nil, lastErr
 	}
 	cb.RecordSuccess()
+	currCBState := cb.State()
+	if prevCBState != currCBState {
+		metrics.HTTPClientCircuitBreakerTransitions.WithLabelValues(c.aaaGatewayURL, prevCBState.String(), currCBState.String()).Inc()
+	}
+	metrics.HTTPClientCircuitBreakerState.WithLabelValues(c.aaaGatewayURL).Set(float64(currCBState))
+	if retryCount > 0 {
+		metrics.HTTPClientRequestRetries.WithLabelValues(c.source, c.aaaGatewayURL).Add(float64(retryCount))
+	}
 
 	var resp proto.AaaForwardResponse
 	if err := json.Unmarshal(lastBody, &resp); err != nil {

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/operator/nssAAF/internal/config"
+	"github.com/operator/nssAAF/internal/metrics"
 	"github.com/operator/nssAAF/internal/proto"
 	"github.com/operator/nssAAF/internal/resilience"
 )
@@ -20,6 +21,7 @@ type nativeBizClient struct {
 	httpClient *http.Client
 	cbRegistry *resilience.Registry
 	retryCfg   resilience.RetryConfig
+	source     string
 }
 
 func newNativeBizClient(baseURL string, cfg config.NativeCommConfig) *nativeBizClient {
@@ -55,7 +57,8 @@ func newNativeBizClient(baseURL string, cfg config.NativeCommConfig) *nativeBizC
 	}
 
 	return &nativeBizClient{
-		baseURL: baseURL,
+		baseURL:    baseURL,
+		source:     "nssAAF",
 		httpClient: &http.Client{
 			Transport: &http.Transport{
 				MaxIdleConns:        poolCfg.MaxIdleConns,
@@ -78,12 +81,16 @@ func (c *nativeBizClient) ForwardRequest(ctx context.Context, path, method strin
 	// Per-destination circuit breaker (REQ-11: per-host:port isolation)
 	cb := c.cbRegistry.Get(c.baseURL)
 	if !cb.Allow() {
+		metrics.HTTPClientCircuitBreakerState.WithLabelValues(c.baseURL).Set(float64(cb.State()))
+		metrics.HTTPClientRequestDuration.WithLabelValues(c.source, c.baseURL, "circuit_open").Observe(0)
 		return nil, 503, fmt.Errorf("circuit breaker open for %s", c.baseURL)
 	}
 
 	var lastBody []byte
 	var lastStatus int
 	var lastErr error
+	var retryCount int
+	var prevCBState resilience.State
 
 	err := resilience.Do(ctx, c.retryCfg, func() error {
 		respBody, status, err := c.doRequest(ctx, path, method, body)
@@ -104,6 +111,8 @@ func (c *nativeBizClient) ForwardRequest(ctx context.Context, path, method strin
 
 		// Retry 5xx errors
 		if resilience.IsRetryable(status) {
+			retryCount++
+			prevCBState = cb.State()
 			lastErr = fmt.Errorf("retryable status: %d", status)
 			return lastErr
 		}
@@ -111,11 +120,35 @@ func (c *nativeBizClient) ForwardRequest(ctx context.Context, path, method strin
 		return nil
 	})
 
+	start := time.Now()
+	defer func() {
+		duration := time.Since(start).Seconds()
+		statusStr := fmt.Sprintf("%d", lastStatus)
+		if lastErr != nil {
+			statusStr = "error"
+		}
+		metrics.HTTPClientRequestDuration.WithLabelValues(c.source, c.baseURL, statusStr).Observe(duration)
+	}()
+
 	if err != nil {
+		prevCBState = cb.State()
 		cb.RecordFailure()
+		currCBState := cb.State()
+		if prevCBState != currCBState {
+			metrics.HTTPClientCircuitBreakerTransitions.WithLabelValues(c.baseURL, prevCBState.String(), currCBState.String()).Inc()
+		}
+		metrics.HTTPClientCircuitBreakerState.WithLabelValues(c.baseURL).Set(float64(currCBState))
 		return lastBody, lastStatus, lastErr
 	}
 	cb.RecordSuccess()
+	currCBState := cb.State()
+	if prevCBState != currCBState {
+		metrics.HTTPClientCircuitBreakerTransitions.WithLabelValues(c.baseURL, prevCBState.String(), currCBState.String()).Inc()
+	}
+	metrics.HTTPClientCircuitBreakerState.WithLabelValues(c.baseURL).Set(float64(currCBState))
+	if retryCount > 0 {
+		metrics.HTTPClientRequestRetries.WithLabelValues(c.source, c.baseURL).Add(float64(retryCount))
+	}
 	return lastBody, lastStatus, nil
 }
 
