@@ -10,6 +10,8 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/redis/go-redis/v9"
+
 	"github.com/operator/nssAAF/internal/types"
 )
 
@@ -63,7 +65,7 @@ func (l *defaultLogger) Error(msg string, args ...any) { l.Logger.Error(msg, arg
 // Spec: RFC 3748 §3, TS 33.501 §16.3
 type Engine struct {
 	cfg            Config
-	sessionManager *sessionManager
+	sessions       SessionStore
 	fragmentMgr    *FragmentManager
 	aaaClient      AAARouter
 	logger         Logger
@@ -73,6 +75,7 @@ type Engine struct {
 }
 
 // NewEngine creates a new EAP engine with the given configuration.
+// Uses an in-memory session manager.
 func NewEngine(cfg Config, aaaClient AAARouter, logger *slog.Logger) *Engine {
 	if cfg.MaxRounds == 0 {
 		cfg.MaxRounds = DefaultMaxRounds
@@ -89,7 +92,32 @@ func NewEngine(cfg Config, aaaClient AAARouter, logger *slog.Logger) *Engine {
 
 	return &Engine{
 		cfg:            cfg,
-		sessionManager: newSessionManager(cfg.SessionTTL),
+		sessions:       newSessionManager(cfg.SessionTTL),
+		fragmentMgr:    NewFragmentManager(cfg.FragmentTTLSeconds),
+		aaaClient:      aaaClient,
+		logger:         &defaultLogger{logger},
+	}
+}
+
+// NewEngineWithRedis creates a new EAP engine backed by Redis for session storage.
+// Spec: TS 33.501 §16.3
+func NewEngineWithRedis(cfg Config, aaaClient AAARouter, redisClient redis.Cmdable, logger *slog.Logger) *Engine {
+	if cfg.MaxRounds == 0 {
+		cfg.MaxRounds = DefaultMaxRounds
+	}
+	if cfg.RoundTimeout == 0 {
+		cfg.RoundTimeout = DefaultRoundTimeout
+	}
+	if cfg.SessionTTL == 0 {
+		cfg.SessionTTL = DefaultSessionTTL
+	}
+	if cfg.FragmentTTLSeconds == 0 {
+		cfg.FragmentTTLSeconds = 60
+	}
+
+	return &Engine{
+		cfg:            cfg,
+		sessions:       NewRedisSessionManager(redisClient, cfg.SessionTTL),
 		fragmentMgr:    NewFragmentManager(cfg.FragmentTTLSeconds),
 		aaaClient:      aaaClient,
 		logger:         &defaultLogger{logger},
@@ -102,7 +130,7 @@ func (e *Engine) SetTLSConfig(cfg *tls.Config) {
 }
 
 // StartSession creates a new EAP session for an authentication context.
-func (e *Engine) StartSession(authCtxID, gpsi string) (*Session, error) {
+func (e *Engine) StartSession(ctx context.Context, authCtxID, gpsi string) (*Session, error) {
 	if authCtxID == "" {
 		return nil, ErrMissingAuthCtxID
 	}
@@ -111,7 +139,9 @@ func (e *Engine) StartSession(authCtxID, gpsi string) (*Session, error) {
 	session.MaxRounds = e.cfg.MaxRounds
 	session.Timeout = e.cfg.RoundTimeout
 
-	e.sessionManager.put(session)
+	if err := e.sessions.Put(ctx, session); err != nil {
+		return nil, fmt.Errorf("store session: %w", err)
+	}
 	e.logger.Info("eap_session_started",
 		"auth_ctx_id", authCtxID,
 		"gpsi", gpsi,
@@ -122,14 +152,14 @@ func (e *Engine) StartSession(authCtxID, gpsi string) (*Session, error) {
 }
 
 // GetSession returns an existing EAP session by authCtxID.
-func (e *Engine) GetSession(authCtxID string) (*Session, error) {
-	return e.sessionManager.get(authCtxID)
+func (e *Engine) GetSession(ctx context.Context, authCtxID string) (*Session, error) {
+	return e.sessions.Get(ctx, authCtxID)
 }
 
 // Process processes an incoming EAP message from AMF.
 // It determines whether this is a new request, a retry, or part of an ongoing session.
 func (e *Engine) Process(ctx context.Context, authCtxID string, eapPayload []byte) (*types.EapMessage, types.AuthResult, error) {
-	session, err := e.sessionManager.get(authCtxID)
+	session, err := e.sessions.Get(ctx, authCtxID)
 	if err != nil {
 		// No existing session — this should not happen for non-initial messages.
 		return nil, types.AuthResultFailure, fmt.Errorf("no session found for authCtxID=%s: %w", authCtxID, err)
@@ -138,7 +168,9 @@ func (e *Engine) Process(ctx context.Context, authCtxID string, eapPayload []byt
 	// Check for idle timeout.
 	if session.IsTimedOut() {
 		session.MarkTimeout()
-		e.sessionManager.put(session)
+		if putErr := e.sessions.Put(ctx, session); putErr != nil {
+			e.logger.Error("eap_session_put_error", "auth_ctx_id", authCtxID, "error", putErr)
+		}
 		e.logger.Warn("eap_session_timeout",
 			"auth_ctx_id", authCtxID,
 			"last_activity", session.LastActivity,
@@ -179,7 +211,9 @@ func (e *Engine) Process(ctx context.Context, authCtxID string, eapPayload []byt
 	if response != nil {
 		session.CacheResponse(response)
 	}
-	e.sessionManager.put(session)
+	if putErr := e.sessions.Put(ctx, session); putErr != nil {
+		e.logger.Error("eap_session_put_error", "auth_ctx_id", authCtxID, "error", putErr)
+	}
 
 	if err != nil {
 		// Do NOT return cached response here — the caller needs to know the error.
@@ -369,16 +403,19 @@ func (e *Engine) detectEapMethodFromIdentity(data []byte) Method {
 	return MethodTLS // Default to EAP-TLS for enterprise slices.
 }
 
-// DeleteSession removes a session from the manager.
-func (e *Engine) DeleteSession(authCtxID string) {
-	e.sessionManager.delete(authCtxID)
-	e.logger.Debug("eap_session_deleted", "auth_ctx_id", authCtxID)
+// DeleteSession removes a session from the store.
+func (e *Engine) DeleteSession(ctx context.Context, authCtxID string) error {
+	err := e.sessions.Delete(ctx, authCtxID)
+	if err == nil {
+		e.logger.Debug("eap_session_deleted", "auth_ctx_id", authCtxID)
+	}
+	return err
 }
 
 // Stats returns engine statistics.
 func (e *Engine) Stats() EngineStats {
 	return EngineStats{
-		ActiveSessions:   e.sessionManager.size(),
+		ActiveSessions:   e.sessions.Size(),
 		FragmentBuffers:  e.fragmentMgr.Size(),
 		MaxRounds:        e.cfg.MaxRounds,
 		RoundTimeoutSecs: int(e.cfg.RoundTimeout.Seconds()),

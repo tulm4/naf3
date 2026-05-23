@@ -47,7 +47,7 @@ func bytesEqual(a, b []byte) bool {
 }
 
 // sessionManager manages in-memory EAP sessions with TTL expiry.
-// Thread-safe.
+// Thread-safe. Implements SessionStore interface.
 type sessionManager struct {
 	mu       sync.RWMutex
 	sessions map[string]*Session
@@ -62,8 +62,8 @@ func newSessionManager(ttl time.Duration) *sessionManager {
 	}
 }
 
-// get returns a session by authCtxID.
-func (m *sessionManager) get(authCtxID string) (*Session, error) {
+// get returns a session by authCtxID (unexported, used internally).
+func (m *sessionManager) get(ctx context.Context, authCtxID string) (*Session, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -80,25 +80,42 @@ func (m *sessionManager) get(authCtxID string) (*Session, error) {
 	return session, nil
 }
 
-// put stores or updates a session.
-func (m *sessionManager) put(session *Session) {
+// put stores or updates a session (unexported, used internally).
+func (m *sessionManager) put(ctx context.Context, session *Session) error {
 	m.mu.Lock()
 	m.sessions[session.AuthCtxID] = session
 	m.mu.Unlock()
+	return nil
 }
 
-// delete removes a session.
-func (m *sessionManager) delete(authCtxID string) {
+// delete removes a session (unexported, used internally).
+func (m *sessionManager) delete(ctx context.Context, authCtxID string) error {
 	m.mu.Lock()
 	delete(m.sessions, authCtxID)
 	m.mu.Unlock()
+	return nil
 }
 
-// size returns the number of active sessions.
-func (m *sessionManager) size() int {
+// Size returns the number of active sessions.
+func (m *sessionManager) Size() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return len(m.sessions)
+}
+
+// Get implements SessionStore interface.
+func (m *sessionManager) Get(ctx context.Context, authCtxID string) (*Session, error) {
+	return m.get(ctx, authCtxID)
+}
+
+// Put implements SessionStore interface.
+func (m *sessionManager) Put(ctx context.Context, session *Session) error {
+	return m.put(ctx, session)
+}
+
+// Delete implements SessionStore interface.
+func (m *sessionManager) Delete(ctx context.Context, authCtxID string) error {
+	return m.delete(ctx, authCtxID)
 }
 
 // cleanup removes expired sessions.
@@ -142,18 +159,18 @@ func NewTestSessionManager(ttl time.Duration) *sessionManager {
 }
 
 // TestPut stores a session in the manager (for testing).
-func (m *sessionManager) TestPut(session *Session) {
-	m.put(session)
+func (m *sessionManager) TestPut(ctx context.Context, session *Session) error {
+	return m.put(ctx, session)
 }
 
 // TestGet retrieves a session by authCtxID (for testing).
-func (m *sessionManager) TestGet(authCtxID string) (*Session, error) {
-	return m.get(authCtxID)
+func (m *sessionManager) TestGet(ctx context.Context, authCtxID string) (*Session, error) {
+	return m.get(ctx, authCtxID)
 }
 
 // TestSize returns the number of sessions (for testing).
 func (m *sessionManager) TestSize() int {
-	return m.size()
+	return m.Size()
 }
 
 // NewTestSession creates a session for testing.
