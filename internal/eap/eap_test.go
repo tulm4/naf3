@@ -4,6 +4,7 @@ package eap
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/binary"
 	"fmt"
@@ -448,7 +449,7 @@ func TestSessionString(t *testing.T) {
 
 func TestSessionManagerGetNotFound(t *testing.T) {
 	mgr := NewTestSessionManager(10 * time.Minute)
-	_, err := mgr.TestGet("nonexistent")
+	_, err := mgr.TestGet(context.Background(), "nonexistent")
 	assert.ErrorIs(t, err, ErrSessionNotFound)
 }
 
@@ -456,8 +457,9 @@ func TestSessionManagerPutGet(t *testing.T) {
 	mgr := NewTestSessionManager(10 * time.Minute)
 	session := NewTestSession("auth-1", "user@example.com")
 
-	mgr.TestPut(session)
-	got, err := mgr.TestGet("auth-1")
+	err := mgr.TestPut(context.Background(), session)
+	require.NoError(t, err)
+	got, err := mgr.TestGet(context.Background(), "auth-1")
 
 	require.NoError(t, err)
 	assert.Equal(t, session, got)
@@ -469,10 +471,12 @@ func TestSessionManagerUpdate(t *testing.T) {
 	session1 := NewTestSession("auth-1", "user1@test")
 	session2 := NewTestSession("auth-1", "user2@test")
 
-	mgr.TestPut(session1)
-	mgr.TestPut(session2) // update
+	err := mgr.TestPut(context.Background(), session1)
+	require.NoError(t, err)
+	err = mgr.TestPut(context.Background(), session2) // update
+	require.NoError(t, err)
 
-	got, err := mgr.TestGet("auth-1")
+	got, err := mgr.TestGet(context.Background(), "auth-1")
 	require.NoError(t, err)
 	assert.Equal(t, "user2@test", got.Gpsi)
 	assert.Equal(t, 1, mgr.TestSize()) // still 1, not 2
@@ -481,10 +485,12 @@ func TestSessionManagerUpdate(t *testing.T) {
 func TestSessionManagerDelete(t *testing.T) {
 	mgr := NewTestSessionManager(10 * time.Minute)
 	session := NewTestSession("auth-del", "user@test")
-	mgr.TestPut(session)
+	err := mgr.TestPut(context.Background(), session)
+	require.NoError(t, err)
 
-	mgr.delete("auth-del")
-	_, err := mgr.TestGet("auth-del")
+	err = mgr.delete(context.Background(), "auth-del")
+	require.NoError(t, err)
+	_, err = mgr.TestGet(context.Background(), "auth-del")
 	assert.ErrorIs(t, err, ErrSessionNotFound)
 	assert.Equal(t, 0, mgr.TestSize())
 }
@@ -493,15 +499,16 @@ func TestSessionManagerExpired(t *testing.T) {
 	mgr := NewTestSessionManager(100 * time.Millisecond) // 100ms TTL
 
 	session := NewTestSession("auth-1", "user@example.com")
-	mgr.TestPut(session)
+	err := mgr.TestPut(context.Background(), session)
+	require.NoError(t, err)
 
 	// Should exist initially.
-	_, err := mgr.TestGet("auth-1")
+	_, err = mgr.TestGet(context.Background(), "auth-1")
 	assert.NoError(t, err)
 
 	// Wait for expiry (200ms > 100ms TTL).
 	time.Sleep(200 * time.Millisecond)
-	_, err = mgr.TestGet("auth-1")
+	_, err = mgr.TestGet(context.Background(), "auth-1")
 	assert.ErrorIs(t, err, ErrSessionNotFound)
 }
 
@@ -511,13 +518,13 @@ func TestSessionManagerCleanup(t *testing.T) {
 	// Each session uses a different authCtxID so they don't overwrite each other.
 	for i := 0; i < 5; i++ {
 		session := NewTestSession(fmt.Sprintf("auth-expire-%d", i), "user@test")
-		mgr.TestPut(session)
+		_ = mgr.TestPut(context.Background(), session)
 		time.Sleep(200 * time.Millisecond) // each is older than previous
 	}
 
 	// Put a fresh one.
 	fresh := NewTestSession("auth-fresh", "user@test")
-	mgr.TestPut(fresh)
+	_ = mgr.TestPut(context.Background(), fresh)
 
 	// All 5 expired sessions should be cleaned; fresh one remains.
 	count := mgr.cleanup()

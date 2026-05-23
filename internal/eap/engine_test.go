@@ -119,7 +119,7 @@ func TestNewEngine(t *testing.T) {
 
 	engine := NewEngine(cfg, mock, logger)
 	assert.NotNil(t, engine)
-	assert.NotNil(t, engine.sessionManager)
+	assert.NotNil(t, engine.sessions)
 	assert.NotNil(t, engine.fragmentMgr)
 }
 
@@ -165,7 +165,7 @@ func TestStartSession(t *testing.T) {
 	mock := newMockAAAClient()
 	engine := NewEngine(DefaultConfig(), mock, logger)
 
-	session, err := engine.StartSession("auth-001", "user@example.com")
+	session, err := engine.StartSession(context.Background(), "auth-001", "user@example.com")
 	require.NoError(t, err)
 	assert.NotNil(t, session)
 	assert.Equal(t, "auth-001", session.AuthCtxID)
@@ -186,7 +186,7 @@ func TestStartSessionWithCustomConfig(t *testing.T) {
 	}
 	engine := NewEngine(cfg, mock, logger)
 
-	session, err := engine.StartSession("auth-002", "user2@test")
+	session, err := engine.StartSession(context.Background(), "auth-002", "user2@test")
 	require.NoError(t, err)
 	assert.Equal(t, 10, session.MaxRounds)
 	assert.Equal(t, 5*time.Second, session.Timeout)
@@ -197,7 +197,7 @@ func TestStartSessionEmptyAuthCtxId(t *testing.T) {
 	mock := newMockAAAClient()
 	engine := NewEngine(DefaultConfig(), mock, logger)
 
-	session, err := engine.StartSession("", "user@test")
+	session, err := engine.StartSession(context.Background(), "", "user@test")
 	assert.Nil(t, session)
 	assert.ErrorIs(t, err, ErrMissingAuthCtxID)
 }
@@ -211,10 +211,10 @@ func TestGetSession(t *testing.T) {
 	mock := newMockAAAClient()
 	engine := NewEngine(DefaultConfig(), mock, logger)
 
-	created, err := engine.StartSession("auth-get", "user@test")
+	created, err := engine.StartSession(context.Background(), "auth-get", "user@test")
 	require.NoError(t, err)
 
-	got, err := engine.GetSession("auth-get")
+	got, err := engine.GetSession(context.Background(), "auth-get")
 	require.NoError(t, err)
 	assert.Equal(t, created, got)
 }
@@ -224,7 +224,7 @@ func TestGetSessionNotFound(t *testing.T) {
 	mock := newMockAAAClient()
 	engine := NewEngine(DefaultConfig(), mock, logger)
 
-	_, err := engine.GetSession("nonexistent")
+	_, err := engine.GetSession(context.Background(), "nonexistent")
 	assert.ErrorIs(t, err, ErrSessionNotFound)
 }
 
@@ -238,7 +238,7 @@ func TestProcessFirstResponse(t *testing.T) {
 	engine := NewEngine(DefaultConfig(), mock, logger)
 
 	// First: start session.
-	_, err := engine.StartSession("auth-proc", "user@test")
+	_, err := engine.StartSession(context.Background(), "auth-proc", "user@test")
 	require.NoError(t, err)
 
 	// Build EAP-Response/Identity from AMF.
@@ -280,7 +280,7 @@ func TestProcessSessionTimeout(t *testing.T) {
 	}
 	engine := NewEngine(cfg, mock, logger)
 
-	_, err := engine.StartSession("auth-timeout", "user@test")
+	_, err := engine.StartSession(context.Background(), "auth-timeout", "user@test")
 	require.NoError(t, err)
 
 	// Wait for idle timeout.
@@ -301,7 +301,7 @@ func TestProcessRetry(t *testing.T) {
 	mock := newMockAAAClient()
 	engine := NewEngine(DefaultConfig(), mock, logger)
 
-	_, err := engine.StartSession("auth-retry", "user@test")
+	_, err := engine.StartSession(context.Background(), "auth-retry", "user@test")
 	require.NoError(t, err)
 
 	eapResp := BuildResponse(1, MethodIdentity, []byte("user@test"))
@@ -328,7 +328,7 @@ func TestProcessEAPSuccess(t *testing.T) {
 	mock := newMockAAAClient()
 	engine := NewEngine(DefaultConfig(), mock, logger)
 
-	_, err := engine.StartSession("auth-success", "user@test")
+	_, err := engine.StartSession(context.Background(), "auth-success", "user@test")
 	require.NoError(t, err)
 
 	// Set up: first response triggers a second exchange, second response is Success.
@@ -355,7 +355,7 @@ func TestProcessEAPFailure(t *testing.T) {
 	mock := newMockAAAClient()
 	engine := NewEngine(DefaultConfig(), mock, logger)
 
-	_, err := engine.StartSession("auth-fail", "user@test")
+	_, err := engine.StartSession(context.Background(), "auth-fail", "user@test")
 	require.NoError(t, err)
 
 	// AAA returns EAP-Failure packet. The engine forwards it to AMF.
@@ -387,7 +387,7 @@ func TestProcessAAAError(t *testing.T) {
 	mock := newMockAAAClient()
 	engine := NewEngine(DefaultConfig(), mock, logger)
 
-	_, err := engine.StartSession("auth-aaa-err", "user@test")
+	_, err := engine.StartSession(context.Background(), "auth-aaa-err", "user@test")
 	require.NoError(t, err)
 
 	// Configure AAA to fail on next call.
@@ -404,7 +404,7 @@ func TestProcessNilResponseFromAAA(t *testing.T) {
 	mock := newMockAAAClient()
 	engine := NewEngine(DefaultConfig(), mock, logger)
 
-	_, err := engine.StartSession("auth-nil-resp", "user@test")
+	_, err := engine.StartSession(context.Background(), "auth-nil-resp", "user@test")
 	require.NoError(t, err)
 
 	// Set AAA to return a nil response.
@@ -427,7 +427,7 @@ func TestProcessContextCancelled(t *testing.T) {
 
 	engine := NewEngine(DefaultConfig(), mock, logger)
 
-	_, err := engine.StartSession("auth-cancel", "user@test")
+	_, err := engine.StartSession(context.Background(), "auth-cancel", "user@test")
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
@@ -447,7 +447,7 @@ func TestProcessParseError(t *testing.T) {
 	mock := newMockAAAClient()
 	engine := NewEngine(DefaultConfig(), mock, logger)
 
-	_, err := engine.StartSession("auth-parse-err", "user@test")
+	_, err := engine.StartSession(context.Background(), "auth-parse-err", "user@test")
 	require.NoError(t, err)
 
 	// Invalid EAP packet (too short).
@@ -466,7 +466,7 @@ func TestProcessMaxRoundsExceeded(t *testing.T) {
 	cfg := Config{MaxRounds: 3}
 	engine := NewEngine(cfg, mock, logger)
 
-	_, err := engine.StartSession("auth-max-rounds", "user@test")
+	_, err := engine.StartSession(context.Background(), "auth-max-rounds", "user@test")
 	require.NoError(t, err)
 
 	// Keep sending responses until max rounds.
@@ -476,7 +476,7 @@ func TestProcessMaxRoundsExceeded(t *testing.T) {
 	}
 
 	// After max rounds, session should be failed.
-	session, err := engine.GetSession("auth-max-rounds")
+	session, err := engine.GetSession(context.Background(), "auth-max-rounds")
 	require.NoError(t, err)
 	assert.Equal(t, SessionStateFailed, session.State)
 }
@@ -490,7 +490,7 @@ func TestProcessIdMismatch(t *testing.T) {
 	mock := newMockAAAClient()
 	engine := NewEngine(DefaultConfig(), mock, logger)
 
-	_, err := engine.StartSession("auth-id-mismatch", "user@test")
+	_, err := engine.StartSession(context.Background(), "auth-id-mismatch", "user@test")
 	require.NoError(t, err)
 
 	// First response sets ExpectedId=2.
@@ -513,7 +513,7 @@ func TestProcessDoneSession(t *testing.T) {
 	mock := newMockAAAClient()
 	engine := NewEngine(DefaultConfig(), mock, logger)
 
-	session, err := engine.StartSession("auth-done", "user@test")
+	session, err := engine.StartSession(context.Background(), "auth-done", "user@test")
 	require.NoError(t, err)
 	session.MarkDone()
 
@@ -527,7 +527,7 @@ func TestProcessFailedSession(t *testing.T) {
 	mock := newMockAAAClient()
 	engine := NewEngine(DefaultConfig(), mock, logger)
 
-	session, err := engine.StartSession("auth-failed", "user@test")
+	session, err := engine.StartSession(context.Background(), "auth-failed", "user@test")
 	require.NoError(t, err)
 	session.MarkFailed()
 
@@ -545,12 +545,13 @@ func TestDeleteSession(t *testing.T) {
 	mock := newMockAAAClient()
 	engine := NewEngine(DefaultConfig(), mock, logger)
 
-	_, err := engine.StartSession("auth-del", "user@test")
+	_, err := engine.StartSession(context.Background(), "auth-del", "user@test")
 	require.NoError(t, err)
 
-	engine.DeleteSession("auth-del")
+	err = engine.DeleteSession(context.Background(), "auth-del")
+	require.NoError(t, err)
 
-	_, err = engine.GetSession("auth-del")
+	_, err = engine.GetSession(context.Background(), "auth-del")
 	assert.ErrorIs(t, err, ErrSessionNotFound)
 }
 
@@ -559,8 +560,9 @@ func TestDeleteSessionNotFound(t *testing.T) {
 	mock := newMockAAAClient()
 	engine := NewEngine(DefaultConfig(), mock, logger)
 
-	// Should not panic.
-	engine.DeleteSession("nonexistent")
+	// Should not error on non-existent session.
+	err := engine.DeleteSession(context.Background(), "nonexistent")
+	require.NoError(t, err)
 }
 
 // ---------------------------------------------------------------------------
@@ -579,7 +581,7 @@ func TestEngineStats(t *testing.T) {
 	assert.Equal(t, 30, stats.RoundTimeoutSecs)
 
 	// Start a session.
-	_, _ = engine.StartSession("auth-stats", "user@test")
+	_, _ = engine.StartSession(context.Background(), "auth-stats", "user@test")
 	stats = engine.Stats()
 	assert.Equal(t, 1, stats.ActiveSessions)
 }
@@ -590,15 +592,11 @@ func TestEngineStats(t *testing.T) {
 
 func TestSessionManagerStats(t *testing.T) {
 	mgr := newSessionManager(5 * time.Minute)
-	stats := mgr.stats()
+	assert.Equal(t, 0, mgr.Size())
 
-	assert.Equal(t, 0, stats.ActiveSessions)
-	assert.Equal(t, 5*time.Minute, stats.TTL)
-
-	mgr.put(NewSession("auth-1", "user1@test"))
-	mgr.put(NewSession("auth-2", "user2@test"))
-	stats = mgr.stats()
-	assert.Equal(t, 2, stats.ActiveSessions)
+	_ = mgr.put(context.Background(), NewSession("auth-1", "user1@test"))
+	_ = mgr.put(context.Background(), NewSession("auth-2", "user2@test"))
+	assert.Equal(t, 2, mgr.Size())
 }
 
 // ---------------------------------------------------------------------------
