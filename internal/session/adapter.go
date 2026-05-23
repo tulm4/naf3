@@ -22,8 +22,8 @@ func NewNSSAAStoreAdapter(store SessionStore) *NSSAAStoreAdapter {
 }
 
 // Load implements nssaa.AuthCtxStore.
-func (a *NSSAAStoreAdapter) Load(_ context.Context, id string) (*nssaa.AuthCtx, error) {
-	s, err := a.store.Load(context.Background(), id)
+func (a *NSSAAStoreAdapter) Load(ctx context.Context, id string) (*nssaa.AuthCtx, error) {
+	s, err := a.store.Load(ctx, id)
 	if err != nil {
 		if errors.Is(err, ErrSessionNotFound) {
 			return nil, nssaa.ErrNotFound
@@ -37,9 +37,9 @@ func (a *NSSAAStoreAdapter) Load(_ context.Context, id string) (*nssaa.AuthCtx, 
 }
 
 // Save implements nssaa.AuthCtxStore.
-func (a *NSSAAStoreAdapter) Save(_ context.Context, ctx *nssaa.AuthCtx) error {
-	s := AuthCtxToNSSASession(ctx)
-	err := a.store.Save(context.Background(), s)
+func (a *NSSAAStoreAdapter) Save(ctx context.Context, authCtx *nssaa.AuthCtx) error {
+	s := AuthCtxToNSSASession(authCtx)
+	err := a.store.Save(ctx, s)
 	if err != nil {
 		return fmt.Errorf("nssaa store save: %w", err)
 	}
@@ -47,8 +47,8 @@ func (a *NSSAAStoreAdapter) Save(_ context.Context, ctx *nssaa.AuthCtx) error {
 }
 
 // Delete implements nssaa.AuthCtxStore.
-func (a *NSSAAStoreAdapter) Delete(_ context.Context, id string) error {
-	return a.store.Delete(context.Background(), id)
+func (a *NSSAAStoreAdapter) Delete(ctx context.Context, id string) error {
+	return a.store.Delete(ctx, id)
 }
 
 // Close implements nssaa.AuthCtxStore.
@@ -67,8 +67,8 @@ func NewNSSAAStoreAdapterAIW(store SessionStore) *NSSAAStoreAdapterAIW {
 }
 
 // Load implements aiw.AuthCtxStore.
-func (a *NSSAAStoreAdapterAIW) Load(id string) (*aiw.AuthContext, error) {
-	s, err := a.store.Load(context.Background(), id)
+func (a *NSSAAStoreAdapterAIW) Load(ctx context.Context, id string) (*aiw.AuthContext, error) {
+	s, err := a.store.Load(ctx, id)
 	if err != nil {
 		if errors.Is(err, ErrSessionNotFound) {
 			return nil, aiw.ErrNotFound
@@ -82,9 +82,9 @@ func (a *NSSAAStoreAdapterAIW) Load(id string) (*aiw.AuthContext, error) {
 }
 
 // Save implements aiw.AuthCtxStore.
-func (a *NSSAAStoreAdapterAIW) Save(ctx *aiw.AuthContext) error {
-	s := AuthCtxToAIWSession(ctx)
-	err := a.store.Save(context.Background(), s)
+func (a *NSSAAStoreAdapterAIW) Save(ctx context.Context, authCtx *aiw.AuthContext) error {
+	s := AuthCtxToAIWSession(authCtx)
+	err := a.store.Save(ctx, s)
 	if err != nil {
 		return fmt.Errorf("aiw store save: %w", err)
 	}
@@ -92,8 +92,8 @@ func (a *NSSAAStoreAdapterAIW) Save(ctx *aiw.AuthContext) error {
 }
 
 // Delete implements aiw.AuthCtxStore.
-func (a *NSSAAStoreAdapterAIW) Delete(id string) error {
-	return a.store.Delete(context.Background(), id)
+func (a *NSSAAStoreAdapterAIW) Delete(ctx context.Context, id string) error {
+	return a.store.Delete(ctx, id)
 }
 
 // Close implements aiw.AuthCtxStore.

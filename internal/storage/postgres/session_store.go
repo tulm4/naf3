@@ -106,8 +106,8 @@ func NewAIWSessionStore(pool *Pool, enc *encryptor) *AIWStore {
 }
 
 // Load retrieves an AIW authentication context by authCtxID.
-func (s *AIWStore) Load(id string) (*aiw.AuthContext, error) {
-	session, err := s.repo.GetByAuthCtxID(context.Background(), id)
+func (s *AIWStore) Load(ctx context.Context, id string) (*aiw.AuthContext, error) {
+	session, err := s.repo.GetByAuthCtxID(ctx, id)
 	if err != nil {
 		if errors.Is(err, ErrSessionNotFound) {
 			return nil, aiw.ErrNotFound
@@ -118,18 +118,18 @@ func (s *AIWStore) Load(id string) (*aiw.AuthContext, error) {
 }
 
 // Save stores or updates an AIW authentication context.
-func (s *AIWStore) Save(ctx *aiw.AuthContext) error {
-	session := authCtxToAIWSession(ctx)
-	err := s.repo.Update(context.Background(), session)
+func (s *AIWStore) Save(ctx context.Context, authCtx *aiw.AuthContext) error {
+	session := authCtxToAIWSession(authCtx)
+	err := s.repo.Update(ctx, session)
 	if errors.Is(err, ErrSessionNotFound) {
-		return s.repo.Create(context.Background(), session)
+		return s.repo.Create(ctx, session)
 	}
 	return err
 }
 
 // Delete removes an AIW authentication context by authCtxID.
-func (s *AIWStore) Delete(id string) error {
-	return s.repo.Delete(context.Background(), id)
+func (s *AIWStore) Delete(ctx context.Context, id string) error {
+	return s.repo.Delete(ctx, id)
 }
 
 // Close is a no-op.

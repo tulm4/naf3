@@ -63,9 +63,9 @@ type AuthContext struct {
 // AuthCtxStore manages AIW authentication contexts.
 // Phase 3 replaces InMemoryStore with Redis-backed implementation.
 type AuthCtxStore interface {
-	Load(id string) (*AuthContext, error)
-	Save(ctx *AuthContext) error
-	Delete(id string) error
+	Load(ctx context.Context, id string) (*AuthContext, error)
+	Save(ctx context.Context, authCtx *AuthContext) error
+	Delete(ctx context.Context, id string) error
 	Close() error
 }
 
@@ -92,7 +92,7 @@ func NewInMemoryStore() *InMemoryStore {
 }
 
 // Load implements AuthCtxStore.
-func (s *InMemoryStore) Load(id string) (*AuthContext, error) {
+func (s *InMemoryStore) Load(_ context.Context, id string) (*AuthContext, error) {
 	if ctx, ok := s.data[id]; ok {
 		return ctx, nil
 	}
@@ -100,13 +100,13 @@ func (s *InMemoryStore) Load(id string) (*AuthContext, error) {
 }
 
 // Save implements AuthCtxStore.
-func (s *InMemoryStore) Save(ctx *AuthContext) error {
+func (s *InMemoryStore) Save(_ context.Context, ctx *AuthContext) error {
 	s.data[ctx.AuthCtxID] = ctx
 	return nil
 }
 
 // Delete implements AuthCtxStore.
-func (s *InMemoryStore) Delete(id string) error {
+func (s *InMemoryStore) Delete(_ context.Context, id string) error {
 	delete(s.data, id)
 	return nil
 }
@@ -202,7 +202,7 @@ func (h *Handler) CreateAuthenticationContext(w http.ResponseWriter, r *http.Req
 		Status:     "PENDING", // Initial AIW session state per TS 29.526 §7.3
 	}
 
-	if err := h.store.Save(authCtx); err != nil {
+	if err := h.store.Save(r.Context(), authCtx); err != nil {
 		common.WriteProblem(w, common.InternalServerProblem(
 			fmt.Sprintf("failed to create auth context: %s", err)))
 		return
@@ -262,7 +262,7 @@ func (h *Handler) ConfirmAuthentication(w http.ResponseWriter, r *http.Request, 
 
 	// Note: eapMessage is []byte alias in generated types, so JSON auto-decodes base64.
 
-	authCtx, err := h.store.Load(authCtxId)
+	authCtx, err := h.store.Load(r.Context(), authCtxId)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			common.WriteProblem(w, common.NotFoundProblem(
@@ -282,7 +282,7 @@ func (h *Handler) ConfirmAuthentication(w http.ResponseWriter, r *http.Request, 
 
 	// Store the Phase 2 EAP payload so it survives across round-trips.
 	authCtx.EapPayload = eapPayloadFromPtr(body.EapMessage)
-	if err := h.store.Save(authCtx); err != nil {
+	if err := h.store.Save(r.Context(), authCtx); err != nil {
 		common.WriteProblem(w, common.InternalServerProblem(
 			fmt.Sprintf("failed to update auth context: %s", err)))
 		return

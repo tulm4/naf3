@@ -1,6 +1,7 @@
 package aiw
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -26,7 +27,7 @@ func newMockStore() *mockStore {
 	return &mockStore{data: make(map[string]*AuthContext)}
 }
 
-func (m *mockStore) Load(id string) (*AuthContext, error) {
+func (m *mockStore) Load(_ context.Context, id string) (*AuthContext, error) {
 	if m.loadErr != nil {
 		return nil, m.loadErr
 	}
@@ -36,7 +37,7 @@ func (m *mockStore) Load(id string) (*AuthContext, error) {
 	return nil, ErrNotFound
 }
 
-func (m *mockStore) Save(ctx *AuthContext) error {
+func (m *mockStore) Save(_ context.Context, ctx *AuthContext) error {
 	if m.saveErr != nil {
 		return m.saveErr
 	}
@@ -44,7 +45,7 @@ func (m *mockStore) Save(ctx *AuthContext) error {
 	return nil
 }
 
-func (m *mockStore) Delete(id string) error {
+func (m *mockStore) Delete(_ context.Context, id string) error {
 	if m.deleteErr != nil {
 		return m.deleteErr
 	}
@@ -327,22 +328,23 @@ func TestConfirmAuthentication_InvalidJSON(t *testing.T) {
 // ─── InMemoryStore tests ───────────────────────────────────────────────────
 
 func TestInMemoryStore(t *testing.T) {
+	ctx := context.Background()
 	store := NewInMemoryStore()
 
-	ctx := &AuthContext{AuthCtxID: "id-001", Supi: "imsi-208046000000001"}
-	err := store.Save(ctx)
+	authCtx := &AuthContext{AuthCtxID: "id-001", Supi: "imsi-208046000000001"}
+	err := store.Save(ctx, authCtx)
 	require.NoError(t, err)
 
-	loaded, err := store.Load("id-001")
+	loaded, err := store.Load(ctx, "id-001")
 	require.NoError(t, err)
 	assert.Equal(t, "imsi-208046000000001", loaded.Supi)
 
-	_, err = store.Load("nonexistent")
+	_, err = store.Load(ctx, "nonexistent")
 	assert.ErrorIs(t, err, ErrNotFound)
 
-	err = store.Delete("id-001")
+	err = store.Delete(ctx, "id-001")
 	require.NoError(t, err)
-	_, err = store.Load("id-001")
+	_, err = store.Load(ctx, "id-001")
 	assert.ErrorIs(t, err, ErrNotFound)
 
 	assert.NoError(t, store.Close())
