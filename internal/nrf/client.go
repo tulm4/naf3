@@ -42,14 +42,26 @@ type cacheEntry struct {
 	expiresAt time.Time
 }
 
-func (c *NRFDiscoveryCache) Get(key string) (interface{}, bool) {
+// Get retrieves a cached value by key.
+// If allowStale is true, returns cached data even if expired (graceful degradation).
+func (c *NRFDiscoveryCache) Get(key string, allowStale bool) (interface{}, bool) {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
 	entry, ok := c.cache[key]
-	if !ok || time.Now().After(entry.expiresAt) {
+	c.mu.RUnlock()
+
+	if !ok {
 		return nil, false
 	}
-	return entry.data, true
+
+	if time.Now().Before(entry.expiresAt) {
+		return entry.data, true
+	}
+
+	if allowStale {
+		return entry.data, true
+	}
+
+	return nil, false
 }
 
 func (c *NRFDiscoveryCache) Set(key string, data interface{}) {
@@ -76,6 +88,10 @@ type NFProfile struct {
 
 // NewClient creates a new NRF client.
 func NewClient(cfg config.NRFConfig) *Client {
+	cacheTTL := cfg.CacheTTL
+	if cacheTTL == 0 {
+		cacheTTL = 5 * time.Minute
+	}
 	return &Client{
 		baseURL: cfg.BaseURL,
 		httpClient: &http.Client{
@@ -84,7 +100,7 @@ func NewClient(cfg config.NRFConfig) *Client {
 		},
 		nfInstanceID: fmt.Sprintf("nssAAF-instance-%d", time.Now().UnixNano()),
 		cache: &NRFDiscoveryCache{
-			ttl: 5 * time.Minute,
+			ttl: cacheTTL,
 		},
 	}
 }
@@ -208,7 +224,7 @@ func (c *Client) StartHeartbeat(ctx context.Context) {
 // REQ-03 / docs/design/05_nf_profile.md §3.2.
 func (c *Client) DiscoverUDM(ctx context.Context, plmnID string) (string, error) {
 	key := fmt.Sprintf("udm:uem:%s", plmnID)
-	if endpoint, ok := c.cache.Get(key); ok {
+	if endpoint, ok := c.cache.Get(key, true); ok {
 		return endpoint.(string), nil
 	}
 	// NRF discovery query
@@ -255,7 +271,7 @@ func (c *Client) DiscoverUDM(ctx context.Context, plmnID string) (string, error)
 // REQ-03 / docs/design/05_nf_profile.md §3.1.
 func (c *Client) DiscoverAMF(ctx context.Context, amfID string) (string, error) {
 	key := fmt.Sprintf("amf:%s", amfID)
-	if endpoint, ok := c.cache.Get(key); ok {
+	if endpoint, ok := c.cache.Get(key, true); ok {
 		return endpoint.(string), nil
 	}
 	url := fmt.Sprintf("%s/nnrf-disc/v1/nf-instances/%s", c.baseURL, amfID)

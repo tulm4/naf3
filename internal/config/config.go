@@ -212,6 +212,7 @@ type MetricsConfig struct {
 type NRFConfig struct {
 	BaseURL         string        `yaml:"baseURL"`
 	DiscoverTimeout time.Duration `yaml:"discoverTimeout"`
+	CacheTTL        time.Duration `yaml:"cacheTtl"` // Default: 5m
 }
 
 // UDMConfig holds UDM API settings.
@@ -493,6 +494,11 @@ func applyDefaults(cfg *Config) {
 			cfg.AAAgw.DiameterHost = "nssaa-gw.operator.com"
 		}
 		// RADIUS client config defaults — no required fields (disabled if RadiusServerAddress empty)
+	}
+
+	// NRF cache TTL default (Phase 4 — NF Integration)
+	if cfg.NRF.CacheTTL == 0 {
+		cfg.NRF.CacheTTL = 5 * time.Minute
 	}
 
 	// AUSF defaults (Phase 4 — N60 interface integration)

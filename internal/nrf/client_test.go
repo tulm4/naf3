@@ -187,7 +187,7 @@ func TestClient_DiscoverUDM_CacheMiss(t *testing.T) {
 	assert.Equal(t, "http://192.168.1.100:8080", endpoint)
 
 	// Verify it's cached
-	cached, ok := client.cache.Get("udm:uem:00101")
+	cached, ok := client.cache.Get("udm:uem:00101", false)
 	assert.True(t, ok)
 	assert.Equal(t, endpoint, cached.(string))
 }
@@ -306,12 +306,12 @@ func TestNRFDiscoveryCache_GetSet(t *testing.T) {
 	cache := &NRFDiscoveryCache{ttl: 5 * time.Minute}
 
 	// Test empty cache
-	_, ok := cache.Get("key1")
+	_, ok := cache.Get("key1", false)
 	assert.False(t, ok)
 
 	// Set and get
 	cache.Set("key1", "value1")
-	val, ok := cache.Get("key1")
+	val, ok := cache.Get("key1", false)
 	assert.True(t, ok)
 	assert.Equal(t, "value1", val)
 }
@@ -322,15 +322,33 @@ func TestNRFDiscoveryCache_TTL(t *testing.T) {
 	cache.Set("key1", "value1")
 
 	// Should be available immediately
-	val, ok := cache.Get("key1")
+	val, ok := cache.Get("key1", false)
 	assert.True(t, ok)
 	assert.Equal(t, "value1", val)
 
 	// Wait for expiration
 	time.Sleep(100 * time.Millisecond)
 
-	_, ok = cache.Get("key1")
+	_, ok = cache.Get("key1", false)
 	assert.False(t, ok)
+}
+
+func TestNRFDiscoveryCache_StaleOk(t *testing.T) {
+	cache := &NRFDiscoveryCache{ttl: 50 * time.Millisecond}
+
+	cache.Set("key1", "value1")
+
+	// Wait for expiration
+	time.Sleep(100 * time.Millisecond)
+
+	// Without stale-ok, should return false
+	_, ok := cache.Get("key1", false)
+	assert.False(t, ok)
+
+	// With stale-ok, should return true
+	val, ok := cache.Get("key1", true)
+	assert.True(t, ok)
+	assert.Equal(t, "value1", val)
 }
 
 func TestClient_RegisterAsync_ReturnsImmediately(t *testing.T) {
