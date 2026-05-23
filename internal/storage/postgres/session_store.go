@@ -26,7 +26,7 @@ func NewSessionStore(pool *Pool, enc *encryptor) *Store {
 }
 
 // Load retrieves a slice authentication context by authCtxID.
-func (s *Store) Load(id string) (*nssaa.AuthCtx, error) {
+func (s *Store) Load(_ context.Context, id string) (*nssaa.AuthCtx, error) {
 	session, err := s.repo.GetByAuthCtxID(context.Background(), id)
 	if err != nil {
 		if errors.Is(err, ErrSessionNotFound) {
@@ -40,7 +40,7 @@ func (s *Store) Load(id string) (*nssaa.AuthCtx, error) {
 // Save stores or updates a slice authentication context.
 // If the session does not exist (Update returns ErrSessionNotFound),
 // Create is called to insert it first.
-func (s *Store) Save(ctx *nssaa.AuthCtx) error {
+func (s *Store) Save(_ context.Context, ctx *nssaa.AuthCtx) error {
 	session := authCtxToSession(ctx)
 	err := s.repo.Update(context.Background(), session)
 	if errors.Is(err, ErrSessionNotFound) {
@@ -50,7 +50,7 @@ func (s *Store) Save(ctx *nssaa.AuthCtx) error {
 }
 
 // Delete removes a slice authentication context by authCtxID.
-func (s *Store) Delete(id string) error {
+func (s *Store) Delete(_ context.Context, id string) error {
 	return s.repo.Delete(context.Background(), id)
 }
 

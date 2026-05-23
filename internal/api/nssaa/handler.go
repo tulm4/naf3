@@ -7,6 +7,7 @@
 package nssaa
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -41,51 +42,14 @@ type AuthCtx struct {
 // AuthCtxStore manages slice authentication contexts.
 // Phase 3 replaces InMemoryStore with Redis-backed implementation.
 type AuthCtxStore interface {
-	Load(id string) (*AuthCtx, error)
-	Save(ctx *AuthCtx) error
-	Delete(id string) error
+	Load(ctx context.Context, id string) (*AuthCtx, error)
+	Save(ctx context.Context, authCtx *AuthCtx) error
+	Delete(ctx context.Context, id string) error
 	Close() error
 }
 
 // ErrNotFound is returned when an authentication context is not found.
 var ErrNotFound = errors.New("auth context not found")
-
-// InMemoryStore is a simple in-memory implementation of AuthCtxStore.
-// Phase 3 replaces this with Redis-based storage.
-type InMemoryStore struct {
-	data map[string]*AuthCtx
-}
-
-// NewInMemoryStore creates a new in-memory store.
-func NewInMemoryStore() *InMemoryStore {
-	return &InMemoryStore{data: make(map[string]*AuthCtx)}
-}
-
-// Load implements AuthCtxStore.
-func (s *InMemoryStore) Load(id string) (*AuthCtx, error) {
-	if ctx, ok := s.data[id]; ok {
-		return ctx, nil
-	}
-	return nil, ErrNotFound
-}
-
-// Save implements AuthCtxStore.
-func (s *InMemoryStore) Save(ctx *AuthCtx) error {
-	s.data[ctx.AuthCtxID] = ctx
-	return nil
-}
-
-// Delete implements AuthCtxStore.
-func (s *InMemoryStore) Delete(id string) error {
-	delete(s.data, id)
-	return nil
-}
-
-// Close implements io.Closer. No-op for in-memory store, but required for
-// API consistency when Phase 3 swaps this with a Redis-backed store.
-func (s *InMemoryStore) Close() error {
-	return nil
-}
 
 // Handler implements nssaanats.ServerInterface.
 // It receives HTTP requests validated by the oapi-codegen router and
@@ -222,7 +186,7 @@ func (h *Handler) CreateSliceAuthenticationContext(w http.ResponseWriter, r *htt
 		EapPayload:  []byte(*body.EapIdRsp),
 	}
 
-	if err := h.store.Save(authCtx); err != nil {
+	if err := h.store.Save(r.Context(), authCtx); err != nil {
 		common.WriteProblem(w, common.InternalServerProblem(
 			fmt.Sprintf("failed to create auth context: %s", err)))
 		return
@@ -301,7 +265,7 @@ func (h *Handler) ConfirmSliceAuthentication(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	authCtx, err := h.store.Load(authCtxId)
+	authCtx, err := h.store.Load(r.Context(), authCtxId)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			common.WriteProblem(w, common.NotFoundProblem(
@@ -331,7 +295,7 @@ func (h *Handler) ConfirmSliceAuthentication(w http.ResponseWriter, r *http.Requ
 
 	// Store the Phase 2 EAP payload so it survives across round-trips.
 	authCtx.EapPayload = eapPayload
-	if err := h.store.Save(authCtx); err != nil {
+	if err := h.store.Save(r.Context(), authCtx); err != nil {
 		common.WriteProblem(w, common.InternalServerProblem(
 			fmt.Sprintf("failed to update auth context: %s", err)))
 		return

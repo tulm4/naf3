@@ -3,6 +3,7 @@
 package conformance
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -33,7 +34,7 @@ func newNssaaMockStore() *nssaaMockStore {
 	return &nssaaMockStore{data: make(map[string]*nssaa.AuthCtx)}
 }
 
-func (s *nssaaMockStore) Load(id string) (*nssaa.AuthCtx, error) {
+func (s *nssaaMockStore) Load(_ context.Context, id string) (*nssaa.AuthCtx, error) {
 	if s.loadErr != nil {
 		return nil, s.loadErr
 	}
@@ -43,7 +44,7 @@ func (s *nssaaMockStore) Load(id string) (*nssaa.AuthCtx, error) {
 	return nil, nssaa.ErrNotFound
 }
 
-func (s *nssaaMockStore) Save(ctx *nssaa.AuthCtx) error {
+func (s *nssaaMockStore) Save(_ context.Context, ctx *nssaa.AuthCtx) error {
 	if s.saveErr != nil {
 		return s.saveErr
 	}
@@ -51,7 +52,7 @@ func (s *nssaaMockStore) Save(ctx *nssaa.AuthCtx) error {
 	return nil
 }
 
-func (s *nssaaMockStore) Delete(id string) error {
+func (s *nssaaMockStore) Delete(_ context.Context, id string) error {
 	if s.delErr != nil {
 		return s.delErr
 	}

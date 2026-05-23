@@ -1,6 +1,7 @@
 package nssaa
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -26,7 +27,7 @@ func newMockStore() *mockStore {
 	return &mockStore{data: make(map[string]*AuthCtx)}
 }
 
-func (m *mockStore) Load(id string) (*AuthCtx, error) {
+func (m *mockStore) Load(_ context.Context, id string) (*AuthCtx, error) {
 	if m.loadErr != nil {
 		return nil, m.loadErr
 	}
@@ -36,7 +37,7 @@ func (m *mockStore) Load(id string) (*AuthCtx, error) {
 	return nil, ErrNotFound
 }
 
-func (m *mockStore) Save(ctx *AuthCtx) error {
+func (m *mockStore) Save(_ context.Context, ctx *AuthCtx) error {
 	if m.saveErr != nil {
 		return m.saveErr
 	}
@@ -44,7 +45,7 @@ func (m *mockStore) Save(ctx *AuthCtx) error {
 	return nil
 }
 
-func (m *mockStore) Delete(id string) error {
+func (m *mockStore) Delete(_ context.Context, id string) error {
 	if m.deleteErr != nil {
 		return m.deleteErr
 	}
@@ -53,6 +54,42 @@ func (m *mockStore) Delete(id string) error {
 }
 
 func (m *mockStore) Close() error {
+	return nil
+}
+
+// InMemoryStore is a simple in-memory implementation of AuthCtxStore.
+// Used for testing. Phase 3 replaces this with Redis-based storage.
+type InMemoryStore struct {
+	data map[string]*AuthCtx
+}
+
+// NewInMemoryStore creates a new in-memory store.
+func NewInMemoryStore() *InMemoryStore {
+	return &InMemoryStore{data: make(map[string]*AuthCtx)}
+}
+
+// Load implements AuthCtxStore.
+func (s *InMemoryStore) Load(_ context.Context, id string) (*AuthCtx, error) {
+	if ctx, ok := s.data[id]; ok {
+		return ctx, nil
+	}
+	return nil, ErrNotFound
+}
+
+// Save implements AuthCtxStore.
+func (s *InMemoryStore) Save(_ context.Context, ctx *AuthCtx) error {
+	s.data[ctx.AuthCtxID] = ctx
+	return nil
+}
+
+// Delete implements AuthCtxStore.
+func (s *InMemoryStore) Delete(_ context.Context, id string) error {
+	delete(s.data, id)
+	return nil
+}
+
+// Close implements io.Closer. No-op for in-memory store.
+func (s *InMemoryStore) Close() error {
 	return nil
 }
 
@@ -415,17 +452,17 @@ func TestInMemoryStore(t *testing.T) {
 	store := NewInMemoryStore()
 
 	ctx := &AuthCtx{AuthCtxID: "id-001", GPSI: "520804600000001"}
-	require.NoError(t, store.Save(ctx))
+	require.NoError(t, store.Save(context.Background(), ctx))
 
-	loaded, err := store.Load("id-001")
+	loaded, err := store.Load(context.Background(), "id-001")
 	require.NoError(t, err)
 	assert.Equal(t, "520804600000001", loaded.GPSI)
 
-	_, err = store.Load("nonexistent")
+	_, err = store.Load(context.Background(), "nonexistent")
 	assert.ErrorIs(t, err, ErrNotFound)
 
-	require.NoError(t, store.Delete("id-001"))
-	_, err = store.Load("id-001")
+	require.NoError(t, store.Delete(context.Background(), "id-001"))
+	_, err = store.Load(context.Background(), "id-001")
 	assert.ErrorIs(t, err, ErrNotFound)
 
 	assert.NoError(t, store.Close())

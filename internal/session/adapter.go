@@ -22,7 +22,7 @@ func NewNSSAAStoreAdapter(store SessionStore) *NSSAAStoreAdapter {
 }
 
 // Load implements nssaa.AuthCtxStore.
-func (a *NSSAAStoreAdapter) Load(id string) (*nssaa.AuthCtx, error) {
+func (a *NSSAAStoreAdapter) Load(_ context.Context, id string) (*nssaa.AuthCtx, error) {
 	s, err := a.store.Load(context.Background(), id)
 	if err != nil {
 		if errors.Is(err, ErrSessionNotFound) {
@@ -37,7 +37,7 @@ func (a *NSSAAStoreAdapter) Load(id string) (*nssaa.AuthCtx, error) {
 }
 
 // Save implements nssaa.AuthCtxStore.
-func (a *NSSAAStoreAdapter) Save(ctx *nssaa.AuthCtx) error {
+func (a *NSSAAStoreAdapter) Save(_ context.Context, ctx *nssaa.AuthCtx) error {
 	s := AuthCtxToNSSASession(ctx)
 	err := a.store.Save(context.Background(), s)
 	if err != nil {
@@ -47,7 +47,7 @@ func (a *NSSAAStoreAdapter) Save(ctx *nssaa.AuthCtx) error {
 }
 
 // Delete implements nssaa.AuthCtxStore.
-func (a *NSSAAStoreAdapter) Delete(id string) error {
+func (a *NSSAAStoreAdapter) Delete(_ context.Context, id string) error {
 	return a.store.Delete(context.Background(), id)
 }
 
