@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -152,18 +153,45 @@ func handleServerInitiated(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleReAuth(_ context.Context, req *proto.AaaServerInitiatedRequest) []byte {
-	slog.Info("handle_re_auth", "auth_ctx_id", req.AuthCtxID, "session_id", req.SessionID)
+	slog.Info("handle_re_auth",
+		"auth_ctx_id", req.AuthCtxID,
+		"session_id", req.SessionID,
+		"payload_len", len(req.Payload))
+	// TODO (Wave 3 continuation): Load EAP session from Redis, process re-auth, notify AMF
 	return []byte{2, 0, 0, 12}
 }
 
 func handleRevocation(_ context.Context, req *proto.AaaServerInitiatedRequest) []byte {
-	slog.Info("handle_revoc", "auth_ctx_id", req.AuthCtxID, "session_id", req.SessionID)
+	slog.Info("handle_revoc",
+		"auth_ctx_id", req.AuthCtxID,
+		"session_id", req.SessionID)
+	// TODO (Wave 3 continuation): Load EAP session, mark revoked, notify AMF
 	return []byte{}
 }
 
 func handleCoA(_ context.Context, req *proto.AaaServerInitiatedRequest) []byte {
-	slog.Info("handle_coa", "auth_ctx_id", req.AuthCtxID, "session_id", req.SessionID)
+	slog.Info("handle_coa",
+		"auth_ctx_id", req.AuthCtxID,
+		"session_id", req.SessionID)
+	// TODO (Wave 3 continuation): Load session, apply attribute changes, persist
 	return []byte{2, 0, 0, 12}
+}
+
+// loadEAPSessionFromRedis loads an EAP session by authCtxID from Redis.
+// Returns nil if not found.
+// TODO: Wire to actual EAP session store (redis-based, see internal/eap/session_redis.go)
+func loadEAPSessionFromRedis(ctx context.Context, redisAddr, authCtxID string) ([]byte, error) {
+	rdb := goredis.NewClient(&goredis.Options{Addr: redisAddr})
+	defer func() { _ = rdb.Close() }()
+	key := "nssaa:eap:session:" + authCtxID
+	data, err := rdb.Get(ctx, key).Bytes()
+	if err != nil {
+		if errors.Is(err, goredis.Nil) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return data, nil
 }
 
 // podHeartbeat registers the Biz Pod in the Redis HASH and refreshes every 30 seconds.
