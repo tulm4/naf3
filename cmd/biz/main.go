@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -84,8 +85,9 @@ func main() {
 		}
 	}()
 
-	// Biz Pod heartbeat: register pod in Redis SET
-	go podHeartbeat(context.Background(), cfg.Redis.Addr, podID)
+	// Biz Pod heartbeat: register pod in Redis HASH with TTL
+	podURL := fmt.Sprintf("http://%s%s", podID, cfg.Server.Addr)
+	go podHeartbeat(context.Background(), cfg.Redis.Addr, podID, podURL)
 
 	select {
 	case err := <-errCh:
@@ -162,13 +164,25 @@ func handleCoA(_ context.Context, req *proto.AaaServerInitiatedRequest) []byte {
 	return []byte{2, 0, 0, 12}
 }
 
-// podHeartbeat registers the Biz Pod in the Redis SET and refreshes every 30 seconds.
-func podHeartbeat(ctx context.Context, redisAddr, podID string) {
+// podHeartbeat registers the Biz Pod in the Redis HASH and refreshes every 30 seconds.
+// On shutdown, deletes the pod entry.
+func podHeartbeat(ctx context.Context, redisAddr, podID, podURL string) {
 	rdb := goredis.NewClient(&goredis.Options{Addr: redisAddr})
 	defer func() { _ = rdb.Close() }()
 
-	if err := rdb.SAdd(ctx, proto.PodsKey, podID).Err(); err != nil {
-		slog.Warn("failed to register pod in Redis", "error", err, "pod_id", podID)
+	key := proto.BizPodsKey(podID)
+	entry := proto.BizPodEntry{
+		URL:      podURL,
+		LastSeen: time.Now().Unix(),
+	}
+	data, err := json.Marshal(entry)
+	if err != nil {
+		slog.Warn("failed to marshal BizPodEntry", "error", err)
+		return
+	}
+
+	if err := rdb.Set(ctx, key, data, proto.BizPodEntryTTL).Err(); err != nil {
+		slog.Warn("failed to register pod in Redis HASH", "error", err, "pod_id", podID)
 	}
 
 	ticker := time.NewTicker(30 * time.Second)
@@ -177,10 +191,16 @@ func podHeartbeat(ctx context.Context, redisAddr, podID string) {
 	for {
 		select {
 		case <-ctx.Done():
-			rdb.SRem(ctx, proto.PodsKey, podID)
+			if err := rdb.Del(ctx, key).Err(); err != nil {
+				slog.Warn("failed to unregister pod on shutdown", "error", err, "pod_id", podID)
+			}
 			return
 		case <-ticker.C:
-			rdb.SAdd(ctx, proto.PodsKey, podID)
+			entry.LastSeen = time.Now().Unix()
+			data, _ := json.Marshal(entry)
+			if err := rdb.Set(ctx, key, data, proto.BizPodEntryTTL).Err(); err != nil {
+				slog.Warn("failed to refresh pod heartbeat", "error", err, "pod_id", podID)
+			}
 		}
 	}
 }
