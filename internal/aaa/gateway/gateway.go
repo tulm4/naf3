@@ -162,6 +162,13 @@ func (g *Gateway) startListeners(ctx context.Context) error {
 		}()
 	}
 
+	// DLQ consumer — processes failed server-initiated messages from the DLQ list.
+	g.wg.Add(1)
+	go func() {
+		defer g.wg.Done()
+		g.runDLQConsumer(g.ctx)
+	}()
+
 	return nil
 }
 
