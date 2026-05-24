@@ -30,7 +30,7 @@ import (
 
 // BizPod holds all dependencies for the Biz Pod.
 type BizPod struct {
-	Server         *http.Server
+	Server          *http.Server
 	NRFClient      *nrf.Client
 	SessionStore   *postgres.Store
 	AIWSessionStore *postgres.AIWStore
@@ -39,6 +39,7 @@ type BizPod struct {
 	DLQ            *redis.DLQ
 	AAAClient      *httpAAAClient
 	Logger         *slog.Logger
+	HeartbeatCancel func() // cancels the podHeartbeat goroutine on shutdown
 }
 
 // BizPodOption configures a BizPod.
@@ -217,7 +218,6 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 	}
 	aaaClient := newHTTPAAAClient(
 		f.cfg.Biz.AAAGatewayURL,
-		f.cfg.Redis.Addr,
 		f.podID,
 		f.cfg.Version,
 		commCfg,
@@ -286,6 +286,9 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 
 // Close releases all resources held by BizPod.
 func (bp *BizPod) Close() {
+	if bp.HeartbeatCancel != nil {
+		bp.HeartbeatCancel()
+	}
 	if bp.Pool != nil {
 		bp.Pool.Close()
 	}

@@ -85,9 +85,11 @@ func main() {
 		}
 	}()
 
-	// Biz Pod heartbeat: register pod in Redis HASH with TTL
+	// Biz Pod heartbeat: register pod in Redis per-pod key with TTL
+	podCtx, podCancel := context.WithCancel(context.Background())
 	podURL := fmt.Sprintf("http://%s%s", podID, cfg.Server.Addr)
-	go podHeartbeat(context.Background(), cfg.Redis.Addr, podID, podURL)
+	go podHeartbeat(podCtx, cfg.Redis.Addr, podID, podURL)
+	pod.HeartbeatCancel = podCancel
 
 	select {
 	case err := <-errCh:
