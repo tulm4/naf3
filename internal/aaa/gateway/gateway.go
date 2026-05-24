@@ -327,33 +327,38 @@ func (g *Gateway) getBizPodURL(ctx context.Context, podID string) (string, error
 // pickRandomLiveBizURL selects a random live Biz Pod from the Redis HASH.
 // A pod is considered live if its LastSeen is within ttl.
 func (g *Gateway) pickRandomLiveBizURL(ctx context.Context) (string, error) {
-	keys, err := g.redis.Keys(ctx, "nssaa:biz:pod:*").Result()
-	if err != nil {
-		return "", err
-	}
-	if len(keys) == 0 {
-		return "", nil
-	}
-
 	ttl := g.cfg.BizPodEntryTTL
 	if ttl == 0 {
 		ttl = proto.BizPodEntryTTL
 	}
 	cutoff := time.Now().Add(-ttl).Unix()
+
 	var livePods []string
-	for _, key := range keys {
-		data, err := g.redis.Get(ctx, key).Bytes()
+	var cursor uint64
+	for {
+		keys, nextCursor, err := g.redis.Scan(ctx, cursor, "nssaa:biz:pod:*", 100).Result()
 		if err != nil {
-			continue
+			return "", err
 		}
-		var entry proto.BizPodEntry
-		if err := json.Unmarshal(data, &entry); err != nil {
-			continue
+		for _, key := range keys {
+			data, err := g.redis.Get(ctx, key).Bytes()
+			if err != nil {
+				continue
+			}
+			var entry proto.BizPodEntry
+			if err := json.Unmarshal(data, &entry); err != nil {
+				continue
+			}
+			if entry.LastSeen >= cutoff && entry.URL != "" {
+				livePods = append(livePods, entry.URL)
+			}
 		}
-		if entry.LastSeen >= cutoff && entry.URL != "" {
-			livePods = append(livePods, entry.URL)
+		cursor = nextCursor
+		if cursor == 0 {
+			break
 		}
 	}
+
 	if len(livePods) == 0 {
 		return "", nil
 	}
@@ -453,22 +458,22 @@ func (g *Gateway) forwardToBiz(ctx context.Context, sessionID string, transportT
 			g.logger.Warn("biz HTTP call failed",
 				"attempt", attempt+1, "error", err, "target_url", targetURL,
 				"retrying", isConnErr)
-			// Only retry on connection errors — 4xx/5xx from the server are not retried
 			if !isConnErr {
 				break
 			}
 			continue
 		}
-		_, _ = io.Copy(io.Discard, resp.Body)
-		_ = resp.Body.Close()
-
 		if resp.StatusCode == http.StatusOK {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
 			return // Success
 		}
 		g.logger.Warn("biz returned non-OK",
 			"status", resp.StatusCode, "session_id", sessionID, "target_url", targetURL)
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
 		// Non-connection errors and 4xx/5xx are not retried
-		return
+		break
 	}
 
 	// 4. All retries exhausted → push to DLQ
