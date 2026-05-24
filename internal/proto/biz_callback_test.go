@@ -67,3 +67,37 @@ func TestRedisConstants(t *testing.T) {
 		t.Errorf("PodsKey: got %q, want %q", PodsKey, "nssaa:pods")
 	}
 }
+
+func TestBizPodsKey(t *testing.T) {
+	got := BizPodsKey("biz-pod-1")
+	want := "nssaa:biz:pod:biz-pod-1"
+	if got != want {
+		t.Errorf("BizPodsKey: got %q, want %q", got, want)
+	}
+}
+
+func TestBizPodsKey_Empty(t *testing.T) {
+	got := BizPodsKey("")
+	want := "nssaa:biz:pod:"
+	if got != want {
+		t.Errorf("BizPodsKey empty: got %q, want %q", got, want)
+	}
+}
+
+func TestBizPodEntry_JSON(t *testing.T) {
+	entry := BizPodEntry{
+		URL:      "http://biz-pod-1:8080",
+		LastSeen: 1716560000,
+	}
+	data, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var roundTrip BizPodEntry
+	if err := json.Unmarshal(data, &roundTrip); err != nil {
+		t.Fatal(err)
+	}
+	if roundTrip.URL != entry.URL || roundTrip.LastSeen != entry.LastSeen {
+		t.Errorf("round-trip mismatch: got %+v, want %+v", roundTrip, entry)
+	}
+}
