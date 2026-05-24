@@ -27,6 +27,10 @@ type NativeCommConfig struct {
 	// TLS holds mTLS client certificate settings.
 	// Use when the target service requires client certificate authentication.
 	TLS *TLSClientConfig `yaml:"tls,omitempty"`
+	// KeepalivedHealthURL is the health check endpoint for the AAA Gateway VIP.
+	// Used by NativeAAAClient to detect VIP state changes for circuit breaker reset.
+	// Example: "http://aaa-gateway:9090/health/vip"
+	KeepalivedHealthURL string `yaml:"keepalivedHealthURL"`
 }
 
 // TLSClientConfig for mTLS client authentication.

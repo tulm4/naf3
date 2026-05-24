@@ -90,12 +90,14 @@ func New(cfg Config) *Gateway {
 	// Create the RADIUS forwarder for client-initiated path.
 	// It wraps EAP payload in Access-Request with EAP-Message and Message-Authenticator.
 	if cfg.RadiusServerAddress != "" {
-		g.radiusForwarder = newRadiusForwarder(
-			cfg.RadiusServerAddress,
-			1812, // Default RADIUS port
-			cfg.RadiusSharedSecret,
-			cfg.Logger,
-		)
+		g.radiusForwarder = newRadiusForwarder(RadiusForwarderConfig{
+			ServerAddress:   cfg.RadiusServerAddress,
+			ServerPort:     1812,
+			SharedSecret:    cfg.RadiusSharedSecret,
+			Timeout:        10 * time.Second,
+			MaxRetries:     3,
+			ResponseWindow: 10 * time.Second,
+		}, cfg.Logger)
 	}
 
 	// Create the persistent Diameter forwarder for client-initiated path.

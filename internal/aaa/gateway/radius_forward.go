@@ -7,13 +7,23 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/operator/nssAAF/internal/radius"
 )
 
+// RadiusForwarderConfig holds configuration for the RADIUS forwarder.
+type RadiusForwarderConfig struct {
+	ServerAddress  string
+	ServerPort     int
+	SharedSecret   string
+	Timeout        time.Duration
+	MaxRetries     int
+	ResponseWindow time.Duration
+}
+
 // radiusForwarder manages a RADIUS client for the AAA Gateway.
 // It handles EAP forwarding to AAA-S via RADIUS Access-Request/Accept/Reject/Challen
-
 // Spec: RFC 2865, RFC 3579, TS 29.561 Ch.16
 type radiusForwarder struct {
 	client *radius.Client
@@ -21,28 +31,25 @@ type radiusForwarder struct {
 }
 
 // newRadiusForwarder creates a RADIUS forwarder using the existing radius.Client.
-func newRadiusForwarder(serverAddr string, serverPort int, sharedSecret string, logger *slog.Logger) *radiusForwarder {
+func newRadiusForwarder(cfg RadiusForwarderConfig, logger *slog.Logger) *radiusForwarder {
 	r := &radiusForwarder{
 		logger: logger,
 	}
-	if serverAddr == "" {
-		// No RADIUS config — forwarder disabled
+	if cfg.ServerAddress == "" {
 		return r
 	}
 
-	cfg := radius.Config{
-		ServerAddress:  serverAddr,
-		ServerPort:     serverPort,
-		SharedSecret:   sharedSecret,
-		Timeout:        10,
-		MaxRetries:     3,
-		ResponseWindow: 10,
+	client, err := radius.NewRadiusClient(radius.Config{
+		ServerAddress:  cfg.ServerAddress,
+		ServerPort:     cfg.ServerPort,
+		SharedSecret:   cfg.SharedSecret,
+		Timeout:        cfg.Timeout,
+		MaxRetries:     cfg.MaxRetries,
+		ResponseWindow: cfg.ResponseWindow,
 		Transport:      "UDP",
-	}
-
-	client, err := radius.NewRadiusClient(cfg, logger)
+	}, logger)
 	if err != nil {
-		logger.Error("radius_forward: failed to create client", "error", err, "server", serverAddr)
+		logger.Error("radius_forward: failed to create client", "error", err, "server", cfg.ServerAddress)
 		return r
 	}
 	r.client = client
