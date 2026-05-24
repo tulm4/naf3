@@ -50,7 +50,6 @@ func TestSendEAP_Success(t *testing.T) {
 		"test-pod",
 		proto.CurrentVersion,
 		config.InternalCommConfig{},
-		nil, // no Redis in unit tests
 	)
 	defer func() { _ = c.Close() }()
 
@@ -73,7 +72,6 @@ func TestSendEAP_Non200Error(t *testing.T) {
 		"test-pod",
 		proto.CurrentVersion,
 		config.InternalCommConfig{},
-		nil,
 	)
 	defer func() { _ = c.Close() }()
 
@@ -98,7 +96,6 @@ func TestSendEAP_InvalidJSONResponse(t *testing.T) {
 		"test-pod",
 		proto.CurrentVersion,
 		config.InternalCommConfig{},
-		nil,
 	)
 	defer func() { _ = c.Close() }()
 
@@ -135,7 +132,6 @@ func TestSendEAP_BuildsSessionID(t *testing.T) {
 		"test-pod",
 		proto.CurrentVersion,
 		config.InternalCommConfig{},
-		nil,
 	)
 	defer func() { _ = c.Close() }()
 
@@ -170,7 +166,6 @@ func TestSendEAP_PassesXVersionHeader(t *testing.T) {
 		"test-pod",
 		"1.2.3",
 		config.InternalCommConfig{},
-		nil,
 	)
 	defer func() { _ = c.Close() }()
 
