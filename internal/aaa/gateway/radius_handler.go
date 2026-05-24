@@ -24,10 +24,9 @@ const (
 
 // RadiusHandler handles RADIUS protocol traffic.
 type RadiusHandler struct {
-	logger          *slog.Logger
-	tracer          trace.Tracer
-	publishResponse func(sessionID string, raw []byte)
-	forwardToBiz    func(ctx context.Context, sessionID string, transportType string, messageType string, raw []byte)
+	logger       *slog.Logger
+	tracer       trace.Tracer
+	forwardToBiz func(ctx context.Context, sessionID string, transportType string, messageType string, raw []byte)
 }
 
 // Listen starts the RADIUS UDP listener.
@@ -74,7 +73,7 @@ func (h *RadiusHandler) handlePacket(ctx context.Context, _ *net.UDPConn, addr *
 	// Client-initiated: AAA-S responding to our Access-Request
 	if msgType == radiusAccessAccept || msgType == radiusAccessReject || msgType == radiusAccessChallenge {
 		sessionID := extractSessionID(raw)
-		h.publishResponse(sessionID, raw)
+		h.logger.Debug("radius_response_received", "session_id", sessionID, "len", len(raw))
 		return
 	}
 

@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -61,21 +62,9 @@ type Gateway struct {
 	radiusForwarder *radiusForwarder // RADIUS client (client-initiated path)
 	diamForwarder   *diamForwarder   // Diameter client (client-initiated path)
 
-	// pending maps SessionID → pendingEntry (for client-initiated response routing).
-	// Fix: store both SessionID and AuthCtxID so AaaResponseEvent.AuthCtxID is populated.
-	pending   map[string]*pendingEntry
-	pendingMu sync.RWMutex
-
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
-}
-
-// pendingEntry holds the response channel and auth context metadata for a pending request.
-type pendingEntry struct {
-	authCtxID string
-	sessionID string
-	ch        chan []byte
 }
 
 // New creates a new AAA Gateway.
@@ -84,17 +73,15 @@ func New(cfg Config) *Gateway {
 		cfg:     cfg,
 		version: cfg.Version,
 		logger:  cfg.Logger,
-		pending: make(map[string]*pendingEntry),
 	}
 
 	g.redis = newRedisClient(cfg.RedisAddr, cfg.RedisMode)
 	g.bizHTTPClient = &http.Client{Timeout: 30 * time.Second}
 
 	g.radiusHandler = &RadiusHandler{
-		logger:          cfg.Logger,
-		tracer:          otel.Tracer("aaa-gateway/radius"),
-		publishResponse: g.publishResponseBytes,
-		forwardToBiz:    g.forwardToBiz,
+		logger:       cfg.Logger,
+		tracer:      otel.Tracer("aaa-gateway/radius"),
+		forwardToBiz: g.forwardToBiz,
 	}
 
 	// Create the RADIUS forwarder for client-initiated path.
@@ -122,7 +109,6 @@ func New(cfg Config) *Gateway {
 
 	g.diameterHandler = NewDiameterHandler(
 		cfg.Logger,
-		g.publishResponseBytes,
 		g.forwardToBiz,
 		cfg.Version,
 		cfg.BizServiceURL,
@@ -158,13 +144,6 @@ func (g *Gateway) Start(ctx context.Context) error {
 			}
 		}()
 	}
-
-	// Start Redis subscription for dispatching responses
-	g.wg.Add(1)
-	go func() {
-		defer g.wg.Done()
-		g.subscribeResponses(g.ctx)
-	}()
 
 	// Connect Diameter forwarder to AAA-S (client-initiated path).
 	// This performs CER/CEA handshake and starts DWR/DWA watchdog.
@@ -202,12 +181,14 @@ func (g *Gateway) Stop() {
 
 // ForwardEAP satisfies proto.BizAAAClient.
 // It receives AaaForwardRequest from Biz Pod, writes session correlation to Redis,
-// forwards to AAA-S, waits for response, publishes to Redis, and returns response bytes.
+// forwards to AAA-S, and returns the response directly to the caller.
 func (g *Gateway) ForwardEAP(ctx context.Context, req *proto.AaaForwardRequest) (*proto.AaaForwardResponse, error) {
 	// 1. Write session correlation entry to Redis (before forwarding)
+	// Wire os.Hostname() now so direct pod lookup works immediately.
+	hostname, _ := os.Hostname()
 	entry := proto.SessionCorrEntry{
 		AuthCtxID: req.AuthCtxID,
-		PodID:     "", // Populated by Biz Pod via heartbeat; AAA GW writes read-only
+		PodID:     hostname, // Written once here; read on server-initiated routing
 		Sst:       req.Sst,
 		Sd:        req.Sd,
 		CreatedAt: time.Now().Unix(),
@@ -216,32 +197,13 @@ func (g *Gateway) ForwardEAP(ctx context.Context, req *proto.AaaForwardRequest) 
 		return nil, fmt.Errorf("aaa-gateway: failed to write session corr: %w", err)
 	}
 
-	// 2. Set up response channel for this session.
-	// pendingEntry stores both SessionID and AuthCtxID for correct response routing.
-	pendingEntry := &pendingEntry{
-		authCtxID: req.AuthCtxID,
-		sessionID: req.SessionID,
-		ch:        make(chan []byte, 1),
-	}
-	g.pendingMu.Lock()
-	g.pending[req.SessionID] = pendingEntry
-	g.pendingMu.Unlock()
-
-	defer func() {
-		g.pendingMu.Lock()
-		delete(g.pending, req.SessionID)
-		g.pendingMu.Unlock()
-	}()
-
-	// 3. Forward to AAA-S based on transport type
+	// 2. Forward to AAA-S based on transport type
 	var response []byte
 	var err error
 	switch req.TransportType {
 	case proto.TransportRADIUS:
 		response, err = g.radiusForwarder.Forward(ctx, req.Payload, req.SessionID, req.Sst, req.Sd)
 	case proto.TransportDIAMETER:
-		// Use diamForwarder directly for the client-initiated path.
-		// It handles CER/CEA handshake, DER encoding, DWR watchdog, and DEA correlation.
 		response, err = g.diamForwarder.Forward(ctx, req.Payload, req.SessionID, req.Sst, req.Sd)
 	default:
 		return nil, fmt.Errorf("aaa-gateway: unknown transport type: %s", req.TransportType)
@@ -250,18 +212,7 @@ func (g *Gateway) ForwardEAP(ctx context.Context, req *proto.AaaForwardRequest) 
 		return nil, fmt.Errorf("aaa-gateway: forward failed: %w", err)
 	}
 
-	// 4. Publish response to Redis channel for Biz Pods to receive
-	event := proto.AaaResponseEvent{
-		Version:   g.version,
-		SessionID: req.SessionID,
-		AuthCtxID: req.AuthCtxID,
-		Payload:   response,
-	}
-	if err := g.publishResponse(ctx, &event); err != nil {
-		g.logger.Error("failed to publish response event", "error", err, "session_id", req.SessionID)
-		// Continue — the response was already received, just couldn't publish
-	}
-
+	// 3. Return response directly to caller (no Redis pub/sub needed)
 	return &proto.AaaForwardResponse{
 		Version:   g.version,
 		SessionID: req.SessionID,
@@ -294,23 +245,6 @@ func (g *Gateway) HandleForward(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-// dispatchResponse dispatches a response event to the appropriate pending channel.
-// This is called from subscribeResponses (Redis pub/sub) for server-initiated responses.
-func (g *Gateway) dispatchResponse(event *proto.AaaResponseEvent) {
-	g.pendingMu.RLock()
-	p, ok := g.pending[event.SessionID]
-	g.pendingMu.RUnlock()
-
-	if !ok {
-		return // No pending request for this session
-	}
-
-	select {
-	case p.ch <- event.Payload:
-	default:
-	}
-}
-
 // writeSessionCorr writes SessionCorrEntry to Redis with TTL = DefaultPayloadTTL.
 func (g *Gateway) writeSessionCorr(ctx context.Context, sessionID string, entry *proto.SessionCorrEntry) error {
 	key := proto.SessionCorrKey(sessionID)
@@ -319,27 +253,6 @@ func (g *Gateway) writeSessionCorr(ctx context.Context, sessionID string, entry 
 		return err
 	}
 	return g.redis.Set(ctx, key, data, proto.DefaultPayloadTTL).Err()
-}
-
-// publishResponseBytes publishes raw response bytes to Redis pub/sub.
-// This is the low-level publish used by RadiusHandler and DiameterHandler.
-func (g *Gateway) publishResponseBytes(sessionID string, raw []byte) {
-	var authCtxID string
-	g.pendingMu.RLock()
-	if p, ok := g.pending[sessionID]; ok {
-		authCtxID = p.authCtxID
-	}
-	g.pendingMu.RUnlock()
-
-	event := proto.AaaResponseEvent{
-		Version:   g.version,
-		SessionID: sessionID,
-		AuthCtxID: authCtxID, // Populated from pending entry (fixes routing bug)
-		Payload:   raw,
-	}
-	if err := g.publishResponse(g.ctx, &event); err != nil {
-		g.logger.Error("failed to publish response bytes", "error", err, "session_id", sessionID)
-	}
 }
 
 // forwardToBiz sends a server-initiated message to the Biz Pod via HTTP POST.
@@ -412,35 +325,6 @@ func (g *Gateway) getSessionCorr(ctx context.Context, sessionID string) (*proto.
 		return nil, err
 	}
 	return &entry, nil
-}
-
-// publishResponse publishes AaaResponseEvent to the nssaa:aaa-response channel.
-func (g *Gateway) publishResponse(ctx context.Context, event *proto.AaaResponseEvent) error {
-	data, err := json.Marshal(event)
-	if err != nil {
-		return err
-	}
-	return g.redis.Publish(ctx, proto.AaaResponseChannel, data).Err()
-}
-
-// subscribeResponses subscribes to nssaa:aaa-response and dispatches to pending handlers.
-func (g *Gateway) subscribeResponses(ctx context.Context) {
-	ch := g.redis.PSubscribe(ctx, proto.AaaResponseChannel)
-	defer func() { _ = ch.Close() }()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case msg := <-ch.Channel():
-			var event proto.AaaResponseEvent
-			if err := json.Unmarshal([]byte(msg.Payload), &event); err != nil {
-				g.logger.Error("failed to unmarshal response event", "error", err)
-				continue
-			}
-			g.dispatchResponse(&event)
-		}
-	}
 }
 
 // VIPHealthHandler returns 200 if this AAA Gateway replica is the VIP owner, 503 otherwise.

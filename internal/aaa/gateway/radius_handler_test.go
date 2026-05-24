@@ -9,20 +9,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// mockPublishResponse captures calls to publishResponse.
-type mockPublishResponse struct {
-	calls []publishCall
-}
-
-type publishCall struct {
-	sessionID string
-	raw       []byte
-}
-
-func (m *mockPublishResponse) invoke(sessionID string, raw []byte) {
-	m.calls = append(m.calls, publishCall{sessionID: sessionID, raw: raw})
-}
-
 // mockForwardToBiz captures calls to forwardToBiz.
 type mockForwardToBiz struct {
 	calls []forwardCall
@@ -92,12 +78,10 @@ func nullTracer() trace.Tracer {
 
 // TestHandlePacket_TooShort verifies that packets with fewer than 4 bytes are dropped.
 func TestHandlePacket_TooShort(t *testing.T) {
-	pub := &mockPublishResponse{}
 	fwd := &mockForwardToBiz{}
 	h := &RadiusHandler{
-		logger:          nullLogger(),
-		publishResponse: pub.invoke,
-		forwardToBiz:    fwd.invoke,
+		logger:       nullLogger(),
+		forwardToBiz: fwd.invoke,
 	}
 
 	// Empty packet
@@ -107,18 +91,15 @@ func TestHandlePacket_TooShort(t *testing.T) {
 	// 3 bytes
 	h.handlePacket(context.Background(), nil, nil, []byte{1, 2, 3})
 
-	assert.Empty(t, pub.calls)
 	assert.Empty(t, fwd.calls)
 }
 
-// TestHandlePacket_AccessAccept calls publishResponse.
+// TestHandlePacket_AccessAccept logs debug message and returns (no pub/sub needed).
 func TestHandlePacket_AccessAccept(t *testing.T) {
-	pub := &mockPublishResponse{}
 	fwd := &mockForwardToBiz{}
 	h := &RadiusHandler{
-		logger:          nullLogger(),
-		publishResponse: pub.invoke,
-		forwardToBiz:    fwd.invoke,
+		logger:       nullLogger(),
+		forwardToBiz: fwd.invoke,
 	}
 
 	state := "test-session-123"
@@ -127,20 +108,16 @@ func TestHandlePacket_AccessAccept(t *testing.T) {
 
 	h.handlePacket(context.Background(), nil, nil, pkt)
 
-	assert.Len(t, pub.calls, 1)
-	assert.Equal(t, state, pub.calls[0].sessionID)
-	assert.Equal(t, pkt, pub.calls[0].raw)
+	// Client-initiated responses are logged and returned directly; no forwardToBiz call.
 	assert.Empty(t, fwd.calls)
 }
 
-// TestHandlePacket_AccessReject calls publishResponse.
+// TestHandlePacket_AccessReject logs debug message and returns (no pub/sub needed).
 func TestHandlePacket_AccessReject(t *testing.T) {
-	pub := &mockPublishResponse{}
 	fwd := &mockForwardToBiz{}
 	h := &RadiusHandler{
-		logger:          nullLogger(),
-		publishResponse: pub.invoke,
-		forwardToBiz:    fwd.invoke,
+		logger:       nullLogger(),
+		forwardToBiz: fwd.invoke,
 	}
 
 	state := "reject-session"
@@ -149,19 +126,15 @@ func TestHandlePacket_AccessReject(t *testing.T) {
 
 	h.handlePacket(context.Background(), nil, nil, pkt)
 
-	assert.Len(t, pub.calls, 1)
-	assert.Equal(t, state, pub.calls[0].sessionID)
 	assert.Empty(t, fwd.calls)
 }
 
-// TestHandlePacket_AccessChallenge calls publishResponse.
+// TestHandlePacket_AccessChallenge logs debug message and returns (no pub/sub needed).
 func TestHandlePacket_AccessChallenge(t *testing.T) {
-	pub := &mockPublishResponse{}
 	fwd := &mockForwardToBiz{}
 	h := &RadiusHandler{
-		logger:          nullLogger(),
-		publishResponse: pub.invoke,
-		forwardToBiz:    fwd.invoke,
+		logger:       nullLogger(),
+		forwardToBiz: fwd.invoke,
 	}
 
 	state := "challenge-session"
@@ -171,20 +144,16 @@ func TestHandlePacket_AccessChallenge(t *testing.T) {
 
 	h.handlePacket(context.Background(), nil, nil, pkt)
 
-	assert.Len(t, pub.calls, 1)
-	assert.Equal(t, state, pub.calls[0].sessionID)
 	assert.Empty(t, fwd.calls)
 }
 
 // TestHandlePacket_CoARequest calls forwardToBiz with messageType="COA".
 func TestHandlePacket_CoARequest(t *testing.T) {
-	pub := &mockPublishResponse{}
 	fwd := &mockForwardToBiz{}
 	h := &RadiusHandler{
-		logger:          nullLogger(),
-		tracer:          nullTracer(),
-		publishResponse: pub.invoke,
-		forwardToBiz:    fwd.invoke,
+		logger:       nullLogger(),
+		tracer:       nullTracer(),
+		forwardToBiz: fwd.invoke,
 	}
 
 	state := "coa-session-xyz"
@@ -193,7 +162,6 @@ func TestHandlePacket_CoARequest(t *testing.T) {
 
 	h.handlePacket(context.Background(), nil, nil, pkt)
 
-	assert.Empty(t, pub.calls)
 	assert.Len(t, fwd.calls, 1)
 	assert.Equal(t, state, fwd.calls[0].sessionID)
 	assert.Equal(t, "RADIUS", fwd.calls[0].transportType)
@@ -203,13 +171,11 @@ func TestHandlePacket_CoARequest(t *testing.T) {
 
 // TestHandlePacket_DisconnectRequest calls forwardToBiz with messageType="RAR".
 func TestHandlePacket_DisconnectRequest(t *testing.T) {
-	pub := &mockPublishResponse{}
 	fwd := &mockForwardToBiz{}
 	h := &RadiusHandler{
-		logger:          nullLogger(),
-		tracer:          nullTracer(),
-		publishResponse: pub.invoke,
-		forwardToBiz:    fwd.invoke,
+		logger:       nullLogger(),
+		tracer:       nullTracer(),
+		forwardToBiz: fwd.invoke,
 	}
 
 	state := "dm-session-abc"
@@ -218,7 +184,6 @@ func TestHandlePacket_DisconnectRequest(t *testing.T) {
 
 	h.handlePacket(context.Background(), nil, nil, pkt)
 
-	assert.Empty(t, pub.calls)
 	assert.Len(t, fwd.calls, 1)
 	assert.Equal(t, state, fwd.calls[0].sessionID)
 	assert.Equal(t, "RADIUS", fwd.calls[0].transportType)
@@ -228,12 +193,10 @@ func TestHandlePacket_DisconnectRequest(t *testing.T) {
 
 // TestHandlePacket_UnknownCodeIsDropped verifies that unrecognized codes are ignored.
 func TestHandlePacket_UnknownCodeIsDropped(t *testing.T) {
-	pub := &mockPublishResponse{}
 	fwd := &mockForwardToBiz{}
 	h := &RadiusHandler{
-		logger:          nullLogger(),
-		publishResponse: pub.invoke,
-		forwardToBiz:    fwd.invoke,
+		logger:       nullLogger(),
+		forwardToBiz: fwd.invoke,
 	}
 
 	// code=5 (Accounting-Request) — not handled
@@ -241,19 +204,16 @@ func TestHandlePacket_UnknownCodeIsDropped(t *testing.T) {
 
 	h.handlePacket(context.Background(), nil, nil, pkt)
 
-	assert.Empty(t, pub.calls)
 	assert.Empty(t, fwd.calls)
 }
 
 // TestHandleServerInitiated_NoSessionID_DropsPacket verifies that packets without
 // a State attribute are dropped without calling forwardToBiz.
 func TestHandleServerInitiated_NoSessionID_DropsPacket(t *testing.T) {
-	pub := &mockPublishResponse{}
 	fwd := &mockForwardToBiz{}
 	h := &RadiusHandler{
-		logger:          nullLogger(),
-		publishResponse: pub.invoke,
-		forwardToBiz:    fwd.invoke,
+		logger:       nullLogger(),
+		forwardToBiz: fwd.invoke,
 	}
 
 	// CoA packet with no State attribute (totalLen >= 20 so not caught by < 4 check)
@@ -261,7 +221,6 @@ func TestHandleServerInitiated_NoSessionID_DropsPacket(t *testing.T) {
 
 	h.handlePacket(context.Background(), nil, nil, pkt)
 
-	assert.Empty(t, pub.calls)
 	assert.Empty(t, fwd.calls)
 }
 
@@ -270,10 +229,9 @@ func TestHandleServerInitiated_NoSessionID_DropsPacket(t *testing.T) {
 func TestHandleServerInitiated_Direct(t *testing.T) {
 	fwd := &mockForwardToBiz{}
 	h := &RadiusHandler{
-		logger:          nullLogger(),
-		tracer:          nullTracer(),
-		publishResponse: func(string, []byte) {},
-		forwardToBiz:    fwd.invoke,
+		logger:       nullLogger(),
+		tracer:       nullTracer(),
+		forwardToBiz: fwd.invoke,
 	}
 
 	sessionID := "direct-coa-test"

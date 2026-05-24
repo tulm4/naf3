@@ -31,13 +31,12 @@ import (
 // The sm.StateMachine wraps each raw net.Conn via diam.NewConn(), then manages
 // CER/CEA internally. Registered handlers only fire after the handshake succeeds.
 type DiameterHandler struct {
-	logger          *slog.Logger
-	publishResponse func(sessionID string, raw []byte)
-	forwardToBiz    func(ctx context.Context, sessionID string, transportType string, messageType string, raw []byte)
-	version         string
-	bizURL          string
-	httpClient      *http.Client
-	diamForwarder   *diamForwarder // client-initiated forwarder
+	logger        *slog.Logger
+	forwardToBiz func(ctx context.Context, sessionID string, transportType string, messageType string, raw []byte)
+	version      string
+	bizURL       string
+	httpClient   *http.Client
+	diamForwarder *diamForwarder // client-initiated forwarder
 
 	// sm is the state machine for server-side CER/CEA handling.
 	// Created in NewDiameterHandler with the AAA Gateway's identity.
@@ -47,7 +46,6 @@ type DiameterHandler struct {
 // NewDiameterHandler creates a DiameterHandler with a go-diameter/v4 state machine.
 func NewDiameterHandler(
 	logger *slog.Logger,
-	publishResponse func(sessionID string, raw []byte),
 	forwardToBiz func(ctx context.Context, sessionID string, transportType string, messageType string, raw []byte),
 	version, bizURL string,
 	httpClient *http.Client,
@@ -64,14 +62,13 @@ func NewDiameterHandler(
 	machine := sm.New(settings)
 
 	h := &DiameterHandler{
-		logger:          logger,
-		publishResponse: publishResponse,
-		forwardToBiz:    forwardToBiz,
-		version:         version,
-		bizURL:          bizURL,
-		httpClient:      httpClient,
-		diamForwarder:   diamForwarder,
-		sm:              machine,
+		logger:        logger,
+		forwardToBiz:  forwardToBiz,
+		version:       version,
+		bizURL:        bizURL,
+		httpClient:    httpClient,
+		diamForwarder: diamForwarder,
+		sm:            machine,
 	}
 
 	// Register ASR handler. It only fires AFTER the peer passes CER/CEA
@@ -230,9 +227,7 @@ func (h *DiameterHandler) handleASR() diam.HandlerFunc {
 func (h *DiameterHandler) handleASA() diam.HandlerFunc {
 	return func(conn diam.Conn, m *diam.Message) {
 		sessionID := extractSessionIDFromMsg(m)
-		h.logger.Debug("Diameter ASA received", "session_id", sessionID)
-		raw, _ := m.Serialize()
-		h.publishResponse(sessionID, raw)
+		h.logger.Debug("diameter_asa_received", "session_id", sessionID)
 	}
 }
 
@@ -261,9 +256,7 @@ func (h *DiameterHandler) handleRAR() diam.HandlerFunc {
 func (h *DiameterHandler) handleRAA() diam.HandlerFunc {
 	return func(conn diam.Conn, m *diam.Message) {
 		sessionID := extractSessionIDFromMsg(m)
-		h.logger.Debug("Diameter RAA received", "session_id", sessionID)
-		raw, _ := m.Serialize()
-		h.publishResponse(sessionID, raw)
+		h.logger.Debug("diameter_raa_received", "session_id", sessionID)
 	}
 }
 
@@ -275,9 +268,6 @@ func (h *DiameterHandler) handleSTR() diam.HandlerFunc {
 
 		// Send STA back.
 		h.sendSTA(conn, m)
-
-		raw, _ := m.Serialize()
-		h.publishResponse(sessionID, raw)
 	}
 }
 
@@ -285,9 +275,7 @@ func (h *DiameterHandler) handleSTR() diam.HandlerFunc {
 func (h *DiameterHandler) handleSTA() diam.HandlerFunc {
 	return func(conn diam.Conn, m *diam.Message) {
 		sessionID := extractSessionIDFromMsg(m)
-		h.logger.Debug("Diameter STA received", "session_id", sessionID)
-		raw, _ := m.Serialize()
-		h.publishResponse(sessionID, raw)
+		h.logger.Debug("diameter_sta_received", "session_id", sessionID)
 	}
 }
 

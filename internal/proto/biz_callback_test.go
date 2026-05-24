@@ -5,38 +5,6 @@ import (
 	"testing"
 )
 
-func TestAaaResponseEvent_JSONRoundtrip(t *testing.T) {
-	evt := &AaaResponseEvent{
-		Version:   "1.0",
-		SessionID: "nssAAF;123;auth123",
-		AuthCtxID: "auth123",
-		Payload:   []byte{1, 2, 3, 4},
-	}
-
-	data, err := json.Marshal(evt)
-	if err != nil {
-		t.Fatalf("json.Marshal error: %v", err)
-	}
-
-	var got AaaResponseEvent
-	if err := json.Unmarshal(data, &got); err != nil {
-		t.Fatalf("json.Unmarshal error: %v", err)
-	}
-
-	if got.Version != evt.Version {
-		t.Errorf("Version: got %q, want %q", got.Version, evt.Version)
-	}
-	if got.SessionID != evt.SessionID {
-		t.Errorf("SessionID: got %q, want %q", got.SessionID, evt.SessionID)
-	}
-	if got.AuthCtxID != evt.AuthCtxID {
-		t.Errorf("AuthCtxID: got %q, want %q", got.AuthCtxID, evt.AuthCtxID)
-	}
-	if string(got.Payload) != string(evt.Payload) {
-		t.Errorf("Payload: got %v, want %v", got.Payload, evt.Payload)
-	}
-}
-
 func TestSessionCorrEntry_JSONRoundtrip(t *testing.T) {
 	entry := &SessionCorrEntry{
 		AuthCtxID: "auth456",
@@ -97,8 +65,5 @@ func TestRedisConstants(t *testing.T) {
 	}
 	if PodsKey != "nssaa:pods" {
 		t.Errorf("PodsKey: got %q, want %q", PodsKey, "nssaa:pods")
-	}
-	if AaaResponseChannel != "nssaa:aaa-response" {
-		t.Errorf("AaaResponseChannel: got %q, want %q", AaaResponseChannel, "nssaa:aaa-response")
 	}
 }
