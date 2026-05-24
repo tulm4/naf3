@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/operator/nssAAF/internal/config"
@@ -22,8 +23,8 @@ type httpAAAClient struct {
 
 // newHTTPAAAClient creates a new HTTP AAA client.
 // It embeds httpclient.NativeAAAClient for ForwardEAP with retry + circuit breaker.
-func newHTTPAAAClient(aaaGatewayURL, podID, version string, cfg config.InternalCommConfig) *httpAAAClient {
-	native := httpclient.NewNativeAAAClient(aaaGatewayURL, cfg.Native)
+func newHTTPAAAClient(aaaGatewayURL, podID, version string, cfg config.InternalCommConfig, logger *slog.Logger) *httpAAAClient {
+	native := httpclient.NewNativeAAAClient(aaaGatewayURL, cfg.Native, logger)
 	return &httpAAAClient{
 		NativeAAAClient: native,
 		podID:           podID,
@@ -33,7 +34,7 @@ func newHTTPAAAClient(aaaGatewayURL, podID, version string, cfg config.InternalC
 
 // newHTTPAAAClientForTest creates a new HTTP AAA client for unit tests.
 func newHTTPAAAClientForTest(aaaGatewayURL, podID, version string, cfg config.InternalCommConfig) *httpAAAClient {
-	native := httpclient.NewNativeAAAClient(aaaGatewayURL, cfg.Native)
+	native := httpclient.NewNativeAAAClient(aaaGatewayURL, cfg.Native, slog.Default())
 	return &httpAAAClient{
 		NativeAAAClient: native,
 		podID:           podID,

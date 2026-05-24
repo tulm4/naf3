@@ -1,6 +1,7 @@
 package httpclient
 
 import (
+	"log/slog"
 	"os"
 	"testing"
 
@@ -168,7 +169,7 @@ func TestFactory_NewAAAClient_Native(t *testing.T) {
 	os.Unsetenv("ISTIO_MTLS")
 
 	factory := NewFactory(cfg)
-	client := factory.NewAAAClient("http://aaa-gateway:8080")
+	client := factory.NewAAAClient("http://aaa-gateway:8080", slog.Default())
 
 	if client == nil {
 		t.Fatal("expected non-nil client")
@@ -191,7 +192,7 @@ func TestFactory_NewAAAClient_Istio(t *testing.T) {
 	os.Unsetenv("ISTIO_MTLS")
 
 	factory := NewFactory(cfg)
-	client := factory.NewAAAClient("http://aaa-gateway:8080")
+	client := factory.NewAAAClient("http://aaa-gateway:8080", slog.Default())
 
 	if client == nil {
 		t.Fatal("expected non-nil client")

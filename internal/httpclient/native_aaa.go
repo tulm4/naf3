@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
@@ -23,13 +24,15 @@ import (
 // AAA protocol is more sensitive: fewer retries, faster circuit breaker.
 type NativeAAAClient struct {
 	aaaGatewayURL string
+	healthURL     string
 	httpClient    *http.Client
 	cbRegistry    *resilience.Registry
 	retryCfg      resilience.RetryConfig
 	source        string
+	logger        *slog.Logger
 }
 
-func NewNativeAAAClient(aaaGatewayURL string, cfg config.NativeCommConfig) *NativeAAAClient {
+func NewNativeAAAClient(aaaGatewayURL string, cfg config.NativeCommConfig, logger *slog.Logger) *NativeAAAClient {
 	// Stricter settings for AAA protocol
 	cfg.Retry.MaxAttempts = 2
 	cfg.Retry.MaxDelay = 10 * time.Second
@@ -49,13 +52,15 @@ func NewNativeAAAClient(aaaGatewayURL string, cfg config.NativeCommConfig) *Nati
 
 	return &NativeAAAClient{
 		aaaGatewayURL: aaaGatewayURL,
+		healthURL:     cfg.KeepalivedHealthURL,
 		source:        "nssAAF",
+		logger:        logger,
 		httpClient: &http.Client{
 			Transport: &http.Transport{
 				MaxIdleConns:        cfg.Pool.MaxIdleConns,
 				MaxIdleConnsPerHost: cfg.Pool.MaxIdleConnsPerHost,
 				IdleConnTimeout:     cfg.Pool.IdleConnTimeout,
-				TLSClientConfig:     tlsCfg,
+				TLSClientConfig:      tlsCfg,
 			},
 			Timeout: 20 * time.Second, // Stricter timeout for AAA
 		},
@@ -201,6 +206,64 @@ func (c *NativeAAAClient) doPost(ctx context.Context, body []byte, version strin
 		return nil, 0, err
 	}
 	return respBody, resp.StatusCode, nil
+}
+
+// StartVIPHealthCheck polls the keepalived health endpoint and resets the
+// circuit breaker for the old VIP owner when a VIP failover is detected.
+// This eliminates the 15-30s blackout window after keepalived recovers.
+func (c *NativeAAAClient) StartVIPHealthCheck(ctx context.Context) {
+	healthURL := c.healthURL
+	if healthURL == "" {
+		c.logger.Info("keepalived health check disabled: no health URL configured")
+		return
+	}
+
+	prevState := "unknown"
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		state, err := c.checkVIPState(ctx, healthURL)
+		if err != nil {
+			c.logger.Warn("keepalived health check failed", "error", err, "url", healthURL)
+			continue
+		}
+
+		if state != prevState && prevState != "unknown" {
+			c.logger.Info("VIP state changed, resetting circuit breaker",
+				"prev", prevState, "curr", state)
+			cb := c.cbRegistry.Get(c.aaaGatewayURL)
+			if cb != nil {
+				cb.Reset()
+			}
+		}
+		prevState = state
+	}
+}
+
+// checkVIPState queries the /health/vip endpoint and returns "MASTER", "BACKUP", or "unknown".
+// Uses the caller's ctx so the request is bounded by the caller's deadline.
+func (c *NativeAAAClient) checkVIPState(ctx context.Context, healthURL string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", healthURL, nil)
+	if err != nil {
+		return "unknown", err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "unknown", err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode == http.StatusOK {
+		return "MASTER", nil
+	}
+	return "BACKUP", nil
 }
 
 var _ proto.BizAAAClient = (*NativeAAAClient)(nil)

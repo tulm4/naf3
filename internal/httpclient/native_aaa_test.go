@@ -3,6 +3,7 @@ package httpclient
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -29,7 +30,8 @@ func TestNativeAAAClient_HappyPath(t *testing.T) {
 	defer server.Close()
 
 	cfg := config.NativeCommConfig{}
-	client := NewNativeAAAClient(server.URL, cfg)
+	logger := slog.Default()
+	client := NewNativeAAAClient(server.URL, cfg, logger)
 
 	req := &proto.AaaForwardRequest{
 		Version:   "1.0",
@@ -60,7 +62,8 @@ func TestNativeAAAClient_StrictRetry(t *testing.T) {
 	defer server.Close()
 
 	cfg := config.NativeCommConfig{}
-	client := NewNativeAAAClient(server.URL, cfg)
+	logger := slog.Default()
+	client := NewNativeAAAClient(server.URL, cfg, logger)
 
 	req := &proto.AaaForwardRequest{
 		Version:   "1.0",

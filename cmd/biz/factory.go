@@ -221,7 +221,11 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 		f.podID,
 		f.cfg.Version,
 		commCfg,
+		f.logger,
 	)
+
+	// Start VIP health check for circuit breaker reset on failover
+	go aaaClient.StartVIPHealthCheck(context.Background())
 
 	// ─── N58: Nnssaaf_NSSAA ─────────────────────────────────────────────
 	nssaaHandler := nssaa.NewHandler(nssaaStore,

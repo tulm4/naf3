@@ -1,6 +1,7 @@
 package httpclient
 
 import (
+	"log/slog"
 	"os"
 
 	"github.com/operator/nssAAF/internal/config"
@@ -49,11 +50,11 @@ func (f *Factory) NewBizServiceClient(bizServiceURL string) proto.BizServiceClie
 }
 
 // NewAAAClient creates an AAA client for Biz Pod -> AAA GW.
-func (f *Factory) NewAAAClient(aaaGatewayURL string) proto.BizAAAClient {
+func (f *Factory) NewAAAClient(aaaGatewayURL string, logger *slog.Logger) proto.BizAAAClient {
 	switch f.mode {
 	case ModeIstio:
 		return newIstioAAAClient(aaaGatewayURL)
 	default:
-		return NewNativeAAAClient(aaaGatewayURL, f.cfg.Native)
+		return NewNativeAAAClient(aaaGatewayURL, f.cfg.Native, logger)
 	}
 }

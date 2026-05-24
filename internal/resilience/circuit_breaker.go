@@ -132,6 +132,16 @@ func (cb *CircuitBreaker) State() State {
 	return cb.state
 }
 
+// Reset forces the circuit breaker to CLOSED state.
+// Used by VIP health check to immediately restore connectivity after failover.
+func (cb *CircuitBreaker) Reset() {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	cb.state = StateClosed
+	cb.failures = 0
+	cb.successes = 0
+}
+
 // Registry manages named circuit breakers keyed by "host:port".
 // D-03: CircuitBreakerRegistry keyed by "host:port".
 type Registry struct {
