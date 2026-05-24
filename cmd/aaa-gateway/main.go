@@ -72,12 +72,12 @@ func main() {
 		}
 	}()
 
-	// Start the gateway (UDP/TCP listeners)
+	// VIP-aware startup: start listeners only when this replica owns the VIP
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := gw.Start(ctx); err != nil {
-		slog.Error("gateway start failed", "error", err)
+	if !gw.StartVIPAware(ctx, cfg.AAAgw.KeepalivedStatePath) {
+		slog.Error("gateway failed to acquire VIP or start listeners")
 		os.Exit(1)
 	}
 

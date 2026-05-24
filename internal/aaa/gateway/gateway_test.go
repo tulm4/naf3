@@ -1,11 +1,14 @@
 package gateway
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestNewRedisClient_Standalone(t *testing.T) {
@@ -78,5 +81,44 @@ func TestVIPHealthHandler_MissingStateFile(t *testing.T) {
 
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("code: got %d, want %d", rec.Code, http.StatusServiceUnavailable)
+	}
+}
+
+func TestStartVIPAware_DevModeNoStateFile(t *testing.T) {
+	// When statePath is empty, should start immediately without polling
+	gw := &Gateway{
+		cfg: Config{
+			KeepalivedStatePath: "",
+			ListenRADIUS:       "",
+			ListenDIAMETER:     "",
+		},
+		logger: slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		wg:     sync.WaitGroup{},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	started := gw.StartVIPAware(ctx, "")
+	if !started {
+		t.Fatal("expected StartVIPAware to return true in dev mode")
+	}
+}
+
+func TestStartVIPAware_DevModeDevNull(t *testing.T) {
+	gw := &Gateway{
+		cfg: Config{
+			KeepalivedStatePath: "/dev/null",
+			ListenRADIUS:       "",
+			ListenDIAMETER:     "",
+		},
+		logger: slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		wg:     sync.WaitGroup{},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	started := gw.StartVIPAware(ctx, "/dev/null")
+	if !started {
+		t.Fatal("expected StartVIPAware to return true with /dev/null state path")
 	}
 }

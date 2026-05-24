@@ -121,8 +121,8 @@ func New(cfg Config) *Gateway {
 	return g
 }
 
-// Start starts the AAA Gateway listeners.
-func (g *Gateway) Start(ctx context.Context) error {
+// startListeners starts all protocol goroutines. Must only be called by VIP owner.
+func (g *Gateway) startListeners(ctx context.Context) error {
 	g.ctx, g.cancel = context.WithCancel(ctx)
 
 	// Start RADIUS UDP listener
@@ -160,6 +160,51 @@ func (g *Gateway) Start(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// StartVIPAware blocks until this pod becomes VIP owner, then starts all listeners.
+// Returns true if started successfully, false on context cancellation or error.
+func (g *Gateway) StartVIPAware(ctx context.Context, statePath string) bool {
+	// Dev/test mode: no state file → start immediately
+	if statePath == "" || statePath == "/dev/null" {
+		g.logger.Info("no keepalived state file, starting immediately (dev/test mode)")
+		if err := g.startListeners(ctx); err != nil {
+			g.logger.Error("startListeners failed", "error", err)
+			return false
+		}
+		return true
+	}
+
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		state, err := readKeepalivedState(statePath)
+		if err != nil {
+			g.logger.Warn("keepalived state unreadable", "error", err)
+		} else if state == "MASTER" {
+			g.logger.Info("VIP acquired, starting all listeners")
+			if err := g.startListeners(ctx); err != nil {
+				g.logger.Error("startListeners failed", "error", err)
+				return false
+			}
+			return true
+		} else {
+			g.logger.Info("not VIP owner, waiting", "state", state)
+		}
+
+		select {
+		case <-ctx.Done():
+			return false
+		case <-ticker.C:
+		}
+	}
+}
+
+// Start starts the AAA Gateway listeners unconditionally.
+// Deprecated: use StartVIPAware for HA deployments.
+func (g *Gateway) Start(ctx context.Context) error {
+	return g.startListeners(ctx)
 }
 
 // Stop gracefully stops the AAA Gateway.
