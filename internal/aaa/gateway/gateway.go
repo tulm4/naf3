@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"sync"
@@ -46,6 +47,8 @@ type Config struct {
 
 	RedisMode           string // "standalone" or "sentinel"
 	KeepalivedStatePath string // path to keepalived state file
+
+	BizPodEntryTTL time.Duration // TTL for BizPodEntry keys (default 60s)
 }
 
 // Gateway is the AAA Gateway component. It runs in a separate process from Biz Pods.
@@ -300,10 +303,97 @@ func (g *Gateway) writeSessionCorr(ctx context.Context, sessionID string, entry 
 	return g.redis.Set(ctx, key, data, proto.DefaultPayloadTTL).Err()
 }
 
+// getBizPodURL reads the BizPodEntry for a specific podID from Redis HASH.
+// Returns empty string if the pod is not registered or TTL has expired.
+func (g *Gateway) getBizPodURL(ctx context.Context, podID string) (string, error) {
+	if podID == "" {
+		return "", nil
+	}
+	key := proto.BizPodsKey(podID)
+	data, err := g.redis.Get(ctx, key).Bytes()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return "", nil
+		}
+		return "", err
+	}
+	var entry proto.BizPodEntry
+	if err := json.Unmarshal(data, &entry); err != nil {
+		return "", err
+	}
+	return entry.URL, nil
+}
+
+// pickRandomLiveBizURL selects a random live Biz Pod from the Redis HASH.
+// A pod is considered live if its LastSeen is within ttl.
+func (g *Gateway) pickRandomLiveBizURL(ctx context.Context) (string, error) {
+	keys, err := g.redis.Keys(ctx, "nssaa:biz:pod:*").Result()
+	if err != nil {
+		return "", err
+	}
+	if len(keys) == 0 {
+		return "", nil
+	}
+
+	ttl := g.cfg.BizPodEntryTTL
+	if ttl == 0 {
+		ttl = proto.BizPodEntryTTL
+	}
+	cutoff := time.Now().Add(-ttl).Unix()
+	var livePods []string
+	for _, key := range keys {
+		data, err := g.redis.Get(ctx, key).Bytes()
+		if err != nil {
+			continue
+		}
+		var entry proto.BizPodEntry
+		if err := json.Unmarshal(data, &entry); err != nil {
+			continue
+		}
+		if entry.LastSeen >= cutoff && entry.URL != "" {
+			livePods = append(livePods, entry.URL)
+		}
+	}
+	if len(livePods) == 0 {
+		return "", nil
+	}
+	return livePods[time.Now().UnixNano()%int64(len(livePods))], nil
+}
+
+// selectTargetBizURL selects the target URL for a server-initiated message.
+// Priority: 1) direct pod lookup via podID, 2) random live pod, 3) static BizServiceURL.
+func (g *Gateway) selectTargetBizURL(ctx context.Context, podID string) (string, error) {
+	// 1. Try direct lookup
+	if podID != "" {
+		url, err := g.getBizPodURL(ctx, podID)
+		if err != nil {
+			g.logger.Warn("getBizPodURL failed, falling back", "pod_id", podID, "error", err)
+		} else if url != "" {
+			return url, nil
+		}
+	}
+	// 2. Fallback: random live pod
+	url, err := g.pickRandomLiveBizURL(ctx)
+	if err != nil {
+		g.logger.Warn("pickRandomLiveBizURL failed, falling back to static", "error", err)
+	} else if url != "" {
+		return url, nil
+	}
+	// 3. Final fallback: static URL
+	return g.cfg.BizServiceURL, nil
+}
+
+const (
+	serverInitMaxRetries   = 3
+	serverInitRetryBase    = 1 * time.Second
+	serverInitRetryMax     = 3 * time.Second
+)
+
 // forwardToBiz sends a server-initiated message to the Biz Pod via HTTP POST.
-// It also writes the session correlation entry to Redis first.
+// It selects the target pod dynamically, retries on connection errors, and pushes
+// failed messages to the DLQ after all retries are exhausted.
 func (g *Gateway) forwardToBiz(ctx context.Context, sessionID string, transportType string, messageType string, raw []byte) {
-	// 1. Look up session correlation from Redis
+	// 1. Look up session correlation to get target PodID
 	entry, err := g.getSessionCorr(ctx, sessionID)
 	if err != nil || entry == nil {
 		g.logger.Warn("server_initiated_session_not_found",
@@ -313,45 +403,109 @@ func (g *Gateway) forwardToBiz(ctx context.Context, sessionID string, transportT
 		return
 	}
 
-	// 2. Build and send the request to Biz Pod
+	// 2. Build the request body once
 	req := &proto.AaaServerInitiatedRequest{
 		Version:       g.version,
-		SessionID:     sessionID,
-		AuthCtxID:     entry.AuthCtxID,
+		SessionID:    sessionID,
+		AuthCtxID:    entry.AuthCtxID,
 		TransportType: proto.TransportType(transportType),
-		MessageType:   proto.MessageType(messageType),
-		Payload:       raw,
+		MessageType:  proto.MessageType(messageType),
+		Payload:      raw,
 	}
-
 	body, err := json.Marshal(req)
 	if err != nil {
 		g.logger.Error("failed to marshal server-initiated request", "error", err)
 		return
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST",
-		g.cfg.BizServiceURL+"/aaa/server-initiated", bytes.NewReader(body))
-	if err != nil {
-		g.logger.Error("failed to create request to biz", "error", err)
+	// 3. Retry loop
+	var lastErr error
+	for attempt := 0; attempt < serverInitMaxRetries; attempt++ {
+		if attempt > 0 {
+			sleep := time.Duration(attempt) * serverInitRetryBase
+			if sleep > serverInitRetryMax {
+				sleep = serverInitRetryMax
+			}
+			time.Sleep(sleep)
+		}
+
+		targetURL, err := g.selectTargetBizURL(ctx, entry.PodID)
+		if err != nil {
+			lastErr = err
+			g.logger.Warn("selectTargetBizURL failed",
+				"attempt", attempt+1, "error", err)
+			continue
+		}
+
+		httpReq, err := http.NewRequestWithContext(ctx, "POST",
+			targetURL+"/aaa/server-initiated", bytes.NewReader(body))
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set(proto.HeaderName, g.version)
+
+		resp, err := g.bizHTTPClient.Do(httpReq)
+		if err != nil {
+			lastErr = err
+			isConnErr := isConnectionError(err)
+			g.logger.Warn("biz HTTP call failed",
+				"attempt", attempt+1, "error", err, "target_url", targetURL,
+				"retrying", isConnErr)
+			// Only retry on connection errors — 4xx/5xx from the server are not retried
+			if !isConnErr {
+				break
+			}
+			continue
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+
+		if resp.StatusCode == http.StatusOK {
+			return // Success
+		}
+		g.logger.Warn("biz returned non-OK",
+			"status", resp.StatusCode, "session_id", sessionID, "target_url", targetURL)
+		// Non-connection errors and 4xx/5xx are not retried
 		return
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set(proto.HeaderName, g.version)
 
-	resp, err := g.bizHTTPClient.Do(httpReq)
+	// 4. All retries exhausted → push to DLQ
+	g.logger.Error("server_initiated_all_retries_failed",
+		"session_id", sessionID, "error", lastErr, "pod_id", entry.PodID)
+	g.pushDLQ(ctx, sessionID, transportType, messageType, body)
+}
+
+// isConnectionError returns true if err is a connection/dial timeout error.
+func isConnectionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		return opErr.Op == "dial" || opErr.Op == "read" || opErr.Op == "write"
+	}
+	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
+}
+
+// pushDLQ pushes a failed server-initiated message to the Redis DLQ list.
+func (g *Gateway) pushDLQ(ctx context.Context, sessionID, transportType, messageType string, body []byte) {
+	msg := map[string]interface{}{
+		"sessionID":     sessionID,
+		"transportType": transportType,
+		"messageType":   messageType,
+		"payload":       body,
+		"attemptCount":  0,
+		"queuedAt":      time.Now().Unix(),
+	}
+	data, err := json.Marshal(msg)
 	if err != nil {
-		g.logger.Error("biz service unavailable for server-initiated",
-			"error", err, "session_id", sessionID)
+		g.logger.Error("failed to marshal DLQ message", "error", err)
 		return
 	}
-	// Drain and close the body to allow connection reuse.
-	// io.Copy is idempotent and safe even if the body is already empty.
-	_, _ = io.Copy(io.Discard, resp.Body)
-	_ = resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		g.logger.Warn("biz returned non-OK for server-initiated",
-			"status", resp.StatusCode, "session_id", sessionID)
+	if err := g.redis.RPush(ctx, proto.DLQKey, data).Err(); err != nil {
+		g.logger.Error("failed to push to DLQ", "error", err)
 	}
 }
 
