@@ -38,6 +38,17 @@ After a detailed codebase audit of the circuit breaker, dead-letter queue (DLQ),
 |----|----------|-------------|
 | RL-G1 | High | `RateLimiter` fully implemented but never wired into HTTP handlers |
 
+### 2.4 Metrics and Alerting Gaps
+
+| ID | Severity | Description |
+|----|----------|-------------|
+| MET-G1 | High | `nssAAF_ratelimit_requests_total{result="limited"}` never emitted — RL-G1 counterpart missing |
+| MET-G2 | Medium | `DLQProcessed` counter defined but never incremented (blocked on DLQ-G1) |
+| AL-G1 | High | No alert for DLQ items exhausting MaxAttempts — silently discarded |
+| AL-G2 | Medium | No alert for rate limit hits — RL misconfig or attack undetected |
+| AL-G3 | Low | No alert for DLQ stalled (depth > 0 for > 30 min, no processing) |
+| AL-G4 | Low | No alert for CB flapping (excessive transitions) |
+
 ---
 
 ## 3. Architecture
@@ -349,7 +360,133 @@ nssaaHandler := nssaa.NewHandler(nssaaStore,
 
 ---
 
-## 7. Factory Changes
+## 7. Metrics and Alerting
+
+### 7.1 MET-G1: Emit Rate Limit Metric on 429
+
+**Files:** `internal/api/nssaa/handler.go`, `internal/api/aiw/handler.go`
+
+**Problem:** `redis.RateLimiter` has `Allow()` but no call site emits a Prometheus counter when rate limit is hit.
+
+**Fix:** In each N58/N60 handler, after calling `rateLimiter.Allow()`:
+
+```go
+allowed, err := h.rateLimiter.AllowGPSI(ctx, gpsiHash)
+if err != nil {
+    slog.Warn("ratelimit: allow check failed", "error", err)
+}
+if !allowed {
+    metrics.RateLimitRequests.WithLabelValues("limited").Inc()
+    h.write429(w, r, retryAfter)
+    return
+}
+```
+
+The `RateLimitRequests` counter already exists in `internal/metrics/metrics.go` — just needs to be called.
+
+### 7.2 MET-G2: DLQProcessed Counter
+
+**File:** `internal/cache/redis/dlq.go`
+
+**Problem:** `DLQProcessed` counter is defined but never incremented — `Process()` is a no-op.
+
+**Fix:** Unblocked by DLQ-G1. After `Process()` is rewritten, it emits:
+
+```go
+metrics.DLQProcessed.WithLabelValues("success").Inc()   // delivery succeeded
+metrics.DLQProcessed.WithLabelValues("exhausted").Inc() // MaxAttempts reached
+metrics.DLQProcessed.WithLabelValues("error").Inc()     // re-enqueue failed
+```
+
+### 7.3 AL-G1: Alert on DLQ Exhaustion (Critical)
+
+**File:** `deployments/nssaa-biz/prometheusrules.yaml`
+
+**Problem:** When items exhaust MaxAttempts, they are silently discarded. No alert fires.
+
+**Fix:** Add alert:
+
+```yaml
+# DLQ item exhausted — critical: AMF notification permanently lost
+- alert: NssaaDLQExhausted
+  expr: increase(nssAAF_dlq_processed_total{result="exhausted"}[15m]) > 0
+  for: 1m
+  labels:
+    severity: critical
+  annotations:
+    summary: "DLQ item exhausted MaxAttempts — AMF notification permanently lost"
+    description: "{{ $value }} DLQ item(s) exhausted MaxAttempts in the last 15m and were discarded"
+```
+
+### 7.4 AL-G2: Alert on Rate Limit Hits
+
+**File:** `deployments/nssaa-biz/prometheusrules.yaml`
+
+**Problem:** Rate limit fires but no visibility — could indicate misconfig or a DoS attempt.
+
+**Fix:** Add alert:
+
+```yaml
+# Rate limit triggered frequently — possible misconfig or abuse
+- alert: NssaaRateLimitHit
+  expr: |
+    sum(rate(nssAAF_ratelimit_requests_total{result="limited"}[5m]))
+    by (handler) > 0.1
+  for: 5m
+  labels:
+    severity: major
+  annotations:
+    summary: "Rate limit triggered frequently on {{ $labels.handler }}"
+    description: "Rate limit hit > 6 req/min on {{ $labels.handler }}"
+```
+
+### 7.5 AL-G3: Alert on DLQ Processing Stall
+
+**File:** `deployments/nssaa-biz/prometheusrules.yaml`
+
+**Problem:** If DLQ processor goroutine crashes or deadlocks, depth grows but no alert fires until it exceeds 100 (current threshold).
+
+**Fix:** Add alert for DLQ stall:
+
+```yaml
+# DLQ has items but nothing processed — processor may be stalled
+- alert: NssaaDLQProcessingStalled
+  expr: |
+    nssAAF_dlq_depth > 0
+    and
+    increase(nssAAF_dlq_processed_total[30m]) == 0
+  for: 5m
+  labels:
+    severity: critical
+  annotations:
+    summary: "DLQ stalled — no items processed in 30 minutes despite depth > 0"
+```
+
+### 7.6 AL-G4: Alert on Circuit Breaker Flapping
+
+**File:** `deployments/nssaa-biz/prometheusrules.yaml`
+
+**Problem:** Excessive CB state transitions indicate unstable network or misconfigured thresholds.
+
+**Fix:** Add alert:
+
+```yaml
+# Circuit breaker flapping — too many state transitions
+- alert: NssaaCircuitBreakerFlapping
+  expr: |
+    sum(rate(nssAAF_httpclient_circuit_breaker_transitions_total[15m]))
+    by (server) > 10
+  for: 5m
+  labels:
+    severity: warning
+  annotations:
+    summary: "Circuit breaker flapping for {{ $labels.server }} — >10 transitions in 15m"
+    description: "Frequent CB state transitions indicate instability. Check network or lower failure threshold."
+```
+
+---
+
+## 8. Factory Changes
 
 ### 7.1 New Registry Instantiation
 
@@ -423,7 +560,7 @@ go dlq.Process(ctx, dlqHTTPClient)```
 
 ---
 
-## 8. New Dependencies
+## 9. New Dependencies
 
 No new external dependencies required. All implementations already exist:
 - `resilience.Registry` and `resilience.CircuitBreaker` — existing
@@ -433,7 +570,7 @@ No new external dependencies required. All implementations already exist:
 
 ---
 
-## 9. Test Coverage
+## 10. Test Coverage
 
 | Test | Scope |
 |------|-------|
@@ -444,12 +581,17 @@ No new external dependencies required. All implementations already exist:
 | Unit: DLQ MaxAttempts exhaustion | `redis/dlq_test.go` |
 | Unit: DLQItem unification | `redis/dlq_test.go` |
 | Unit: RateLimiter wiring | `nssaa/handler_test.go` |
+| Unit: MET-G1 rate limit counter emission | `nssaa/handler_test.go` |
 | Integration: DLQ delivery to mock AMF | `integration/redis_test.go` |
 | Integration: Rate limit returns 429 | `integration/` |
+| Prometheus: AL-G1 alert expression | `deployments/nssaa-biz/prometheusrules_test.go` |
+| Prometheus: AL-G2 alert expression | `deployments/nssaa-biz/prometheusrules_test.go` |
+| Prometheus: AL-G3 alert expression | `deployments/nssaa-biz/prometheusrules_test.go` |
+| Prometheus: AL-G4 alert expression | `deployments/nssaa-biz/prometheusrules_test.go` |
 
 ---
 
-## 10. Files Changed
+## 11. Files Changed
 
 | File | Change |
 |------|--------|
@@ -467,8 +609,9 @@ No new external dependencies required. All implementations already exist:
 | `internal/api/aiw/options.go` | Add WithRateLimiter option |
 | `internal/api/aiw/handler.go` | Apply rate limit before processing |
 | `cmd/biz/factory.go` | Wire 3 CB registries, rate limiter, update NF client constructors |
-| `internal/metrics/metrics.go` | Add DLQProcessed label values |
+| `internal/metrics/metrics.go` | Add DLQProcessed label values; add RateLimitRequests counter |
 | `internal/config/config.go` | No change (RateLimitConfig already exists) |
+| `deployments/nssaa-biz/prometheusrules.yaml` | Add AL-G1 through AL-G4 alerts |
 | `test/unit/resilience/circuit_breaker_test.go` | Add prevCBState test cases |
 | `test/unit/amf/notifier_test.go` | Add CB config test, prevCBState test |
 | `test/unit/nrf/nrf_test.go` | Add CB wrapping test |
