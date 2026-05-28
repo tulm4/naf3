@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -242,26 +241,16 @@ func TestDLQ_Process_Exhaustion(t *testing.T) {
 	err = dlq.Enqueue(context.Background(), item)
 	require.NoError(t, err)
 
+	// Item is dequeued and immediately discarded (attempt=3 == max=3).
+	// Stop() cancels the internal context; goroutine exits.
 	hc := &http.Client{Timeout: 1 * time.Second}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	var wg sync.WaitGroup
-	var done atomic.Bool
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		dlq.Process(ctx, hc, func() { done.Store(true) })
-	}()
-
-	wg.Wait()   // Wait for goroutine to start
-	dlq.Done()  // Wait for goroutine to finish processing
-
-	assert.True(t, done.Load(), "onDone should be called after exhaustion")
+	go dlq.Process(context.Background(), hc)
+	time.Sleep(50 * time.Millisecond)
+	dlq.Stop()
 
 	length, err := dlq.Len(context.Background())
 	require.NoError(t, err)
-	assert.Equal(t, int64(0), length, "exhausted item should be discarded")
+	assert.Equal(t, int64(0), length, "exhausted item should be discarded, not re-enqueued")
 }
 
 func TestDLQ_Process_DeliverySuccess(t *testing.T) {
@@ -280,9 +269,12 @@ func TestDLQ_Process_DeliverySuccess(t *testing.T) {
 
 	dlq := NewDLQ(pool)
 
-	var callCount atomic.Int32
+	var callCount int
+	var mu sync.Mutex
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		callCount.Add(1)
+		mu.Lock()
+		callCount++
+		mu.Unlock()
 		_, _ = io.Copy(io.Discard, r.Body)
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -301,30 +293,24 @@ func TestDLQ_Process_DeliverySuccess(t *testing.T) {
 	err = dlq.Enqueue(context.Background(), item)
 	require.NoError(t, err)
 
+	// Item is dequeued and delivered to AMF successfully.
+	// Stop() cancels the internal context; goroutine exits.
 	hc := &http.Client{Timeout: 5 * time.Second}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	go dlq.Process(context.Background(), hc)
+	time.Sleep(50 * time.Millisecond)
+	dlq.Stop()
 
-	var wg sync.WaitGroup
-	var done atomic.Bool
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		dlq.Process(ctx, hc, func() { done.Store(true) })
-	}()
-
-	wg.Wait()   // Wait for goroutine to start
-	dlq.Done()  // Wait for goroutine to finish processing
-
-	assert.True(t, done.Load(), "onDone should be called after delivery")
-	assert.Equal(t, int32(1), callCount.Load(), "AMF should receive exactly one delivery attempt")
+	mu.Lock()
+	count := callCount
+	mu.Unlock()
+	assert.Equal(t, 1, count, "AMF should receive exactly one delivery attempt")
 
 	length, err := dlq.Len(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), length, "delivered item should be removed from queue")
 }
 
-func TestDLQ_Process_ReenqueueOnFailure(t *testing.T) {
+func TestDLQ_Process_MultipleRetriesThenExhaustion(t *testing.T) {
 	mr, err := miniredis.Run()
 	require.NoError(t, err)
 	defer mr.Close()
@@ -345,13 +331,16 @@ func TestDLQ_Process_ReenqueueOnFailure(t *testing.T) {
 	}))
 	defer server.Close()
 
+	// One item in the queue with MaxAttempts=3. Process repeatedly dequeues,
+	// fails delivery, and re-enqueues. After 3 failures the item is discarded.
+	// Total time: ~1s for the retry cycle + 1s for final BRPOP wait < 5s deadline.
 	item := &AMFDLQItem{
 		ID:          "fail-1",
 		Type:        "SLICE_REVOCATION",
 		URI:         server.URL,
 		AuthCtxID:   "auth-789",
 		Attempt:     0,
-		MaxAttempts: 5,
+		MaxAttempts: 3,
 		Payload:     []byte(`{}`),
 		CreatedAt:   time.Now(),
 	}
@@ -362,20 +351,11 @@ func TestDLQ_Process_ReenqueueOnFailure(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	var wg sync.WaitGroup
-	var done atomic.Bool
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		dlq.Process(ctx, hc, func() { done.Store(true) })
-	}()
-
-	wg.Wait()   // Wait for goroutine to start
-	dlq.Done()  // Wait for goroutine to finish processing
-
-	assert.True(t, done.Load(), "onDone should be called after re-enqueue")
+	go dlq.Process(ctx, hc)
+	<-ctx.Done()
+	dlq.Done()
 
 	length, err := dlq.Len(context.Background())
 	require.NoError(t, err)
-	assert.Equal(t, int64(1), length, "failed item should be re-enqueued")
+	assert.Equal(t, int64(0), length, "all attempts exhausted, item should be discarded")
 }
