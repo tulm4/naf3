@@ -43,7 +43,6 @@ func NewDLQ(pool *Pool) *DLQ {
 	return &DLQ{
 		pool:   pool,
 		stopCh: make(chan struct{}),
-		doneCh: make(chan struct{}),
 	}
 }
 
@@ -55,6 +54,10 @@ func (d *DLQ) Enqueue(ctx context.Context, item interface{}) error {
 	return d.pool.Client().LPush(ctx, amfDLQKey, data).Err()
 }
 
+// Dequeue blocks on BRPOP until an item is available or the timeout expires.
+// Returns (nil, nil) when the timeout expires (queue empty) or when the
+// context is cancelled in miniredis. Callers must check ctx.Err() to
+// distinguish "queue empty" from "context cancelled".
 func (d *DLQ) Dequeue(ctx context.Context, timeout time.Duration) (*AMFDLQItem, error) {
 	result, err := d.pool.Client().BRPop(ctx, timeout, amfDLQKey).Result()
 	if err != nil {
@@ -95,7 +98,12 @@ func (d *DLQ) deliverToAMF(ctx context.Context, hc *http.Client, item *AMFDLQIte
 	return false, fmt.Errorf("dlq: non-2xx status: %d", resp.StatusCode)
 }
 
+// Process starts a background goroutine that continuously polls the DLQ and
+// attempts to deliver items to AMF. Items are re-enqueued on delivery failure
+// with an incremented Attempt counter. Items exceeding MaxAttempts are discarded.
+// The goroutine exits when ctx is cancelled or Stop() is called.
 func (d *DLQ) Process(ctx context.Context, hc *http.Client) {
+	d.doneCh = make(chan struct{})
 	d.wg.Add(1)
 	go func() {
 		defer d.wg.Done()
@@ -143,11 +151,14 @@ func (d *DLQ) Process(ctx context.Context, hc *http.Client) {
 	}()
 }
 
+// Stop signals the Process goroutine to exit and blocks until it finishes.
+// Safe to call multiple times.
 func (d *DLQ) Stop() {
 	close(d.stopCh)
 	d.wg.Wait()
 }
 
+// Done returns a channel that is closed when the Process goroutine has exited.
 func (d *DLQ) Done() <-chan struct{} {
 	return d.doneCh
 }
