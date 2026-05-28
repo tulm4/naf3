@@ -1,6 +1,7 @@
 package nssaa
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,9 +9,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/go-chi/chi/v5"
 	"github.com/operator/nssAAF/internal/api/common"
+	"github.com/operator/nssAAF/internal/cache/redis"
 	nssaanats "github.com/operator/nssAAF/oapi-gen/gen/nssaa"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -472,4 +476,122 @@ func TestInMemoryStore(t *testing.T) {
 
 func TestHandler_ImplementsServerInterface(t *testing.T) {
 	var _ nssaanats.ServerInterface = (*Handler)(nil)
+}
+
+// ─── Rate limit tests ─────────────────────────────────────────────────────
+
+func TestNSSAAHandler_RateLimit_Returns429(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	t.Cleanup(func() { mr.Close() })
+
+	pool, err := redis.NewPool(context.Background(), redis.Config{
+		Addrs:        []string{mr.Addr()},
+		PoolSize:     5,
+		MinIdleConns: 1,
+		DialTimeout:  100 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = pool.Close() })
+
+	// Create rate limiter with limit=1.
+	// With sliding window: 1st request allowed, 2nd request denied.
+	rl := redis.NewRateLimiter(pool.Client(), 1*time.Minute, 1)
+
+	// Exhaust the limit by making 2 requests (1 allowed, 1 denied).
+	ctx := context.Background()
+	_, err = rl.AllowAMF(ctx, "amf-host-1") // 1st: allowed
+	require.NoError(t, err)
+
+	allowed, err := rl.AllowAMF(ctx, "amf-host-1") // 2nd: denied
+	require.NoError(t, err)
+	require.False(t, allowed, "second request should be denied")
+
+	store := newMockStore()
+	h := NewHandler(store, WithRateLimiter(rl))
+
+	body := `{"gpsi":"520804600000001","snssai":{"sst":1},"eapIdRsp":"dXNlcgBleGFtcGxlLmNvbQ==","amfInstanceId":"amf-host-1"}`
+	req := httptest.NewRequest(http.MethodPost, "/nnssaaf-nssaa/v1/slice-authentications",
+		bytes.NewReader([]byte(body)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	makeRouter(h).ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusTooManyRequests, w.Code)
+	assert.Equal(t, "60", w.Header().Get("Retry-After"))
+
+	var problem common.ProblemDetails
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &problem))
+	assert.Equal(t, 429, problem.Status)
+	assert.Equal(t, "rate-limit-exceeded", problem.Cause)
+}
+
+func TestNSSAAHandler_RateLimit_ConfirmSliceAuthentication_Returns429(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	t.Cleanup(func() { mr.Close() })
+
+	pool, err := redis.NewPool(context.Background(), redis.Config{
+		Addrs:        []string{mr.Addr()},
+		PoolSize:     5,
+		MinIdleConns: 1,
+		DialTimeout:  100 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = pool.Close() })
+
+	rl := redis.NewRateLimiter(pool.Client(), 1*time.Minute, 1)
+
+	// Exhaust the limit for authctx:ctx-001.
+	ctx := context.Background()
+	_, err = rl.Allow(ctx, "authctx:ctx-001") // 1st: allowed
+	require.NoError(t, err)
+
+	allowed, err := rl.Allow(ctx, "authctx:ctx-001") // 2nd: denied
+	require.NoError(t, err)
+	require.False(t, allowed, "second request should be denied")
+
+	store := newMockStore()
+	store.data["ctx-001"] = &AuthCtx{
+		AuthCtxID: "ctx-001",
+		GPSI:      "520804600000001",
+		SnssaiSST: 1,
+		SnssaiSD:  "000001",
+	}
+	h := NewHandler(store, WithRateLimiter(rl))
+
+	body := `{"gpsi":"520804600000001","snssai":{"sst":1,"sd":"000001"},"eapMessage":"dGVzdA=="}`
+	req := httptest.NewRequest(http.MethodPut, "/nnssaaf-nssaa/v1/slice-authentications/ctx-001",
+		bytes.NewReader([]byte(body)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	makeRouter(h).ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusTooManyRequests, w.Code)
+	assert.Equal(t, "60", w.Header().Get("Retry-After"))
+
+	var problem common.ProblemDetails
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &problem))
+	assert.Equal(t, 429, problem.Status)
+	assert.Equal(t, "rate-limit-exceeded", problem.Cause)
+}
+
+func TestNSSAAHandler_RateLimit_NilRateLimiter_AllowsRequest(t *testing.T) {
+	// When no rate limiter is set, requests should be allowed.
+	store := newMockStore()
+	h := NewHandler(store, WithRateLimiter(nil))
+
+	body := `{"gpsi":"520804600000001","snssai":{"sst":1},"eapIdRsp":"dXNlcgBleGFtcGxlLmNvbQ=="}`
+	req := httptest.NewRequest(http.MethodPost, "/nnssaaf-nssaa/v1/slice-authentications",
+		bytes.NewReader([]byte(body)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	// Use makeRouter to properly mount the handler.
+	makeRouter(h).ServeHTTP(w, req)
+
+	// Should succeed (201 Created), not rate limited.
+	assert.Equal(t, http.StatusCreated, w.Code)
 }

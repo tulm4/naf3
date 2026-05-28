@@ -12,11 +12,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/google/uuid"
 	"github.com/operator/nssAAF/internal/api/common"
+	"github.com/operator/nssAAF/internal/cache/redis"
 	"github.com/operator/nssAAF/internal/eap"
+	"github.com/operator/nssAAF/internal/metrics"
 	"github.com/operator/nssAAF/internal/udm"
 	nssaanats "github.com/operator/nssAAF/oapi-gen/gen/nssaa"
 	"github.com/operator/nssAAF/oapi-gen/gen/specs"
@@ -55,13 +59,14 @@ var ErrNotFound = errors.New("auth context not found")
 // It receives HTTP requests validated by the oapi-codegen router and
 // delegates to the business logic layer.
 type Handler struct {
-	store     AuthCtxStore
-	aaa       AAARouter
-	apiRoot   string
-	nrfClient interface {
+	store       AuthCtxStore
+	aaa         AAARouter
+	apiRoot     string
+	nrfClient   interface {
 		IsRegistered() bool
 	}
-	udmClient *udm.Client
+	udmClient   *udm.Client
+	rateLimiter *redis.RateLimiter
 }
 
 // HandlerOption configures a Handler.
@@ -87,6 +92,11 @@ func WithNRFClient(nrf interface {
 // WithUDMClient sets the UDM client for subscription data retrieval.
 func WithUDMClient(udmClient *udm.Client) HandlerOption {
 	return func(h *Handler) { h.udmClient = udmClient }
+}
+
+// WithRateLimiter sets the rate limiter for the NSSAA handler.
+func WithRateLimiter(rl *redis.RateLimiter) HandlerOption {
+	return func(h *Handler) { h.rateLimiter = rl }
 }
 
 // NewHandler creates a new NSSAA handler.
@@ -126,6 +136,20 @@ func (h *Handler) CreateSliceAuthenticationContext(w http.ResponseWriter, r *htt
 		return
 	}
 	snssaiPresent := present["snssai"]
+
+	// Rate limit by AMF NF Instance ID (RL-G1).
+	// SliceAuthInfo.AmfInstanceId is a UUID NF instance ID — use it directly.
+	if h.rateLimiter != nil && body.AmfInstanceId != nil {
+		allowed, rlErr := h.rateLimiter.AllowAMF(r.Context(), string(*body.AmfInstanceId))
+		if rlErr != nil {
+			slog.Warn("ratelimit: allow check failed", "error", rlErr)
+		}
+		if !allowed {
+			metrics.RateLimitRequests.WithLabelValues("nssaa", "limited").Inc()
+			h.write429(w, r, 60)
+			return
+		}
+	}
 
 	if err := common.ValidateGPSI(string(body.Gpsi)); err != nil {
 		var pd *common.ProblemDetails
@@ -220,6 +244,19 @@ func (h *Handler) CreateSliceAuthenticationContext(w http.ResponseWriter, r *htt
 //nolint:revive // authCtxId matches the generated ServerInterface signature
 func (h *Handler) ConfirmSliceAuthentication(w http.ResponseWriter, r *http.Request, authCtxId string) {
 	reqID := common.GetRequestID(r.Context())
+
+	// Rate limit by authCtxId (RL-G1).
+	if h.rateLimiter != nil {
+		allowed, rlErr := h.rateLimiter.Allow(r.Context(), "authctx:"+authCtxId)
+		if rlErr != nil {
+			slog.Warn("ratelimit: allow check failed", "error", rlErr)
+		}
+		if !allowed {
+			metrics.RateLimitRequests.WithLabelValues("nssaa", "limited").Inc()
+			h.write429(w, r, 60)
+			return
+		}
+	}
 
 	if err := common.ValidateAuthCtxID(authCtxId); err != nil {
 		common.WriteProblem(w, common.ValidationProblem("authCtxId", err.Error()))
@@ -316,6 +353,17 @@ func (h *Handler) ConfirmSliceAuthentication(w http.ResponseWriter, r *http.Requ
 	w.Header().Set(common.HeaderContentType, common.MediaTypeJSONVersion)
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// write429 writes a 429 Too Many Requests response with Retry-After header.
+func (h *Handler) write429(w http.ResponseWriter, r *http.Request, retryAfter int) {
+	w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
+	w.WriteHeader(http.StatusTooManyRequests)
+	common.WriteProblem(w, common.NewProblem(
+		http.StatusTooManyRequests,
+		"rate-limit-exceeded",
+		"Rate limit exceeded for this request",
+	))
 }
 
 // Compile-time check: Handler must implement nssaanats.ServerInterface.
