@@ -120,7 +120,7 @@ func (c *NativeAAAClient) ForwardEAP(ctx context.Context, req *proto.AaaForwardR
 	var lastBody []byte
 	var lastErr error
 	var retryCount int
-	var prevCBState resilience.State
+	prevCBState := cb.State()
 
 	err = resilience.Do(ctx, c.retryCfg, func() error {
 		respBody, status, err := c.doPost(ctx, body, req.Version)
@@ -140,7 +140,6 @@ func (c *NativeAAAClient) ForwardEAP(ctx context.Context, req *proto.AaaForwardR
 		// Retry 5xx errors
 		if resilience.IsRetryable(status) {
 			retryCount++
-			prevCBState = cb.State()
 			lastErr = fmt.Errorf("retryable status: %d", status)
 			return lastErr
 		}
