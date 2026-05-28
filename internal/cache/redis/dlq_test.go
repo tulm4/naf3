@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -241,16 +242,22 @@ func TestDLQ_Process_Exhaustion(t *testing.T) {
 	err = dlq.Enqueue(context.Background(), item)
 	require.NoError(t, err)
 
-	// Start Process; item is exhausted so it is discarded.
-	// Use dlq.Stop() to interrupt the loop after the item is processed.
 	hc := &http.Client{Timeout: 1 * time.Second}
-	go dlq.Process(context.Background(), hc)
-	time.Sleep(50 * time.Millisecond) // Let Process dequeue and discard the item.
-	dlq.Stop()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		dlq.Process(ctx, hc)
+	}()
+
+	wg.Wait()
 
 	length, err := dlq.Len(context.Background())
 	require.NoError(t, err)
-	assert.Equal(t, int64(0), length, "exhausted item should be discarded, not re-enqueued")
+	assert.Equal(t, int64(0), length, "exhausted item should be discarded")
 }
 
 func TestDLQ_Process_DeliverySuccess(t *testing.T) {
@@ -269,12 +276,9 @@ func TestDLQ_Process_DeliverySuccess(t *testing.T) {
 
 	dlq := NewDLQ(pool)
 
-	var callCount int
-	var mu sync.Mutex
+	var callCount atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		callCount++
-		mu.Unlock()
+		callCount.Add(1)
 		_, _ = io.Copy(io.Discard, r.Body)
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -294,14 +298,19 @@ func TestDLQ_Process_DeliverySuccess(t *testing.T) {
 	require.NoError(t, err)
 
 	hc := &http.Client{Timeout: 5 * time.Second}
-	go dlq.Process(context.Background(), hc)
-	time.Sleep(50 * time.Millisecond) // Let Process dequeue and deliver the item.
-	dlq.Stop()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
 
-	mu.Lock()
-	count := callCount
-	mu.Unlock()
-	assert.Equal(t, 1, count, "AMF should receive exactly one delivery attempt")
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		dlq.Process(ctx, hc)
+	}()
+
+	wg.Wait()
+
+	assert.Equal(t, int32(1), callCount.Load(), "AMF should receive exactly one delivery attempt")
 
 	length, err := dlq.Len(context.Background())
 	require.NoError(t, err)
@@ -343,9 +352,17 @@ func TestDLQ_Process_ReenqueueOnFailure(t *testing.T) {
 	require.NoError(t, err)
 
 	hc := &http.Client{Timeout: 5 * time.Second}
-	go dlq.Process(context.Background(), hc)
-	time.Sleep(50 * time.Millisecond) // Let Process dequeue, fail, and re-enqueue.
-	dlq.Stop()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		dlq.Process(ctx, hc)
+	}()
+
+	wg.Wait()
 
 	length, err := dlq.Len(context.Background())
 	require.NoError(t, err)
