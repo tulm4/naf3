@@ -90,7 +90,7 @@ func (c *nativeBizClient) ForwardRequest(ctx context.Context, path, method strin
 	var lastStatus int
 	var lastErr error
 	var retryCount int
-	var prevCBState resilience.State
+	prevCBState := cb.State()
 
 	err := resilience.Do(ctx, c.retryCfg, func() error {
 		respBody, status, err := c.doRequest(ctx, path, method, body)
@@ -112,7 +112,6 @@ func (c *nativeBizClient) ForwardRequest(ctx context.Context, path, method strin
 		// Retry 5xx errors
 		if resilience.IsRetryable(status) {
 			retryCount++
-			prevCBState = cb.State()
 			lastErr = fmt.Errorf("retryable status: %d", status)
 			return lastErr
 		}
