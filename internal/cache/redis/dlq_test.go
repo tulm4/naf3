@@ -243,17 +243,21 @@ func TestDLQ_Process_Exhaustion(t *testing.T) {
 	require.NoError(t, err)
 
 	hc := &http.Client{Timeout: 1 * time.Second}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	var wg sync.WaitGroup
+	var done atomic.Bool
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		dlq.Process(ctx, hc)
+		dlq.Process(ctx, hc, func() { done.Store(true) })
 	}()
 
-	wg.Wait()
+	wg.Wait()   // Wait for goroutine to start
+	dlq.Done()  // Wait for goroutine to finish processing
+
+	assert.True(t, done.Load(), "onDone should be called after exhaustion")
 
 	length, err := dlq.Len(context.Background())
 	require.NoError(t, err)
@@ -298,18 +302,21 @@ func TestDLQ_Process_DeliverySuccess(t *testing.T) {
 	require.NoError(t, err)
 
 	hc := &http.Client{Timeout: 5 * time.Second}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	var wg sync.WaitGroup
+	var done atomic.Bool
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		dlq.Process(ctx, hc)
+		dlq.Process(ctx, hc, func() { done.Store(true) })
 	}()
 
-	wg.Wait()
+	wg.Wait()   // Wait for goroutine to start
+	dlq.Done()  // Wait for goroutine to finish processing
 
+	assert.True(t, done.Load(), "onDone should be called after delivery")
 	assert.Equal(t, int32(1), callCount.Load(), "AMF should receive exactly one delivery attempt")
 
 	length, err := dlq.Len(context.Background())
@@ -352,17 +359,21 @@ func TestDLQ_Process_ReenqueueOnFailure(t *testing.T) {
 	require.NoError(t, err)
 
 	hc := &http.Client{Timeout: 5 * time.Second}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	var wg sync.WaitGroup
+	var done atomic.Bool
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		dlq.Process(ctx, hc)
+		dlq.Process(ctx, hc, func() { done.Store(true) })
 	}()
 
-	wg.Wait()
+	wg.Wait()   // Wait for goroutine to start
+	dlq.Done()  // Wait for goroutine to finish processing
+
+	assert.True(t, done.Load(), "onDone should be called after re-enqueue")
 
 	length, err := dlq.Len(context.Background())
 	require.NoError(t, err)

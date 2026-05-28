@@ -33,16 +33,13 @@ type AMFDLQItem struct {
 }
 
 type DLQ struct {
-	pool         *Pool
-	wg           sync.WaitGroup
-	stopCh       chan struct{}
-	onProcessed  func()
-	processed    chan struct{}
-	mu           sync.Mutex
+	pool   *Pool
+	wg     sync.WaitGroup
+	stopCh chan struct{}
 }
 
 func NewDLQ(pool *Pool) *DLQ {
-	return &DLQ{pool: pool, stopCh: make(chan struct{}), processed: make(chan struct{})}
+	return &DLQ{pool: pool, stopCh: make(chan struct{})}
 }
 
 func (d *DLQ) Enqueue(ctx context.Context, item interface{}) error {
@@ -59,10 +56,10 @@ func (d *DLQ) Enqueue(ctx context.Context, item interface{}) error {
 // Returns (nil, ctx.Err()) when the context is cancelled or its deadline fires.
 func (d *DLQ) Dequeue(ctx context.Context, timeout time.Duration) (*AMFDLQItem, error) {
 	// Check context before blocking on BRPOP so callers can exit on cancellation.
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
+	// We check ctx.Err() because ctx.Done() is only closed on explicit cancellation,
+	// not when a deadline passes.
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	result, err := d.pool.Client().BRPop(ctx, timeout, amfDLQKey).Result()
 	if err != nil {
@@ -112,27 +109,20 @@ func (d *DLQ) deliverToAMF(ctx context.Context, hc *http.Client, item *AMFDLQIte
 // failure, or discarded after MaxAttempts exhaustion.
 // The caller must pass a dedicated *http.Client (e.g., 10s timeout) to
 // avoid circular dependencies.
-// Process exits when ctx is cancelled, stopCh is closed, or an unrecoverable
-// error occurs (including re-enqueue failures).
-func (d *DLQ) Process(ctx context.Context, hc *http.Client) {
+// onDone is called after each item is processed (exhaustion/discard, delivery, or
+// re-enqueue). The caller can use this to wait for completion in tests.
+func (d *DLQ) Process(ctx context.Context, hc *http.Client, onDone func()) {
 	d.wg.Add(1)
 	go func() {
 		defer d.wg.Done()
 		for {
-			// Check cancellation BEFORE blocking on Dequeue.
-			select {
-			case <-d.stopCh:
-				return
-			case <-ctx.Done():
-				return
-			default:
-			}
-
 			item, err := d.Dequeue(ctx, 1*time.Second)
+			// Return on context cancellation or deadline exceeded.
 			if err != nil {
 				return
 			}
 			if item == nil {
+				// Queue empty (Redis timeout); continue polling.
 				continue
 			}
 
@@ -142,6 +132,9 @@ func (d *DLQ) Process(ctx context.Context, hc *http.Client) {
 					"id", item.ID, "type", item.Type, "auth_ctx_id", item.AuthCtxID,
 					"attempt", item.Attempt, "max_attempts", item.MaxAttempts)
 				metrics.DLQProcessed.WithLabelValues("exhausted").Inc()
+				if onDone != nil {
+					onDone()
+				}
 				continue
 			}
 
@@ -150,6 +143,9 @@ func (d *DLQ) Process(ctx context.Context, hc *http.Client) {
 			if ok {
 				slog.Info("dlq: delivered", "id", item.ID, "type", item.Type, "auth_ctx_id", item.AuthCtxID)
 				metrics.DLQProcessed.WithLabelValues("success").Inc()
+				if onDone != nil {
+					onDone()
+				}
 				continue
 			}
 
@@ -164,39 +160,19 @@ func (d *DLQ) Process(ctx context.Context, hc *http.Client) {
 				return // Exit on unrecoverable error (cannot re-enqueue)
 			}
 			slog.Warn("dlq: re-enqueued", "id", item.ID, "attempt", item.Attempt, "error", retryErr)
+			if onDone != nil {
+				onDone()
+			}
 			return // Exit after re-enqueue so tests can verify queue state
 		}
 	}()
 }
 
 func (d *DLQ) Stop() {
-	d.mu.Lock()
 	if d.stopCh != nil {
 		close(d.stopCh)
 	}
-	d.mu.Unlock()
 	d.wg.Wait()
-	// Signal that processing is complete
-	d.mu.Lock()
-	if d.processed != nil {
-		select {
-		case <-d.processed:
-		default:
-			close(d.processed)
-		}
-	}
-	d.mu.Unlock()
-}
-
-// WaitProcessed blocks until Process has completed its current item or exited.
-// Returns immediately if Process has not been started.
-func (d *DLQ) WaitProcessed() {
-	d.mu.Lock()
-	ch := d.processed
-	d.mu.Unlock()
-	if ch != nil {
-		<-ch
-	}
 }
 
 func (d *DLQ) Done() {
