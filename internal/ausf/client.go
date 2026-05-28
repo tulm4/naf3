@@ -12,6 +12,7 @@ import (
 	"net/http"
 
 	"github.com/operator/nssAAF/internal/config"
+	"github.com/operator/nssAAF/internal/resilience"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
@@ -19,16 +20,19 @@ import (
 type Client struct {
 	baseURL    string
 	httpClient *http.Client
+	cbRegistry *resilience.Registry
 }
 
 // NewClient creates a new AUSF client.
-func NewClient(cfg config.AUSFConfig) *Client {
+// cbRegistry may be nil for testing; if non-nil, HTTP calls are wrapped with circuit breaker.
+func NewClient(cfg config.AUSFConfig, cbRegistry *resilience.Registry) *Client {
 	return &Client{
 		baseURL: cfg.BaseURL,
 		httpClient: &http.Client{
 			Timeout:   cfg.Timeout,
 			Transport: otelhttp.NewTransport(http.DefaultTransport),
 		},
+		cbRegistry: cbRegistry,
 	}
 }
 
@@ -38,6 +42,14 @@ func NewClient(cfg config.AUSFConfig) *Client {
 func (c *Client) ForwardMSK(ctx context.Context, authCtxID string, msk []byte) error {
 	if c.baseURL == "" {
 		return fmt.Errorf("ausf: baseURL not configured")
+	}
+
+	var cb *resilience.CircuitBreaker
+	if c.cbRegistry != nil {
+		cb = c.cbRegistry.Get(c.baseURL)
+		if !cb.Allow() {
+			return fmt.Errorf("ausf: circuit breaker open for %s", c.baseURL)
+		}
 	}
 
 	payload := map[string]interface{}{
@@ -58,12 +70,21 @@ func (c *Client) ForwardMSK(ctx context.Context, authCtxID string, msk []byte) e
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		if cb != nil {
+			cb.RecordFailure()
+		}
 		return fmt.Errorf("ausf: forward msk: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
+		if cb != nil {
+			cb.RecordFailure()
+		}
 		return fmt.Errorf("ausf: unexpected status %d", resp.StatusCode)
+	}
+	if cb != nil {
+		cb.RecordSuccess()
 	}
 	return nil
 }

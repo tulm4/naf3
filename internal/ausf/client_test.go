@@ -19,7 +19,7 @@ func TestNewClient(t *testing.T) {
 		Timeout: 10 * time.Second,
 	}
 
-	client := NewClient(cfg)
+	client := NewClient(cfg, nil)
 
 	assert.NotNil(t, client)
 	assert.Equal(t, "http://ausf.operator.com:8080", client.baseURL)
@@ -30,7 +30,7 @@ func TestNewClient(t *testing.T) {
 func TestNewClient_Defaults(t *testing.T) {
 	cfg := config.AUSFConfig{}
 
-	client := NewClient(cfg)
+	client := NewClient(cfg, nil)
 
 	assert.NotNil(t, client)
 	assert.Empty(t, client.baseURL)
@@ -60,7 +60,7 @@ func TestForwardMSK_Success(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	client := NewClient(config.AUSFConfig{BaseURL: server.URL})
+	client := NewClient(config.AUSFConfig{BaseURL: server.URL}, nil)
 	err := client.ForwardMSK(context.Background(), "auth-123", []byte("test-msk-data"))
 
 	assert.NoError(t, err)
@@ -73,7 +73,7 @@ func TestForwardMSK_Error_Non2xx(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	client := NewClient(config.AUSFConfig{BaseURL: server.URL})
+	client := NewClient(config.AUSFConfig{BaseURL: server.URL}, nil)
 	err := client.ForwardMSK(context.Background(), "auth-123", []byte("test-msk"))
 
 	assert.Error(t, err)
@@ -81,7 +81,7 @@ func TestForwardMSK_Error_Non2xx(t *testing.T) {
 }
 
 func TestForwardMSK_Error_NotConfigured(t *testing.T) {
-	client := NewClient(config.AUSFConfig{})
+	client := NewClient(config.AUSFConfig{}, nil)
 	err := client.ForwardMSK(context.Background(), "auth-123", []byte("test-msk"))
 
 	assert.Error(t, err)
@@ -90,7 +90,7 @@ func TestForwardMSK_Error_NotConfigured(t *testing.T) {
 
 func TestForwardMSK_Error_ConnectionRefused(t *testing.T) {
 	// Use an address that will fail to connect
-	client := NewClient(config.AUSFConfig{BaseURL: "http://localhost:19999"})
+	client := NewClient(config.AUSFConfig{BaseURL: "http://localhost:19999"}, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
@@ -105,7 +105,7 @@ func TestForwardMSK_ServerReturns404(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	client := NewClient(config.AUSFConfig{BaseURL: server.URL})
+	client := NewClient(config.AUSFConfig{BaseURL: server.URL}, nil)
 	err := client.ForwardMSK(context.Background(), "auth-nonexistent", []byte("test-msk"))
 
 	assert.Error(t, err)
@@ -121,7 +121,7 @@ func TestForwardMSK_MultipleCalls(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	client := NewClient(config.AUSFConfig{BaseURL: server.URL})
+	client := NewClient(config.AUSFConfig{BaseURL: server.URL}, nil)
 
 	for i := 0; i < 5; i++ {
 		err := client.ForwardMSK(context.Background(), "auth-"+string(rune('0'+i)), []byte("msk-data"))

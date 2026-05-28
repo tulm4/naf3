@@ -14,6 +14,7 @@ import (
 
 	"github.com/operator/nssAAF/internal/config"
 	"github.com/operator/nssAAF/internal/nrf"
+	"github.com/operator/nssAAF/internal/resilience"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
@@ -24,17 +25,20 @@ type Client struct {
 	baseURL    string
 	nrfClient  *nrf.Client
 	httpClient *http.Client
+	cbRegistry *resilience.Registry
 }
 
 // NewClient creates a new UDM client.
-func NewClient(cfg config.UDMConfig, nrfClient *nrf.Client) *Client {
+// cbRegistry may be nil for testing; if non-nil, HTTP calls are wrapped with circuit breaker.
+func NewClient(cfg config.UDMConfig, nrfClient *nrf.Client, cbRegistry *resilience.Registry) *Client {
 	return &Client{
-		baseURL:   cfg.BaseURL,
+		baseURL:    cfg.BaseURL,
 		nrfClient: nrfClient,
 		httpClient: &http.Client{
 			Timeout:   cfg.Timeout,
 			Transport: otelhttp.NewTransport(http.DefaultTransport),
 		},
+		cbRegistry: cbRegistry,
 	}
 }
 
@@ -60,6 +64,14 @@ func (c *Client) GetAuthContext(ctx context.Context, supi string) (interface{}, 
 		baseURL = udmEndpoint
 	}
 
+	var cb *resilience.CircuitBreaker
+	if c.cbRegistry != nil {
+		cb = c.cbRegistry.Get(baseURL)
+		if !cb.Allow() {
+			return nil, fmt.Errorf("udm: circuit breaker open for %s", baseURL)
+		}
+	}
+
 	url := fmt.Sprintf("%s/nudm-uem/v1/subscribers/%s/auth-contexts", baseURL, supi)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -69,15 +81,27 @@ func (c *Client) GetAuthContext(ctx context.Context, supi string) (interface{}, 
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		if cb != nil {
+			cb.RecordFailure()
+		}
 		return nil, fmt.Errorf("udm: get auth context: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotFound {
+		if cb != nil {
+			cb.RecordFailure()
+		}
 		return nil, fmt.Errorf("udm: subscriber %s not found", supi)
 	}
 	if resp.StatusCode != http.StatusOK {
+		if cb != nil {
+			cb.RecordFailure()
+		}
 		return nil, fmt.Errorf("udm: unexpected status %d", resp.StatusCode)
+	}
+	if cb != nil {
+		cb.RecordSuccess()
 	}
 
 	var result struct {
@@ -106,6 +130,14 @@ func (c *Client) UpdateAuthContext(ctx context.Context, supi, authCtxID, status 
 		baseURL = udmEndpoint
 	}
 
+	var cb *resilience.CircuitBreaker
+	if c.cbRegistry != nil {
+		cb = c.cbRegistry.Get(baseURL)
+		if !cb.Allow() {
+			return fmt.Errorf("udm: circuit breaker open for %s", baseURL)
+		}
+	}
+
 	url := fmt.Sprintf("%s/nudm-uem/v1/subscribers/%s/auth-contexts/%s", baseURL, supi, authCtxID)
 	payload := map[string]string{"authResult": status}
 	body, err := json.Marshal(payload)
@@ -121,12 +153,21 @@ func (c *Client) UpdateAuthContext(ctx context.Context, supi, authCtxID, status 
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		if cb != nil {
+			cb.RecordFailure()
+		}
 		return fmt.Errorf("udm: update auth context: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
+		if cb != nil {
+			cb.RecordFailure()
+		}
 		return fmt.Errorf("udm: update status %d", resp.StatusCode)
+	}
+	if cb != nil {
+		cb.RecordSuccess()
 	}
 	return nil
 }

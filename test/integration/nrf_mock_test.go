@@ -22,7 +22,7 @@ func TestIntegration_NRF_Discovery(t *testing.T) {
 	client := nrf.NewClient(config.NRFConfig{
 		BaseURL:         mock.URL(),
 		DiscoverTimeout: 5 * time.Second,
-	})
+	}, nil)
 
 	ctx := context.Background()
 	endpoint, err := client.DiscoverUDM(ctx, "00101")
@@ -41,7 +41,7 @@ func TestIntegration_NRF_Registration(t *testing.T) {
 	client := nrf.NewClient(config.NRFConfig{
 		BaseURL:         mock.URL(),
 		DiscoverTimeout: 5 * time.Second,
-	})
+	}, nil)
 
 	ctx := context.Background()
 	err := client.Register(ctx)
@@ -58,7 +58,7 @@ func TestIntegration_NRF_Heartbeat(t *testing.T) {
 	client := nrf.NewClient(config.NRFConfig{
 		BaseURL:         mock.URL(),
 		DiscoverTimeout: 5 * time.Second,
-	})
+	}, nil)
 
 	ctx := context.Background()
 	err := client.Register(ctx)
@@ -77,7 +77,7 @@ func TestIntegration_NRF_ServiceDiscovery(t *testing.T) {
 	client := nrf.NewClient(config.NRFConfig{
 		BaseURL:         mock.URL(),
 		DiscoverTimeout: 5 * time.Second,
-	})
+	}, nil)
 
 	ctx := context.Background()
 

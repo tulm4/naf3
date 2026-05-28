@@ -19,7 +19,7 @@ func TestNewClient(t *testing.T) {
 		BaseURL:         "http://nrf:8080",
 		DiscoverTimeout: 5 * time.Second,
 	}
-	client := NewClient(cfg)
+	client := NewClient(cfg, nil)
 
 	assert.NotNil(t, client)
 	assert.Equal(t, "http://nrf:8080", client.baseURL)
@@ -49,7 +49,7 @@ func TestClient_Register_Success(t *testing.T) {
 		BaseURL:         server.URL,
 		DiscoverTimeout: 5 * time.Second,
 	}
-	client := NewClient(cfg)
+	client := NewClient(cfg, nil)
 
 	err := client.Register(context.Background())
 	require.NoError(t, err)
@@ -67,7 +67,7 @@ func TestClient_Register_NonCreatedStatus(t *testing.T) {
 		BaseURL:         server.URL,
 		DiscoverTimeout: 5 * time.Second,
 	}
-	client := NewClient(cfg)
+	client := NewClient(cfg, nil)
 
 	err := client.Register(context.Background())
 	assert.Error(t, err)
@@ -99,7 +99,7 @@ func TestClient_Heartbeat_Success(t *testing.T) {
 		BaseURL:         server.URL,
 		DiscoverTimeout: 5 * time.Second,
 	}
-	client := NewClient(cfg)
+	client := NewClient(cfg, nil)
 
 	// Register first
 	_ = client.Register(context.Background())
@@ -119,7 +119,7 @@ func TestClient_Heartbeat_NonOKStatus(t *testing.T) {
 		BaseURL:         server.URL,
 		DiscoverTimeout: 5 * time.Second,
 	}
-	client := NewClient(cfg)
+	client := NewClient(cfg, nil)
 
 	_ = client.Register(context.Background())
 
@@ -138,7 +138,7 @@ func TestClient_DiscoverUDM_CacheHit(t *testing.T) {
 		BaseURL:         server.URL,
 		DiscoverTimeout: 5 * time.Second,
 	}
-	client := NewClient(cfg)
+	client := NewClient(cfg, nil)
 
 	// Pre-populate cache
 	cachedEndpoint := "http://udm:8080"
@@ -180,7 +180,7 @@ func TestClient_DiscoverUDM_CacheMiss(t *testing.T) {
 		BaseURL:         server.URL,
 		DiscoverTimeout: 5 * time.Second,
 	}
-	client := NewClient(cfg)
+	client := NewClient(cfg, nil)
 
 	endpoint, err := client.DiscoverUDM(context.Background(), "00101")
 	require.NoError(t, err)
@@ -206,7 +206,7 @@ func TestClient_DiscoverUDM_NoUDMFound(t *testing.T) {
 		BaseURL:         server.URL,
 		DiscoverTimeout: 5 * time.Second,
 	}
-	client := NewClient(cfg)
+	client := NewClient(cfg, nil)
 
 	_, err := client.DiscoverUDM(context.Background(), "00101")
 	assert.Error(t, err)
@@ -223,7 +223,7 @@ func TestClient_DiscoverAMF_CacheHit(t *testing.T) {
 		BaseURL:         server.URL,
 		DiscoverTimeout: 5 * time.Second,
 	}
-	client := NewClient(cfg)
+	client := NewClient(cfg, nil)
 
 	cachedID := "amf-instance-123"
 	client.cache.Set("amf:amf-instance-123", cachedID)
@@ -250,7 +250,7 @@ func TestClient_DiscoverAMF_CacheMiss(t *testing.T) {
 		BaseURL:         server.URL,
 		DiscoverTimeout: 5 * time.Second,
 	}
-	client := NewClient(cfg)
+	client := NewClient(cfg, nil)
 
 	amfID, err := client.DiscoverAMF(context.Background(), "amf-001")
 	require.NoError(t, err)
@@ -267,7 +267,7 @@ func TestClient_DiscoverAMF_NonOKStatus(t *testing.T) {
 		BaseURL:         server.URL,
 		DiscoverTimeout: 5 * time.Second,
 	}
-	client := NewClient(cfg)
+	client := NewClient(cfg, nil)
 
 	_, err := client.DiscoverAMF(context.Background(), "unknown-amf")
 	assert.Error(t, err)
@@ -291,7 +291,7 @@ func TestClient_Deregister(t *testing.T) {
 		BaseURL:         server.URL,
 		DiscoverTimeout: 5 * time.Second,
 	}
-	client := NewClient(cfg)
+	client := NewClient(cfg, nil)
 
 	// Register first
 	_ = client.Register(context.Background())
@@ -364,7 +364,7 @@ func TestClient_RegisterAsync_ReturnsImmediately(t *testing.T) {
 		BaseURL:         server.URL,
 		DiscoverTimeout: 5 * time.Second,
 	}
-	client := NewClient(cfg)
+	client := NewClient(cfg, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -404,7 +404,7 @@ func TestClient_RegisterAsync_RetryOnFailure(t *testing.T) {
 		BaseURL:         server.URL,
 		DiscoverTimeout: 5 * time.Second,
 	}
-	client := NewClient(cfg)
+	client := NewClient(cfg, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
