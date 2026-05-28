@@ -11,12 +11,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/operator/nssAAF/internal/api/common"
 	"github.com/operator/nssAAF/internal/eap"
+	"github.com/operator/nssAAF/internal/metrics"
+	ratelimit "github.com/operator/nssAAF/internal/cache/redis"
 	aiwnats "github.com/operator/nssAAF/oapi-gen/gen/aiw"
 	"github.com/operator/nssAAF/oapi-gen/gen/specs"
 )
@@ -119,10 +123,11 @@ func (s *InMemoryStore) Close() error {
 
 // Handler implements aiwnats.ServerInterface.
 type Handler struct {
-	store      AuthCtxStore
-	aaa        AAARouter
-	apiRoot    string
-	ausfClient interface {
+	store       AuthCtxStore
+	aaa         AAARouter
+	apiRoot     string
+	rateLimiter *ratelimit.RateLimiter
+	ausfClient  interface {
 		ForwardMSK(ctx context.Context, authCtxID string, msk []byte) error
 	}
 }
@@ -145,6 +150,11 @@ func WithAUSFClient(ausf interface {
 	ForwardMSK(ctx context.Context, authCtxID string, msk []byte) error
 }) HandlerOption {
 	return func(h *Handler) { h.ausfClient = ausf }
+}
+
+// WithRateLimiter sets the rate limiter for the AIW handler.
+func WithRateLimiter(rl *ratelimit.RateLimiter) HandlerOption {
+	return func(h *Handler) { h.rateLimiter = rl }
 }
 
 // NewHandler creates a new AIW handler.
@@ -178,6 +188,19 @@ func (h *Handler) CreateAuthenticationContext(w http.ResponseWriter, r *http.Req
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		common.WriteProblem(w, common.ValidationProblem("body", err.Error()))
 		return
+	}
+
+	// Rate limit by SUPI (RL-G1).
+	if h.rateLimiter != nil {
+		allowed, err := h.rateLimiter.Allow(r.Context(), "aiw:supi:"+string(body.Supi))
+		if err != nil {
+			slog.Warn("ratelimit: allow check failed", "error", err)
+		}
+		if !allowed {
+			metrics.RateLimitRequests.WithLabelValues("aiw", "limited").Inc()
+			h.write429(w, r, 60)
+			return
+		}
 	}
 
 	if err := common.ValidateSUPI(string(body.Supi)); err != nil {
@@ -304,6 +327,17 @@ func (h *Handler) ConfirmAuthentication(w http.ResponseWriter, r *http.Request, 
 	w.Header().Set(common.HeaderContentType, common.MediaTypeJSONVersion)
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// write429 writes a 429 Too Many Requests response with Retry-After header.
+func (h *Handler) write429(w http.ResponseWriter, r *http.Request, retryAfter int) {
+	w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
+	w.WriteHeader(http.StatusTooManyRequests)
+	common.WriteProblem(w, common.NewProblem(
+		http.StatusTooManyRequests,
+		"rate-limit-exceeded",
+		"Rate limit exceeded for this request",
+	))
 }
 
 // Compile-time check: Handler must implement aiwnats.ServerInterface.

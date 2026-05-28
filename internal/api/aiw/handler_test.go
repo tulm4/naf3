@@ -1,6 +1,7 @@
 package aiw
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,9 +9,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/go-chi/chi/v5"
 	"github.com/operator/nssAAF/internal/api/common"
+	rediscache "github.com/operator/nssAAF/internal/cache/redis"
 	aiwnats "github.com/operator/nssAAF/oapi-gen/gen/aiw"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -355,4 +359,42 @@ func TestInMemoryStore(t *testing.T) {
 func TestHandler_ImplementsServerInterface(t *testing.T) {
 	// Compile-time check: Handler must implement aiwnats.ServerInterface.
 	var _ aiwnats.ServerInterface = (*Handler)(nil)
+}
+
+// ─── Rate limit tests ────────────────────────────────────────────────────────
+
+func TestAIWHandler_RateLimit_Returns429(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	pool, err := rediscache.NewPool(context.Background(), rediscache.Config{
+		Addrs:        []string{mr.Addr()},
+		PoolSize:     5,
+		MinIdleConns: 1,
+		DialTimeout:  100 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	defer func() { _ = pool.Close() }()
+
+	rl := rediscache.NewRateLimiter(pool.Client(), 1*time.Minute, 1)
+	ctx := context.Background()
+	for i := 0; i < 3; i++ {
+		_, err := rl.Allow(ctx, "aiw:supi:imsi-208046000000001")
+		require.NoError(t, err)
+	}
+
+	store := newMockStore()
+	h := NewHandler(store, WithRateLimiter(rl))
+
+	req := httptest.NewRequest(http.MethodPost, "/authentications",
+		bytes.NewReader([]byte(`{"supi":"imsi-208046000000001"}`)))
+	req.Header.Set(common.HeaderXRequestID, "test-req-id")
+	req.Header.Set(common.HeaderContentType, common.MediaTypeJSONVersion)
+	w := httptest.NewRecorder()
+
+	h.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusTooManyRequests, w.Code)
+	assert.Equal(t, "60", w.Header().Get("Retry-After"))
 }
