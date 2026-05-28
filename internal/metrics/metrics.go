@@ -161,7 +161,13 @@ var (
 	DLQProcessed = newCounterVec(prometheus.CounterOpts{
 		Name: "nssAAF_dlq_processed_total",
 		Help: "Total DLQ items processed",
-	}, nil)
+	}, []string{"result"})
+
+	// RateLimitRequests tracks rate-limited requests by handler.
+	RateLimitRequests = newCounterVec(prometheus.CounterOpts{
+		Name: "nssAAF_ratelimit_requests_total",
+		Help: "Total requests rejected by rate limiter",
+	}, []string{"handler", "result"})
 
 	// HTTPClientRequestDuration tracks internal HTTP client request latency.
 	HTTPClientRequestDuration = newHistogramVec(prometheus.HistogramOpts{
