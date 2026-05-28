@@ -9,10 +9,27 @@ import (
 	"testing"
 	"time"
 
+	"github.com/operator/nssAAF/internal/config"
 	"github.com/operator/nssAAF/internal/resilience"
 	redisclient "github.com/operator/nssAAF/internal/cache/redis"
 	"github.com/stretchr/testify/assert"
 )
+
+func testCBCfg() config.CircuitBreakerConfig {
+	return config.CircuitBreakerConfig{
+		FailureThreshold: 5,
+		RecoveryTimeout:  30 * time.Second,
+		SuccessThreshold: 3,
+	}
+}
+
+func testRetryCfg() resilience.RetryConfig {
+	return resilience.RetryConfig{
+		MaxAttempts: 3,
+		BaseDelay:   500 * time.Millisecond,
+		MaxDelay:    2 * time.Second,
+	}
+}
 
 func TestSendReAuthNotification_Success(t *testing.T) {
 	var callCount atomic.Int32
@@ -28,7 +45,7 @@ func TestSendReAuthNotification_Success(t *testing.T) {
 	cbRegistry := resilience.NewRegistry(5, 30*time.Second, 3)
 	dlq := &mockDLQ{}
 
-	client := NewClient(5*time.Second, cbRegistry, dlq)
+	client := NewClient(5*time.Second, cbRegistry, dlq, testCBCfg(), testRetryCfg())
 
 	err := client.SendReAuthNotification(context.Background(), server.URL+"/notify/reauth", "auth-123", []byte(`{"reason":"expired"}`))
 	assert.NoError(t, err)
@@ -53,7 +70,7 @@ func TestSendReAuthNotification_RetryThenSuccess(t *testing.T) {
 	cbRegistry := resilience.NewRegistry(5, 30*time.Second, 3)
 	dlq := &mockDLQ{}
 
-	client := NewClient(2*time.Second, cbRegistry, dlq)
+	client := NewClient(2*time.Second, cbRegistry, dlq, testCBCfg(), testRetryCfg())
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -76,7 +93,7 @@ func TestSendReAuthNotification_RetryExhausted_DLQEnqueued(t *testing.T) {
 	cbRegistry := resilience.NewRegistry(5, 30*time.Second, 3)
 	dlq := &mockDLQ{}
 
-	client := NewClient(1*time.Second, cbRegistry, dlq)
+	client := NewClient(1*time.Second, cbRegistry, dlq, testCBCfg(), testRetryCfg())
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -99,7 +116,7 @@ func TestSendRevocationNotification_Success(t *testing.T) {
 	cbRegistry := resilience.NewRegistry(5, 30*time.Second, 3)
 	dlq := &mockDLQ{}
 
-	client := NewClient(5*time.Second, cbRegistry, dlq)
+	client := NewClient(5*time.Second, cbRegistry, dlq, testCBCfg(), testRetryCfg())
 
 	err := client.SendRevocationNotification(context.Background(), server.URL, "auth-789", []byte(`{"reason":"policy_change"}`))
 	assert.NoError(t, err)
@@ -119,7 +136,7 @@ func TestSendRevocationNotification_RetryExhausted_DLQEnqueued(t *testing.T) {
 	cbRegistry := resilience.NewRegistry(5, 30*time.Second, 3)
 	dlq := &mockDLQ{}
 
-	client := NewClient(1*time.Second, cbRegistry, dlq)
+	client := NewClient(1*time.Second, cbRegistry, dlq, testCBCfg(), testRetryCfg())
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -146,7 +163,7 @@ func TestSendNotification_ClientError_StillRetried(t *testing.T) {
 	cbRegistry := resilience.NewRegistry(5, 30*time.Second, 3)
 	dlq := &mockDLQ{}
 
-	client := NewClient(1*time.Second, cbRegistry, dlq)
+	client := NewClient(1*time.Second, cbRegistry, dlq, testCBCfg(), testRetryCfg())
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()

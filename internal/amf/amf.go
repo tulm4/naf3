@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/operator/nssAAF/internal/config"
 	"github.com/operator/nssAAF/internal/resilience"
 	redisclient "github.com/operator/nssAAF/internal/cache/redis"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -32,19 +33,20 @@ const (
 // REQ-07: Revocation notification POST to revocNotifUri.
 // REQ-10: DLQ on retry exhaustion.
 type Client struct {
-	httpClient *http.Client
-	cbRegistry *resilience.Registry
-	dlq        interface {
+	httpClient    *http.Client
+	cbRegistry    *resilience.Registry
+	dlq           interface {
 		Enqueue(ctx context.Context, item interface{}) error
 	}
 	notifyTimeout time.Duration
-	maxRetries    int
+	cbCfg         config.CircuitBreakerConfig
+	retryCfg      resilience.RetryConfig
 }
 
 // NewClient creates a new AMF notifier.
 func NewClient(timeout time.Duration, cbRegistry *resilience.Registry, dlq interface {
 	Enqueue(ctx context.Context, item interface{}) error
-}) *Client {
+}, cbCfg config.CircuitBreakerConfig, retryCfg resilience.RetryConfig) *Client {
 	if timeout == 0 {
 		timeout = 30 * time.Second
 	}
@@ -54,9 +56,10 @@ func NewClient(timeout time.Duration, cbRegistry *resilience.Registry, dlq inter
 			Transport: otelhttp.NewTransport(http.DefaultTransport),
 		},
 		cbRegistry:    cbRegistry,
-		dlq:           dlq,
+		dlq:          dlq,
 		notifyTimeout: timeout,
-		maxRetries:    3,
+		cbCfg:        cbCfg,
+		retryCfg:     retryCfg,
 	}
 }
 
@@ -87,15 +90,11 @@ func (c *Client) sendNotification(ctx context.Context, typ NotificationType, uri
 		Payload:     payload,
 		AuthCtxID:   authCtxID,
 		Attempt:     0,
-		MaxAttempts: c.maxRetries,
+		MaxAttempts: c.retryCfg.MaxAttempts,
 		CreatedAt:   time.Now(),
 	}
 
-	err := resilience.Do(ctx, resilience.RetryConfig{
-		MaxAttempts: c.maxRetries,
-		BaseDelay:   1 * time.Second,
-		MaxDelay:    4 * time.Second,
-	}, func() error {
+	err := resilience.Do(ctx, c.retryCfg, func() error {
 		item.Attempt++
 
 		if !cb.Allow() {
