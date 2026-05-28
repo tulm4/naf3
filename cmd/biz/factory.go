@@ -171,29 +171,65 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 		prevCleanup()
 	}
 
+	// ─── DLQ with dedicated HTTP client for retry delivery (DLQ-G1) ────
 	dlq := redis.NewDLQ(redisPool)
-	go dlq.Process(ctx)
+	dlqHTTPClient := &http.Client{Timeout: 10 * time.Second}
+	go dlq.Process(ctx, dlqHTTPClient)
 
-	// ─── Resilience ─────────────────────────────────────────────────────
-	cbRegistry := resilience.NewRegistry(
-		f.cfg.AAA.FailureThreshold,
-		f.cfg.AAA.RecoveryTimeout,
-		3,
+	// ─── Three isolated CB registries for blast-radius isolation ───────
+	// Internal NF registry (NRF, UDM, AUSF)
+	internalNFCfg := f.cfg.InternalComm.Native.CB
+	if internalNFCfg.FailureThreshold == 0 {
+		internalNFCfg.FailureThreshold = 3
+	}
+	if internalNFCfg.RecoveryTimeout == 0 {
+		internalNFCfg.RecoveryTimeout = 10 * time.Second
+	}
+	if internalNFCfg.SuccessThreshold == 0 {
+		internalNFCfg.SuccessThreshold = 2
+	}
+	internalNFRegistry := resilience.NewRegistry(
+		internalNFCfg.FailureThreshold,
+		internalNFCfg.RecoveryTimeout,
+		internalNFCfg.SuccessThreshold,
 	)
 
-	// ─── NRF client ─────────────────────────────────────────────────────
-	nrfClient := nrf.NewClient(f.cfg.NRF)
+	// AMF registry (for AMF notification delivery)
+	amfCfg := config.CircuitBreakerConfig{
+		FailureThreshold: 3,
+		RecoveryTimeout:  15 * time.Second,
+		SuccessThreshold: 2,
+	}
+	amfRegistry := resilience.NewRegistry(amfCfg.FailureThreshold, amfCfg.RecoveryTimeout, amfCfg.SuccessThreshold)
+
+	// ─── NF clients with circuit breakers (CB-G1) ─────────────────────
+	nrfClient := nrf.NewClient(f.cfg.NRF, internalNFRegistry)
 	go nrfClient.RegisterAsync(ctx)
 	go nrfClient.StartHeartbeat(ctx)
 
-	// ─── UDM client ────────────────────────────────────────────────────
-	udmClient := udm.NewClient(f.cfg.UDM, nrfClient)
+	udmClient := udm.NewClient(f.cfg.UDM, nrfClient, internalNFRegistry)
 
-	// ─── AUSF client ───────────────────────────────────────────────────
-	ausfClient := ausf.NewClient(f.cfg.AUSF)
+	ausfClient := ausf.NewClient(f.cfg.AUSF, internalNFRegistry)
 
-	// ─── AMF notifier ──────────────────────────────────────────────────
-	_ = amf.NewClient(30*time.Second, cbRegistry, dlq)
+	// ─── AMF notifier with circuit breaker (CB-G3) ────────────────────
+	_ = amf.NewClient(
+		30*time.Second,
+		amfRegistry,
+		dlq,
+		amfCfg,
+		resilience.RetryConfig{
+			MaxAttempts: 3,
+			BaseDelay:   500 * time.Millisecond,
+			MaxDelay:    2 * time.Second,
+		},
+	)
+
+	// ─── Rate limiter (RL-G1) ───────────────────────────────────────────
+	ratelimiter := redis.NewRateLimiter(
+		redisPool.Client(),
+		1*time.Minute,
+		f.cfg.RateLimit.PerGpsiPerMin,
+	)
 
 	// ─── HTTP AAA client ────────────────────────────────────────────────
 	if f.cfg.Biz.UseMTLS {
@@ -233,6 +269,7 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 		nssaa.WithAAA(aaaClient),
 		nssaa.WithNRFClient(nrfClient),
 		nssaa.WithUDMClient(udmClient),
+		nssaa.WithRateLimiter(ratelimiter),
 	)
 	nssaaRouter := nssaa.NewRouter(nssaaHandler, apiRoot)
 
@@ -240,6 +277,7 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 	aiwHandler := aiw.NewHandler(aiwStore,
 		aiw.WithAPIRoot(apiRoot),
 		aiw.WithAUSFClient(ausfClient),
+		aiw.WithRateLimiter(ratelimiter),
 	)
 	aiwRouter := aiw.NewRouter(aiwHandler, apiRoot)
 
