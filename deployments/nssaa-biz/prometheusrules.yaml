@@ -82,3 +82,49 @@ spec:
             severity: warning
           annotations:
             summary: "AMF notification DLQ depth is high ({{ $value }} items)"
+
+        # AL-G1: DLQ item exhausted MaxAttempts — permanently lost notification (Critical)
+        - alert: NssaaDLQExhausted
+          expr: increase(nssAAF_dlq_processed_total{result="exhausted"}[15m]) > 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "DLQ item exhausted MaxAttempts — AMF notification permanently lost"
+            description: "{{ $value }} DLQ item(s) exhausted MaxAttempts in the last 15m and were discarded"
+
+        # AL-G2: Rate limit hit frequently — possible misconfig or abuse (Major)
+        - alert: NssaaRateLimitHit
+          expr: |
+            sum(rate(nssAAF_ratelimit_requests_total{result="limited"}[5m]))
+            by (handler) > 0.1
+          for: 5m
+          labels:
+            severity: major
+          annotations:
+            summary: "Rate limit triggered frequently on {{ $labels.handler }}"
+            description: "Rate limit hit > 6 req/min on {{ $labels.handler }}"
+
+        # AL-G3: DLQ stalled — processor not making progress (Critical)
+        - alert: NssaaDLQProcessingStalled
+          expr: |
+            nssAAF_dlq_depth > 0
+            and
+            increase(nssAAF_dlq_processed_total[30m]) == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "DLQ stalled — no items processed in 30 minutes despite depth > 0"
+
+        # AL-G4: Circuit breaker flapping — excessive state transitions (Warning)
+        - alert: NssaaCircuitBreakerFlapping
+          expr: |
+            sum(rate(nssAAF_httpclient_circuit_breaker_transitions_total[15m]))
+            by (destination) > 10
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Circuit breaker flapping for {{ $labels.destination }} — >10 transitions in 15m"
+            description: "Frequent CB state transitions indicate instability. Check network or lower failure threshold."
