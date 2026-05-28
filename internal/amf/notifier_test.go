@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/operator/nssAAF/internal/resilience"
+	redisclient "github.com/operator/nssAAF/internal/cache/redis"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -179,13 +180,13 @@ func TestExtractHostPort(t *testing.T) {
 // mockDLQ is a test double for the DLQ interface.
 type mockDLQ struct {
 	EnqueueCount atomic.Int32
-	LastItem     atomic.Value // stores *DLQItem
+	LastItem     atomic.Value // stores *redisclient.AMFDLQItem
 }
 
 func (m *mockDLQ) Enqueue(ctx context.Context, item interface{}) error {
 	m.EnqueueCount.Add(1)
 	if data, err := json.Marshal(item); err == nil {
-		var dlqItem DLQItem
+		var dlqItem redisclient.AMFDLQItem
 		if json.Unmarshal(data, &dlqItem) == nil {
 			m.LastItem.Store(&dlqItem)
 		}
