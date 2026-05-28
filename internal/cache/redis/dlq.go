@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -17,13 +18,11 @@ import (
 	"github.com/operator/nssAAF/internal/metrics"
 )
 
-// DLQ key prefix per D-02.
 const amfDLQKey = "nssAAF:dlq:amf-notifications"
 
-// AMFDLQItem represents an item in the AMF notification DLQ.
 type AMFDLQItem struct {
 	ID          string          `json:"id"`
-	Type        string          `json:"type"` // "SLICE_RE_AUTH" | "SLICE_REVOCATION"
+	Type        string          `json:"type"`
 	URI         string          `json:"uri"`
 	Payload     json.RawMessage `json:"payload"`
 	AuthCtxID   string          `json:"authCtxId"`
@@ -33,19 +32,16 @@ type AMFDLQItem struct {
 	LastError   string          `json:"lastError"`
 }
 
-// DLQ provides a dead-letter queue for failed AMF notifications.
 type DLQ struct {
-	pool *Pool
-	wg   sync.WaitGroup
+	pool   *Pool
+	wg     sync.WaitGroup
+	stopCh chan struct{}
 }
 
-// NewDLQ creates a new AMF notification DLQ.
 func NewDLQ(pool *Pool) *DLQ {
-	return &DLQ{pool: pool}
+	return &DLQ{pool: pool, stopCh: make(chan struct{})}
 }
 
-// Enqueue adds an AMF notification DLQ item to the queue using LPUSH.
-// D-02: Redis LPUSH for queue insertion.
 func (d *DLQ) Enqueue(ctx context.Context, item interface{}) error {
 	data, err := json.Marshal(item)
 	if err != nil {
@@ -54,21 +50,12 @@ func (d *DLQ) Enqueue(ctx context.Context, item interface{}) error {
 	return d.pool.Client().LPush(ctx, amfDLQKey, data).Err()
 }
 
-// Dequeue removes and returns an item from the DLQ using BRPOP.
-// D-02: Redis BRPOP with timeout for queue consumption.
-// Returns nil, nil if timeout expires. Returns nil, ctx.Err() if context
-// is already cancelled or deadline exceeded.
 func (d *DLQ) Dequeue(ctx context.Context, timeout time.Duration) (*AMFDLQItem, error) {
-	// Check context before blocking on BRPOP so callers can exit on cancellation.
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
-	}
-
 	result, err := d.pool.Client().BRPop(ctx, timeout, amfDLQKey).Result()
 	if err != nil {
-		// context deadline exceeded or cancelled — not an error
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, ctx.Err()
+		}
 		return nil, nil
 	}
 	if len(result) < 2 {
@@ -81,91 +68,109 @@ func (d *DLQ) Dequeue(ctx context.Context, timeout time.Duration) (*AMFDLQItem, 
 	return &item, nil
 }
 
-// Len returns the current DLQ depth for metrics.
 func (d *DLQ) Len(ctx context.Context) (int64, error) {
 	return d.pool.Client().LLen(ctx, amfDLQKey).Result()
 }
 
-// deliverToAMF attempts to deliver a DLQ item to the AMF via HTTP POST.
-// Returns (true, nil) on 2xx, (false, error) otherwise.
 func (d *DLQ) deliverToAMF(ctx context.Context, hc *http.Client, item *AMFDLQItem) (bool, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, item.URI, bytes.NewReader(item.Payload))
 	if err != nil {
 		return false, fmt.Errorf("dlq: create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-
 	resp, err := hc.Do(req)
 	if err != nil {
 		return false, fmt.Errorf("dlq: do request: %w", err)
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, resp.Body)
-
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return true, nil
 	}
 	return false, fmt.Errorf("dlq: non-2xx status: %d", resp.StatusCode)
 }
 
-// Process starts a background goroutine that polls the DLQ and attempts
-// HTTP delivery to AMF. Items are re-enqueued with incremented Attempt on
-// failure, or discarded after MaxAttempts exhaustion.
-// The caller must pass a dedicated *http.Client (e.g., 10s timeout) to
-// avoid circular dependencies.
 func (d *DLQ) Process(ctx context.Context, hc *http.Client) {
 	d.wg.Add(1)
 	go func() {
 		defer d.wg.Done()
 		for {
-			item, err := d.Dequeue(ctx, 5*time.Second)
-			if err != nil || item == nil {
-				continue
+			type deqResult struct {
+				item *AMFDLQItem
+				err  error
 			}
+			resCh := make(chan deqResult, 1)
+			go func() {
+				it, e := d.Dequeue(ctx, 1*time.Second)
+				resCh <- deqResult{item: it, err: e}
+			}()
 
-			// DLQ-G2: exhaustion check — prevent infinite retry
-			if item.MaxAttempts > 0 && item.Attempt >= item.MaxAttempts {
-				slog.Error("dlq: max attempts exhausted, discarding item",
-					"id", item.ID,
-					"type", item.Type,
-					"auth_ctx_id", item.AuthCtxID,
-					"attempt", item.Attempt,
-					"max_attempts", item.MaxAttempts,
-				)
-				metrics.DLQProcessed.WithLabelValues("exhausted").Inc()
-				continue
-			}
+			select {
+			case <-d.stopCh:
+				<-resCh
+				return
+			case <-ctx.Done():
+				<-resCh
+				return
+			case res := <-resCh:
+				item, err := res.item, res.err
+				if err != nil {
+					return
+				}
+				if item == nil {
+					continue
+				}
 
-			// DLQ-G1: attempt actual AMF delivery
-			ok, retryErr := d.deliverToAMF(ctx, hc, item)
-			if ok {
-				slog.Info("dlq: delivered",
-					"id", item.ID,
-					"type", item.Type,
-					"auth_ctx_id", item.AuthCtxID,
-				)
-				metrics.DLQProcessed.WithLabelValues("success").Inc()
-				continue
-			}
+				if item.MaxAttempts > 0 && item.Attempt >= item.MaxAttempts {
+					slog.Error("dlq: max attempts exhausted, discarding item",
+						"id", item.ID, "type", item.Type, "auth_ctx_id", item.AuthCtxID,
+						"attempt", item.Attempt, "max_attempts", item.MaxAttempts)
+					metrics.DLQProcessed.WithLabelValues("exhausted").Inc()
+					select {
+					case <-d.stopCh:
+						return
+					default:
+					}
+					continue
+				}
 
-			// Re-enqueue with incremented attempt counter
-			item.Attempt++
-			if retryErr != nil {
-				item.LastError = retryErr.Error()
-			}
-			if reErr := d.Enqueue(ctx, item); reErr != nil {
-				slog.Error("dlq: re-enqueue failed",
-					"id", item.ID,
-					"error", reErr,
-				)
-				metrics.DLQProcessed.WithLabelValues("error").Inc()
-			} else {
-				slog.Warn("dlq: re-enqueued",
-					"id", item.ID,
-					"attempt", item.Attempt,
-					"error", retryErr,
-				)
+				ok, retryErr := d.deliverToAMF(ctx, hc, item)
+				if ok {
+					slog.Info("dlq: delivered", "id", item.ID, "type", item.Type, "auth_ctx_id", item.AuthCtxID)
+					metrics.DLQProcessed.WithLabelValues("success").Inc()
+					select {
+					case <-d.stopCh:
+						return
+					default:
+					}
+					continue
+				}
+
+				item.Attempt++
+				if retryErr != nil {
+					item.LastError = retryErr.Error()
+				}
+				if reErr := d.Enqueue(ctx, item); reErr != nil {
+					slog.Error("dlq: re-enqueue failed", "id", item.ID, "error", reErr)
+					metrics.DLQProcessed.WithLabelValues("error").Inc()
+				} else {
+					slog.Warn("dlq: re-enqueued", "id", item.ID, "attempt", item.Attempt, "error", retryErr)
+				}
+				select {
+				case <-d.stopCh:
+					return
+				default:
+				}
 			}
 		}
 	}()
+}
+
+func (d *DLQ) Stop() {
+	close(d.stopCh)
+	d.wg.Wait()
+}
+
+func (d *DLQ) Done() {
+	d.wg.Wait()
 }
