@@ -5,13 +5,13 @@ package amf
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/operator/nssAAF/internal/resilience"
+	redisclient "github.com/operator/nssAAF/internal/cache/redis"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
@@ -26,33 +26,6 @@ const (
 	// Spec: TS 23.502 §4.2.9.4, TS 29.518 §5.2.2.27
 	NotificationTypeSliceRevoc NotificationType = "SLICE_REVOCATION"
 )
-
-// DLQItem represents an item in the AMF notification DLQ.
-// D-02: Redis LPUSH/BRPOP, key `nssAAF:dlq:amf-notifications`.
-type DLQItem struct {
-	ID          string           `json:"id"`
-	Type        NotificationType `json:"type"`
-	URI         string           `json:"uri"`
-	Payload     json.RawMessage  `json:"payload"`
-	AuthCtxID   string           `json:"authCtxId"`
-	Attempt     int              `json:"attempt"`
-	MaxAttempts int              `json:"maxAttempts"`
-	CreatedAt   time.Time        `json:"createdAt"`
-	LastError   string           `json:"lastError"`
-}
-
-// redisAMFDLQItem is the DLQItem variant stored in Redis.
-// Field types match redis.AMFDLQItem for serialization compatibility.
-type redisAMFDLQItem struct {
-	ID        string          `json:"id"`
-	Type      string          `json:"type"`
-	URI       string          `json:"uri"`
-	Payload   json.RawMessage `json:"payload"`
-	AuthCtxID string          `json:"authCtxId"`
-	Attempt   int             `json:"attempt"`
-	CreatedAt time.Time       `json:"createdAt"`
-	LastError string          `json:"lastError"`
-}
 
 // Client sends notifications to the AMF.
 // REQ-06: Re-Auth notification POST to reauthNotifUri.
@@ -107,9 +80,9 @@ func (c *Client) sendNotification(ctx context.Context, typ NotificationType, uri
 	cbKey := extractHostPort(uri)
 	cb := c.cbRegistry.Get(cbKey)
 
-	item := &DLQItem{
+	item := &redisclient.AMFDLQItem{
 		ID:          fmt.Sprintf("%s-%d", authCtxID, time.Now().UnixNano()),
-		Type:        typ,
+		Type:        string(typ),
 		URI:         uri,
 		Payload:     payload,
 		AuthCtxID:   authCtxID,
@@ -158,18 +131,7 @@ func (c *Client) sendNotification(ctx context.Context, typ NotificationType, uri
 
 	if err != nil {
 		item.LastError = err.Error()
-		// Convert to redis.AMFDLQItem for storage
-		dlqItem := &redisAMFDLQItem{
-			ID:        item.ID,
-			Type:      string(item.Type),
-			URI:       item.URI,
-			Payload:   item.Payload,
-			AuthCtxID: item.AuthCtxID,
-			Attempt:   item.Attempt,
-			CreatedAt: item.CreatedAt,
-			LastError: item.LastError,
-		}
-		if dlqErr := c.dlq.Enqueue(ctx, dlqItem); dlqErr != nil {
+		if dlqErr := c.dlq.Enqueue(ctx, item); dlqErr != nil {
 			slog.Error("amf notification: dlq enqueue failed",
 				"auth_ctx_id", authCtxID,
 				"type", typ,
