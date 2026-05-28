@@ -625,14 +625,14 @@ No new external dependencies required. All implementations already exist:
 
 ## 11. Verification Checklist
 
-- [ ] `go build ./...` compiles without errors
-- [ ] `go test ./internal/resilience/...` passes (CB tests)
-- [ ] `go test ./internal/amf/...` passes (AMF notifier tests)
-- [ ] `go test ./internal/nrf/...` passes (NRF CB tests)
-- [ ] `go test ./internal/udm/...` passes (UDM CB tests)
-- [ ] `go test ./internal/ausf/...` passes (AUSF CB tests)
-- [ ] `go test ./internal/cache/redis/...` passes (DLQ + rate limit tests)
-- [ ] `go test ./internal/api/nssaa/...` passes (NSSAA handler tests)
-- [ ] `go test ./internal/api/aiw/...` passes (AIW handler tests)
-- [ ] `golangci-lint run ./...` passes
+- [x] `go build ./...` compiles without errors
+- [x] `go test ./internal/resilience/...` passes (CB tests)
+- [x] `go test ./internal/amf/...` passes (AMF notifier tests)
+- [x] `go test ./internal/nrf/...` passes (NRF CB tests)
+- [x] `go test ./internal/udm/...` passes (UDM CB tests)
+- [x] `go test ./internal/ausf/...` passes (AUSF CB tests)
+- [x] `go test ./internal/cache/redis/...` passes (DLQ + rate limit tests)
+- [x] `go test ./internal/api/nssaa/...` passes (NSSAA handler tests)
+- [x] `go test ./internal/api/aiw/...` passes (AIW handler tests)
+- [x] `golangci-lint run ./...` passes (6 typecheck warnings in pre-existing test files)
 - [ ] `make test-e2e` passes (E2E harness)
