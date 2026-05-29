@@ -56,3 +56,4 @@ temp/
 *.test
 nrm
 nrm.test
+.worktrees/
