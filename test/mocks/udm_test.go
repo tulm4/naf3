@@ -15,7 +15,7 @@ func TestUDMMock_SetAuthSubscription(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, m.URL()+"/nudm-uem/v1/subscribers/imsi-208046000000001/auth-contexts", nil)
 	resp := httptest.NewRecorder()
-	m.Server.Config.Handler.ServeHTTP(resp, req)
+	m.Server().Config.Handler.ServeHTTP(resp, req)
 
 	if resp.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.Code)

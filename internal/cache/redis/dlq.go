@@ -33,10 +33,12 @@ type AMFDLQItem struct {
 }
 
 type DLQ struct {
-	pool    *Pool
-	wg      sync.WaitGroup
-	stopCh  chan struct{}
-	doneCh  chan struct{}
+	pool     *Pool
+	wg       sync.WaitGroup
+	mu       sync.Mutex
+	stopCh   chan struct{}
+	doneCh   chan struct{}
+	cancelCtx context.CancelFunc // cancels the internal goroutine context
 }
 
 func NewDLQ(pool *Pool) *DLQ {
@@ -103,18 +105,26 @@ func (d *DLQ) deliverToAMF(ctx context.Context, hc *http.Client, item *AMFDLQIte
 // with an incremented Attempt counter. Items exceeding MaxAttempts are discarded.
 // The goroutine exits when ctx is cancelled or Stop() is called.
 func (d *DLQ) Process(ctx context.Context, hc *http.Client) {
+	d.mu.Lock()
 	d.doneCh = make(chan struct{})
+	innerCtx, cancel := context.WithCancel(ctx)
+	d.cancelCtx = cancel
+	d.mu.Unlock()
 	d.wg.Add(1)
 	go func() {
 		defer d.wg.Done()
 		defer close(d.doneCh)
+		defer cancel() // clean up the inner context on exit
 		for {
-			item, err := d.Dequeue(ctx, 1*time.Second)
+			item, err := d.Dequeue(innerCtx, 1*time.Second)
 			if err != nil || item == nil {
+				d.mu.Lock()
+				stop := d.stopCh
+				d.mu.Unlock()
 				select {
-				case <-d.stopCh:
+				case <-stop:
 					return
-				case <-ctx.Done():
+				case <-innerCtx.Done():
 					return
 				default:
 				}
@@ -154,11 +164,23 @@ func (d *DLQ) Process(ctx context.Context, hc *http.Client) {
 // Stop signals the Process goroutine to exit and blocks until it finishes.
 // Safe to call multiple times.
 func (d *DLQ) Stop() {
+	d.mu.Lock()
+	if d.cancelCtx == nil {
+		d.mu.Unlock()
+		return
+	}
+	cancel := d.cancelCtx
+	d.mu.Unlock()
+
 	close(d.stopCh)
+	cancel()   // cancel innerCtx so BRPOP returns immediately in the goroutine
 	d.wg.Wait()
 }
 
 // Done returns a channel that is closed when the Process goroutine has exited.
 func (d *DLQ) Done() <-chan struct{} {
-	return d.doneCh
+	d.mu.Lock()
+	ch := d.doneCh
+	d.mu.Unlock()
+	return ch
 }

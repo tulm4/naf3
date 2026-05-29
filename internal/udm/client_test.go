@@ -19,7 +19,7 @@ func TestNewClient(t *testing.T) {
 		Timeout: 10 * time.Second,
 	}
 
-	client := NewClient(cfg, nil)
+	client := NewClient(cfg, nil, nil)
 
 	assert.NotNil(t, client)
 	assert.Equal(t, "http://udm.operator.com:8080", client.baseURL)
@@ -30,7 +30,7 @@ func TestNewClient(t *testing.T) {
 func TestNewClient_Defaults(t *testing.T) {
 	cfg := config.UDMConfig{}
 
-	client := NewClient(cfg, nil)
+	client := NewClient(cfg, nil, nil)
 
 	assert.NotNil(t, client)
 	assert.Equal(t, "", client.baseURL)
@@ -58,7 +58,7 @@ func TestGetAuthContext_Success(t *testing.T) {
 	defer server.Close()
 
 	cfg := config.UDMConfig{BaseURL: server.URL, Timeout: 5 * time.Second}
-	client := NewClient(cfg, nil)
+	client := NewClient(cfg, nil, nil)
 
 	ctx := context.Background()
 	result, err := client.GetAuthContext(ctx, "imsi-208001000000000")
@@ -78,7 +78,7 @@ func TestGetAuthContext_NotFound(t *testing.T) {
 	defer server.Close()
 
 	cfg := config.UDMConfig{BaseURL: server.URL, Timeout: 5 * time.Second}
-	client := NewClient(cfg, nil)
+	client := NewClient(cfg, nil, nil)
 
 	ctx := context.Background()
 	result, err := client.GetAuthContext(ctx, "imsi-999999999999999")
@@ -95,7 +95,7 @@ func TestGetAuthContext_UnexpectedStatus(t *testing.T) {
 	defer server.Close()
 
 	cfg := config.UDMConfig{BaseURL: server.URL, Timeout: 5 * time.Second}
-	client := NewClient(cfg, nil)
+	client := NewClient(cfg, nil, nil)
 
 	ctx := context.Background()
 	result, err := client.GetAuthContext(ctx, "imsi-208001000000000")
@@ -117,7 +117,7 @@ func TestGetAuthContext_EmptyAuthContexts(t *testing.T) {
 	defer server.Close()
 
 	cfg := config.UDMConfig{BaseURL: server.URL, Timeout: 5 * time.Second}
-	client := NewClient(cfg, nil)
+	client := NewClient(cfg, nil, nil)
 
 	ctx := context.Background()
 	result, err := client.GetAuthContext(ctx, "imsi-208001000000000")
@@ -136,7 +136,7 @@ func TestGetAuthContext_InvalidJSON(t *testing.T) {
 	defer server.Close()
 
 	cfg := config.UDMConfig{BaseURL: server.URL, Timeout: 5 * time.Second}
-	client := NewClient(cfg, nil)
+	client := NewClient(cfg, nil, nil)
 
 	ctx := context.Background()
 	result, err := client.GetAuthContext(ctx, "imsi-208001000000000")
@@ -154,7 +154,7 @@ func TestGetAuthContext_ContextCanceled(t *testing.T) {
 	defer server.Close()
 
 	cfg := config.UDMConfig{BaseURL: server.URL, Timeout: 5 * time.Second}
-	client := NewClient(cfg, nil)
+	client := NewClient(cfg, nil, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -196,7 +196,7 @@ func TestGetAuthContext_NRFDiscovery(t *testing.T) {
 	// We can't easily mock NRF here since the client calls nrfClient.DiscoverUDM.
 	// Instead, test that with an empty baseURL and nil nrfClient, we get a clear error.
 	cfg := config.UDMConfig{BaseURL: "", Timeout: 5 * time.Second}
-	client := NewClient(cfg, nil)
+	client := NewClient(cfg, nil, nil)
 
 	ctx := context.Background()
 	result, err := client.GetAuthContext(ctx, "imsi-208001000000000")
@@ -226,7 +226,7 @@ func TestUpdateAuthContext_Success(t *testing.T) {
 	defer server.Close()
 
 	cfg := config.UDMConfig{BaseURL: server.URL, Timeout: 5 * time.Second}
-	client := NewClient(cfg, nil)
+	client := NewClient(cfg, nil, nil)
 
 	ctx := context.Background()
 	err := client.UpdateAuthContext(ctx, "imsi-208001000000000", "auth-123", "EAP_SUCCESS")
@@ -246,7 +246,7 @@ func TestUpdateAuthContext_UnexpectedStatus(t *testing.T) {
 	defer server.Close()
 
 	cfg := config.UDMConfig{BaseURL: server.URL, Timeout: 5 * time.Second}
-	client := NewClient(cfg, nil)
+	client := NewClient(cfg, nil, nil)
 
 	ctx := context.Background()
 	err := client.UpdateAuthContext(ctx, "imsi-208001000000000", "auth-456", "EAP_FAILURE")
@@ -263,7 +263,7 @@ func TestUpdateAuthContext_ContextCanceled(t *testing.T) {
 	defer server.Close()
 
 	cfg := config.UDMConfig{BaseURL: server.URL, Timeout: 5 * time.Second}
-	client := NewClient(cfg, nil)
+	client := NewClient(cfg, nil, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -276,7 +276,7 @@ func TestUpdateAuthContext_ContextCanceled(t *testing.T) {
 func TestUpdateAuthContext_NRFDiscovery(t *testing.T) {
 	// When BaseURL is empty and nrfClient is nil, should get a clear error
 	cfg := config.UDMConfig{BaseURL: "", Timeout: 5 * time.Second}
-	client := NewClient(cfg, nil)
+	client := NewClient(cfg, nil, nil)
 
 	ctx := context.Background()
 	err := client.UpdateAuthContext(ctx, "imsi-208001000000000", "auth-xyz", "EAP_SUCCESS")

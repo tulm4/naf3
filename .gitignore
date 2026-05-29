@@ -34,6 +34,7 @@ dist/
 
 # Environment and secrets (never commit these)
 .env
+.venv
 .env.*
 .env_local
 secrets.yaml

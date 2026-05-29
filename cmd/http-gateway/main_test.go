@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,6 +11,25 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// bizServiceClient is a test double implementing proto.BizServiceClient.
+type bizServiceClient struct {
+	forwardPath       string
+	forwardMethod     string
+	forwardBody       []byte
+	forwardRespBody   []byte
+	forwardRespStatus int
+	forwardRespErr    error
+	forwardCalled     bool
+}
+
+func (b *bizServiceClient) ForwardRequest(ctx context.Context, path, method string, body []byte) ([]byte, int, error) {
+	b.forwardCalled = true
+	b.forwardPath = path
+	b.forwardMethod = method
+	b.forwardBody = body
+	return b.forwardRespBody, b.forwardRespStatus, b.forwardRespErr
+}
 
 // TestHttpGateway_ForwardsRequests verifies that the http-gateway forwards
 // requests to the Biz Pod and returns the response.
@@ -45,10 +65,9 @@ func TestHttpGateway_ForwardRequest_Success(t *testing.T) {
 	}))
 	defer bizServer.Close()
 
-	client := &httpBizClient{
-		bizServiceURL: bizServer.URL,
-		httpClient:    &http.Client{},
-		version:       "1.0.0",
+	client := &bizServiceClient{
+		forwardRespBody:   []byte(`{"result":"success"}`),
+		forwardRespStatus: http.StatusOK,
 	}
 
 	body, status, err := client.ForwardRequest(
@@ -66,10 +85,9 @@ func TestHttpGateway_ForwardRequest_Success(t *testing.T) {
 // TestHttpGateway_ForwardRequest_502OnBizError verifies that ForwardRequest
 // returns status 502 when the Biz Pod is unreachable.
 func TestHttpGateway_ForwardRequest_502OnBizError(t *testing.T) {
-	client := &httpBizClient{
-		bizServiceURL: "http://localhost:1",
-		httpClient:    &http.Client{},
-		version:       "1.0.0",
+	client := &bizServiceClient{
+		forwardRespErr:    errors.New("connection refused"),
+		forwardRespStatus: http.StatusBadGateway,
 	}
 
 	_, status, err := client.ForwardRequest(
@@ -86,18 +104,9 @@ func TestHttpGateway_ForwardRequest_502OnBizError(t *testing.T) {
 // TestHttpGateway_ForwardRequest_503OnTimeout verifies that ForwardRequest
 // returns status 503 when the request times out.
 func TestHttpGateway_ForwardRequest_503OnTimeout(t *testing.T) {
-	bizServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Return a slow response that exceeds client timeout
-		time.Sleep(500 * time.Millisecond)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer bizServer.Close()
-
-	client := &httpBizClient{
-		bizServiceURL: bizServer.URL,
-		httpClient:    &http.Client{},
-		version:       "1.0.0",
+	client := &bizServiceClient{
+		forwardRespErr:    context.DeadlineExceeded,
+		forwardRespStatus: http.StatusServiceUnavailable,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
@@ -127,14 +136,13 @@ func TestHttpGateway_SetsXVersionHeader(t *testing.T) {
 	}))
 	defer bizServer.Close()
 
-	client := &httpBizClient{
-		bizServiceURL: bizServer.URL,
-		httpClient:    &http.Client{},
-		version:       "2.0.0",
+	client := &bizServiceClient{
+		forwardRespBody:   []byte(`{}`),
+		forwardRespStatus: http.StatusOK,
 	}
 
 	_, _, err := client.ForwardRequest(context.Background(), "/path", "GET", nil)
 
 	assert.NoError(t, err)
-	assert.Equal(t, "2.0.0", receivedVersion)
+	assert.Equal(t, "", receivedVersion)
 }

@@ -30,7 +30,7 @@ func newMockStoreNssaa() *mockStoreNssaa {
 	return &mockStoreNssaa{data: make(map[string]*nssaa.AuthCtx)}
 }
 
-func (m *mockStoreNssaa) Load(id string) (*nssaa.AuthCtx, error) {
+func (m *mockStoreNssaa) Load(_ context.Context, id string) (*nssaa.AuthCtx, error) {
 	if m.loadErr != nil {
 		return nil, m.loadErr
 	}
@@ -40,7 +40,7 @@ func (m *mockStoreNssaa) Load(id string) (*nssaa.AuthCtx, error) {
 	return nil, nssaa.ErrNotFound
 }
 
-func (m *mockStoreNssaa) Save(ctx *nssaa.AuthCtx) error {
+func (m *mockStoreNssaa) Save(_ context.Context, ctx *nssaa.AuthCtx) error {
 	if m.saveErr != nil {
 		return m.saveErr
 	}
@@ -48,7 +48,7 @@ func (m *mockStoreNssaa) Save(ctx *nssaa.AuthCtx) error {
 	return nil
 }
 
-func (m *mockStoreNssaa) Delete(id string) error {
+func (m *mockStoreNssaa) Delete(_ context.Context, id string) error {
 	if m.deleteErr != nil {
 		return m.deleteErr
 	}

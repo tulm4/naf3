@@ -81,12 +81,12 @@ type storeWithCache struct {
 	cache *cacheredis.SessionCache
 }
 
-func (s *storeWithCache) Load(id string) (*nssaa.AuthCtx, error) {
-	return s.pg.Load(id)
+func (s *storeWithCache) Load(_ context.Context, id string) (*nssaa.AuthCtx, error) {
+	return s.pg.Load(context.Background(), id)
 }
 
-func (s *storeWithCache) Save(ctx *nssaa.AuthCtx) error {
-	if err := s.pg.Save(ctx); err != nil {
+func (s *storeWithCache) Save(_ context.Context, ctx *nssaa.AuthCtx) error {
+	if err := s.pg.Save(context.Background(), ctx); err != nil {
 		return err
 	}
 	if s.cache != nil {
@@ -103,11 +103,11 @@ func (s *storeWithCache) Save(ctx *nssaa.AuthCtx) error {
 	return nil
 }
 
-func (s *storeWithCache) Delete(id string) error {
+func (s *storeWithCache) Delete(_ context.Context, id string) error {
 	if s.cache != nil {
 		_ = s.cache.Delete(context.Background(), id)
 	}
-	return s.pg.Delete(id)
+	return s.pg.Delete(context.Background(), id)
 }
 
 func (s *storeWithCache) Close() error { return s.pg.Close() }
@@ -309,7 +309,7 @@ func TestIntegration_NSSAA_GetSession(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &createResp))
 
 	// GET the session via store (GET handler not implemented in Phase 1).
-	loaded, err := pgStore.Load(createResp.AuthCtxId)
+	loaded, err := pgStore.Load(context.Background(), string(createResp.AuthCtxId))
 	require.NoError(t, err)
 	assert.Equal(t, "520804600000002", loaded.GPSI)
 	assert.Equal(t, uint8(2), loaded.SnssaiSST)
@@ -329,7 +329,7 @@ func TestIntegration_NSSAA_GetSession_NotFound(t *testing.T) {
 	store := postgres.NewSessionStore(pool, enc)
 
 	// Verify store returns ErrNotFound for nonexistent session.
-	_, err = store.Load("nonexistent-uuid-12345")
+	_, err = store.Load(context.Background(), "nonexistent-uuid-12345")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, nssaa.ErrNotFound))
 }

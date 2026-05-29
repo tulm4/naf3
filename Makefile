@@ -189,7 +189,7 @@ test-html: test ## Generate HTML coverage report
 .PHONY: test-unit
 test-unit: ## Run unit tests only (fast, no infra required)
 	@echo "$(YELLOW)Running unit tests...$(NC)"
-	$(GOTEST) -race -coverprofile=$(COVERAGE_FILE) -covermode=atomic ./internal/... ./test/unit/...
+	$(GOTEST) -race -coverprofile=$(COVERAGE_FILE) -covermode=atomic ./...
 
 .PHONY: test-integration
 test-integration: ## Run integration tests against real PostgreSQL and Redis via docker compose

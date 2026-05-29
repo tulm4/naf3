@@ -74,7 +74,7 @@ func newAiwMockStore() *aiwMockStore {
 	return &aiwMockStore{data: make(map[string]*aiw.AuthContext)}
 }
 
-func (s *aiwMockStore) Load(id string) (*aiw.AuthContext, error) {
+func (s *aiwMockStore) Load(_ context.Context, id string) (*aiw.AuthContext, error) {
 	if s.loadErr != nil {
 		return nil, s.loadErr
 	}
@@ -84,7 +84,7 @@ func (s *aiwMockStore) Load(id string) (*aiw.AuthContext, error) {
 	return nil, aiw.ErrNotFound
 }
 
-func (s *aiwMockStore) Save(ctx *aiw.AuthContext) error {
+func (s *aiwMockStore) Save(_ context.Context, ctx *aiw.AuthContext) error {
 	if s.saveErr != nil {
 		return s.saveErr
 	}
@@ -92,7 +92,7 @@ func (s *aiwMockStore) Save(ctx *aiw.AuthContext) error {
 	return nil
 }
 
-func (s *aiwMockStore) Delete(id string) error {
+func (s *aiwMockStore) Delete(_ context.Context, id string) error {
 	if s.delErr != nil {
 		return s.delErr
 	}

@@ -55,16 +55,16 @@ type aiwStoreWithCache struct {
 	pg    *postgres.AIWStore
 }
 
-func (s *aiwStoreWithCache) Load(id string) (*aiw.AuthContext, error) {
-	return s.pg.Load(id)
+func (s *aiwStoreWithCache) Load(_ context.Context, id string) (*aiw.AuthContext, error) {
+	return s.pg.Load(context.Background(), id)
 }
 
-func (s *aiwStoreWithCache) Save(ctx *aiw.AuthContext) error {
-	return s.pg.Save(ctx)
+func (s *aiwStoreWithCache) Save(_ context.Context, ctx *aiw.AuthContext) error {
+	return s.pg.Save(context.Background(), ctx)
 }
 
-func (s *aiwStoreWithCache) Delete(id string) error {
-	return s.pg.Delete(id)
+func (s *aiwStoreWithCache) Delete(_ context.Context, id string) error {
+	return s.pg.Delete(context.Background(), id)
 }
 
 func (s *aiwStoreWithCache) Close() error { return s.pg.Close() }
@@ -185,7 +185,7 @@ func TestIntegration_AIW_GetSession(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &createResp))
 
 	// GET the session via store (GET handler not implemented in Phase 1).
-	loaded, err := pgStore.Load(createResp.AuthCtxId)
+	loaded, err := pgStore.Load(context.Background(), string(createResp.AuthCtxId))
 	require.NoError(t, err)
 	assert.Equal(t, "imsi-208046000000003", loaded.Supi)
 }
@@ -203,7 +203,7 @@ func TestIntegration_AIW_GetSession_NotFound(t *testing.T) {
 	store := postgres.NewAIWSessionStore(pool, enc)
 
 	// Verify store returns ErrNotFound for nonexistent session.
-	_, err = store.Load("nonexistent-uuid-99999")
+	_, err = store.Load(context.Background(), "nonexistent-uuid-99999")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, aiw.ErrNotFound))
 }
@@ -232,7 +232,7 @@ func TestIntegration_AIW_SessionInRedis(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 
 	// Verify session exists in PostgreSQL.
-	loaded, err := pgStore.Load(resp.AuthCtxId)
+	loaded, err := pgStore.Load(context.Background(), string(resp.AuthCtxId))
 	require.NoError(t, err)
 	assert.Equal(t, "imsi-208046000000004", loaded.Supi)
 }

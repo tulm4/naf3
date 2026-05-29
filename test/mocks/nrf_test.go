@@ -15,7 +15,7 @@ func TestNRFMock_SetServiceEndpoint(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, m.URL()+"/nnrf-disc/v1/nf-instances?target-nf-type=UDM&service-names=nudm-uem", nil)
 	resp := httptest.NewRecorder()
-	m.Server.Config.Handler.ServeHTTP(resp, req)
+	m.Server().Config.Handler.ServeHTTP(resp, req)
 
 	if resp.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.Code)

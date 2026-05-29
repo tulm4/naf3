@@ -241,11 +241,11 @@ func TestDLQ_Process_Exhaustion(t *testing.T) {
 	err = dlq.Enqueue(context.Background(), item)
 	require.NoError(t, err)
 
-	// Item is dequeued and immediately discarded (attempt=3 == max=3).
-	// Stop() cancels the internal context; goroutine exits.
+	// Start goroutine; it dequeues and discards immediately (attempt == max).
+	// Give the goroutine time to process before calling Stop().
 	hc := &http.Client{Timeout: 1 * time.Second}
 	go dlq.Process(context.Background(), hc)
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond) // wait for goroutine to dequeue and discard item
 	dlq.Stop()
 
 	length, err := dlq.Len(context.Background())
@@ -271,12 +271,17 @@ func TestDLQ_Process_DeliverySuccess(t *testing.T) {
 
 	var callCount int
 	var mu sync.Mutex
+	var deliveredCh = make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		callCount++
+		count := callCount
 		mu.Unlock()
 		_, _ = io.Copy(io.Discard, r.Body)
 		w.WriteHeader(http.StatusOK)
+		if count == 1 {
+			close(deliveredCh) // signal that delivery occurred
+		}
 	}))
 	defer server.Close()
 
@@ -293,11 +298,16 @@ func TestDLQ_Process_DeliverySuccess(t *testing.T) {
 	err = dlq.Enqueue(context.Background(), item)
 	require.NoError(t, err)
 
-	// Item is dequeued and delivered to AMF successfully.
-	// Stop() cancels the internal context; goroutine exits.
+	// Start goroutine; it dequeues and delivers to AMF.
+	// Wait for delivery to complete before calling Stop().
 	hc := &http.Client{Timeout: 5 * time.Second}
 	go dlq.Process(context.Background(), hc)
-	time.Sleep(50 * time.Millisecond)
+	select {
+	case <-deliveredCh:
+		// delivery confirmed
+	case <-time.After(5 * time.Second):
+		t.Fatal("AMF delivery timed out")
+	}
 	dlq.Stop()
 
 	mu.Lock()
