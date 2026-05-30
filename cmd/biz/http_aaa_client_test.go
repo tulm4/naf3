@@ -53,7 +53,7 @@ func TestSendEAP_Success(t *testing.T) {
 	)
 	defer func() { _ = c.Close() }()
 
-	payload, err := c.SendEAP(context.Background(), &eap.Session{AuthCtxID: "auth-ctx-test"}, []byte{1, 2, 3})
+	payload, err := c.SendEAP(context.Background(), &eap.Session{AuthCtxID: "auth-ctx-test"}, eap.RoutingContext{}, []byte{1, 2, 3})
 
 	require.NoError(t, err)
 	assert.Equal(t, expectedPayload, payload)
@@ -75,7 +75,7 @@ func TestSendEAP_Non200Error(t *testing.T) {
 	)
 	defer func() { _ = c.Close() }()
 
-	_, err := c.SendEAP(context.Background(), &eap.Session{AuthCtxID: "auth-ctx-fail"}, []byte{1, 2, 3})
+	_, err := c.SendEAP(context.Background(), &eap.Session{AuthCtxID: "auth-ctx-fail"}, eap.RoutingContext{}, []byte{1, 2, 3})
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "retryable status: 502")
@@ -99,7 +99,7 @@ func TestSendEAP_InvalidJSONResponse(t *testing.T) {
 	)
 	defer func() { _ = c.Close() }()
 
-	_, err := c.SendEAP(context.Background(), &eap.Session{AuthCtxID: "auth-ctx-badjson"}, []byte{1, 2, 3})
+	_, err := c.SendEAP(context.Background(), &eap.Session{AuthCtxID: "auth-ctx-badjson"}, eap.RoutingContext{}, []byte{1, 2, 3})
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to unmarshal response")
@@ -135,7 +135,7 @@ func TestSendEAP_BuildsSessionID(t *testing.T) {
 	)
 	defer func() { _ = c.Close() }()
 
-	_, err := c.SendEAP(context.Background(), &eap.Session{AuthCtxID: "auth-ctx-session"}, []byte{9, 8, 7})
+	_, err := c.SendEAP(context.Background(), &eap.Session{AuthCtxID: "auth-ctx-session"}, eap.RoutingContext{}, []byte{9, 8, 7})
 
 	require.NoError(t, err)
 	assert.Equal(t, []byte{9, 8, 7}, receivedPayload)
@@ -169,7 +169,7 @@ func TestSendEAP_PassesXVersionHeader(t *testing.T) {
 	)
 	defer func() { _ = c.Close() }()
 
-	_, err := c.SendEAP(context.Background(), &eap.Session{AuthCtxID: "auth-ctx"}, []byte{1})
+	_, err := c.SendEAP(context.Background(), &eap.Session{AuthCtxID: "auth-ctx"}, eap.RoutingContext{}, []byte{1})
 
 	require.NoError(t, err)
 	assert.Equal(t, "1.2.3", receivedHeader)

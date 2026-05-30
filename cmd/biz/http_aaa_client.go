@@ -44,7 +44,7 @@ func newHTTPAAAClientForTest(aaaGatewayURL, podID, version string, cfg config.In
 
 // SendEAP satisfies eap.AAARouter.
 // Spec: PHASE §1.1 pattern
-func (c *httpAAAClient) SendEAP(ctx context.Context, session *eap.Session, eapPayload []byte) ([]byte, error) {
+func (c *httpAAAClient) SendEAP(ctx context.Context, session *eap.Session, routing eap.RoutingContext, eapPayload []byte) ([]byte, error) {
 	req := &proto.AaaForwardRequest{
 		Version:       c.version,
 		SessionID:     fmt.Sprintf("nssAAF;%d;%s", time.Now().UnixNano(), session.AuthCtxID),
@@ -60,6 +60,17 @@ func (c *httpAAAClient) SendEAP(ctx context.Context, session *eap.Session, eapPa
 	}
 
 	return resp.Payload, nil
+}
+
+// RoutingContext satisfies eap.AAARouter.
+func (c *httpAAAClient) RoutingContext(session *eap.Session) eap.RoutingContext {
+	sst, sd := session.DecodeSnssaiKey()
+	return eap.RoutingContext{
+		GPSI:      session.Gpsi,
+		Sst:       sst,
+		Sd:        sd,
+		AuthCtxID: session.AuthCtxID,
+	}
 }
 
 // Close shuts down the HTTP AAA client.
