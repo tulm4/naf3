@@ -21,6 +21,7 @@ import (
 	"github.com/operator/nssAAF/internal/config"
 	"github.com/operator/nssAAF/internal/crypto"
 	"github.com/operator/nssAAF/internal/metrics"
+	"github.com/operator/nssAAF/internal/nfclient"
 	"github.com/operator/nssAAF/internal/nrf"
 	"github.com/operator/nssAAF/internal/resilience"
 	"github.com/operator/nssAAF/internal/storage/postgres"
@@ -203,13 +204,13 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 	amfRegistry := resilience.NewRegistry(amfCfg.FailureThreshold, amfCfg.RecoveryTimeout, amfCfg.SuccessThreshold)
 
 	// ─── NF clients with circuit breakers (CB-G1) ─────────────────────
-	nrfClient := nrf.NewClient(f.cfg.NRF, internalNFRegistry)
+	nrfFactory := nfclient.NewFactory(internalNFRegistry)
+	nrfClient := nrf.NewClient(f.cfg.NRF, nrfFactory)
 	go nrfClient.RegisterAsync(ctx)
 	go nrfClient.StartHeartbeat(ctx)
 
-	udmClient := udm.NewClient(f.cfg.UDM, nrfClient, internalNFRegistry)
-
-	ausfClient := ausf.NewClient(f.cfg.AUSF, internalNFRegistry)
+	udmClient := udm.NewClient(f.cfg.UDM, nrfFactory, nrfClient)
+	ausfClient := ausf.NewClient(f.cfg.AUSF, nrfFactory)
 
 	// ─── AMF notifier with circuit breaker (CB-G3) ────────────────────
 	_ = amf.NewClient(

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/operator/nssAAF/internal/config"
+	"github.com/operator/nssAAF/internal/nfclient"
 	"github.com/operator/nssAAF/internal/nrf"
 	"github.com/operator/nssAAF/test/mocks"
 	"github.com/stretchr/testify/assert"
@@ -22,7 +23,7 @@ func TestIntegration_NRF_Discovery(t *testing.T) {
 	client := nrf.NewClient(config.NRFConfig{
 		BaseURL:         mock.URL(),
 		DiscoverTimeout: 5 * time.Second,
-	}, nil)
+	}, nfclient.NewFactory(nil))
 
 	ctx := context.Background()
 	endpoint, err := client.DiscoverUDM(ctx, "00101")
@@ -41,7 +42,7 @@ func TestIntegration_NRF_Registration(t *testing.T) {
 	client := nrf.NewClient(config.NRFConfig{
 		BaseURL:         mock.URL(),
 		DiscoverTimeout: 5 * time.Second,
-	}, nil)
+	}, nfclient.NewFactory(nil))
 
 	ctx := context.Background()
 	err := client.Register(ctx)
@@ -58,7 +59,7 @@ func TestIntegration_NRF_Heartbeat(t *testing.T) {
 	client := nrf.NewClient(config.NRFConfig{
 		BaseURL:         mock.URL(),
 		DiscoverTimeout: 5 * time.Second,
-	}, nil)
+	}, nfclient.NewFactory(nil))
 
 	ctx := context.Background()
 	err := client.Register(ctx)
@@ -77,7 +78,7 @@ func TestIntegration_NRF_ServiceDiscovery(t *testing.T) {
 	client := nrf.NewClient(config.NRFConfig{
 		BaseURL:         mock.URL(),
 		DiscoverTimeout: 5 * time.Second,
-	}, nil)
+	}, nfclient.NewFactory(nil))
 
 	ctx := context.Background()
 

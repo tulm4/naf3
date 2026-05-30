@@ -6,39 +6,32 @@
 package udm
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 
 	"github.com/operator/nssAAF/internal/config"
+	"github.com/operator/nssAAF/internal/nfclient"
 	"github.com/operator/nssAAF/internal/nrf"
-	"github.com/operator/nssAAF/internal/resilience"
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 // Client is the UDM Nudm_UECM client.
 // REQ-04: Nudm_UECM_Get wired to N58 handler — gates AAA routing.
 // REQ-05: Nudm_UECM_UpdateAuthContext called after EAP completion.
 type Client struct {
-	baseURL    string
-	nrfClient  *nrf.Client
-	httpClient *http.Client
-	cbRegistry *resilience.Registry
+	baseURL   string
+	nrfClient *nrf.Client
+	factory   *nfclient.Factory
 }
 
 // NewClient creates a new UDM client.
-// cbRegistry may be nil for testing; if non-nil, HTTP calls are wrapped with circuit breaker.
-func NewClient(cfg config.UDMConfig, nrfClient *nrf.Client, cbRegistry *resilience.Registry) *Client {
+func NewClient(cfg config.UDMConfig, factory *nfclient.Factory, nrfClient *nrf.Client) *Client {
 	return &Client{
-		baseURL:    cfg.BaseURL,
+		baseURL:   cfg.BaseURL,
 		nrfClient: nrfClient,
-		httpClient: &http.Client{
-			Timeout:   cfg.Timeout,
-			Transport: otelhttp.NewTransport(http.DefaultTransport),
-		},
-		cbRegistry: cbRegistry,
+		factory:   factory,
 	}
 }
 
@@ -49,65 +42,47 @@ type AuthSubscription struct {
 	AAAServer string `json:"aaaServer"` // e.g. "radius://aaa.operator.com:1812"
 }
 
+func (c *Client) doRequest(ctx context.Context, baseURL, method, path string, body []byte) (int, []byte, error) {
+	return c.factory.Do(ctx, baseURL, method, path, body)
+}
+
+func (c *Client) discoverBaseURL(ctx context.Context, supi string) (string, error) {
+	if c.baseURL != "" {
+		return c.baseURL, nil
+	}
+	if c.nrfClient == nil {
+		return "", errors.New("udm: no baseURL and no NRF client configured")
+	}
+	plmn := extractPLMNFromSupi(supi)
+	return c.nrfClient.DiscoverUDM(ctx, plmn)
+}
+
 // GetAuthContext calls Nudm_UECM_Get to retrieve auth subscription for a SUPI.
 // REQ-04: Called before AAA routing to determine EAP method and AAA server.
 // Spec: TS 29.526 §7.3.2, TS 23.502 §4.2.9.2 step 2.
-// Returns interface{} to satisfy nssaa.WithUDMClient interface{GetAuthContext(...)(interface{}, error)}.
+// Returns interface{} to satisfy nssaa.WithUDMClient interface{GetAuthContext(...)(interface{}, error).
 func (c *Client) GetAuthContext(ctx context.Context, supi string) (interface{}, error) {
-	baseURL := c.baseURL
-	if baseURL == "" && c.nrfClient != nil {
-		plmn := extractPLMNFromSupi(supi)
-		udmEndpoint, err := c.nrfClient.DiscoverUDM(ctx, plmn)
-		if err != nil {
-			return nil, fmt.Errorf("udm: discover via nrf: %w", err)
-		}
-		baseURL = udmEndpoint
-	}
-
-	var cb *resilience.CircuitBreaker
-	if c.cbRegistry != nil {
-		cb = c.cbRegistry.Get(baseURL)
-		if !cb.Allow() {
-			return nil, fmt.Errorf("udm: circuit breaker open for %s", baseURL)
-		}
-	}
-
-	url := fmt.Sprintf("%s/nudm-uem/v1/subscribers/%s/auth-contexts", baseURL, supi)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	baseURL, err := c.discoverBaseURL(ctx, supi)
 	if err != nil {
-		return nil, fmt.Errorf("udm: create request: %w", err)
+		return nil, fmt.Errorf("udm: discover: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
+	path := fmt.Sprintf("/nudm-uem/v1/subscribers/%s/auth-contexts", supi)
 
-	resp, err := c.httpClient.Do(req)
+	status, body, err := c.doRequest(ctx, baseURL, http.MethodGet, path, nil)
 	if err != nil {
-		if cb != nil {
-			cb.RecordFailure()
-		}
 		return nil, fmt.Errorf("udm: get auth context: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode == http.StatusNotFound {
-		if cb != nil {
-			cb.RecordFailure()
-		}
+	if status == http.StatusNotFound {
 		return nil, fmt.Errorf("udm: subscriber %s not found", supi)
 	}
-	if resp.StatusCode != http.StatusOK {
-		if cb != nil {
-			cb.RecordFailure()
-		}
-		return nil, fmt.Errorf("udm: unexpected status %d", resp.StatusCode)
-	}
-	if cb != nil {
-		cb.RecordSuccess()
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("udm: unexpected status %d", status)
 	}
 
 	var result struct {
 		AuthContexts []AuthSubscription `json:"authContexts"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("udm: decode response: %w", err)
 	}
 	if len(result.AuthContexts) == 0 {
@@ -120,54 +95,24 @@ func (c *Client) GetAuthContext(ctx context.Context, supi string) (interface{}, 
 // REQ-05: Called after EAP completion to update auth context in UDM.
 // Spec: TS 29.526 §7.3.3.
 func (c *Client) UpdateAuthContext(ctx context.Context, supi, authCtxID, status string) error {
-	baseURL := c.baseURL
-	if baseURL == "" && c.nrfClient != nil {
-		plmn := extractPLMNFromSupi(supi)
-		udmEndpoint, err := c.nrfClient.DiscoverUDM(ctx, plmn)
-		if err != nil {
-			return fmt.Errorf("udm: discover via nrf: %w", err)
-		}
-		baseURL = udmEndpoint
+	baseURL, err := c.discoverBaseURL(ctx, supi)
+	if err != nil {
+		return fmt.Errorf("udm: discover: %w", err)
 	}
+	path := fmt.Sprintf("/nudm-uem/v1/subscribers/%s/auth-contexts/%s", supi, authCtxID)
 
-	var cb *resilience.CircuitBreaker
-	if c.cbRegistry != nil {
-		cb = c.cbRegistry.Get(baseURL)
-		if !cb.Allow() {
-			return fmt.Errorf("udm: circuit breaker open for %s", baseURL)
-		}
-	}
-
-	url := fmt.Sprintf("%s/nudm-uem/v1/subscribers/%s/auth-contexts/%s", baseURL, supi, authCtxID)
 	payload := map[string]string{"authResult": status}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("udm: marshal update payload: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(body))
+	statusCode, _, err := c.doRequest(ctx, baseURL, http.MethodPut, path, body)
 	if err != nil {
-		return fmt.Errorf("udm: create update request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		if cb != nil {
-			cb.RecordFailure()
-		}
 		return fmt.Errorf("udm: update auth context: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		if cb != nil {
-			cb.RecordFailure()
-		}
-		return fmt.Errorf("udm: update status %d", resp.StatusCode)
-	}
-	if cb != nil {
-		cb.RecordSuccess()
+	if statusCode != http.StatusOK {
+		return fmt.Errorf("udm: update status %d", statusCode)
 	}
 	return nil
 }

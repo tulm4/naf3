@@ -5,35 +5,31 @@
 package ausf
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 
 	"github.com/operator/nssAAF/internal/config"
-	"github.com/operator/nssAAF/internal/resilience"
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"github.com/operator/nssAAF/internal/nfclient"
 )
 
 // Client is the AUSF N60 client for MSK forwarding.
 type Client struct {
-	baseURL    string
-	httpClient *http.Client
-	cbRegistry *resilience.Registry
+	baseURL string
+	factory *nfclient.Factory
 }
 
 // NewClient creates a new AUSF client.
-// cbRegistry may be nil for testing; if non-nil, HTTP calls are wrapped with circuit breaker.
-func NewClient(cfg config.AUSFConfig, cbRegistry *resilience.Registry) *Client {
+func NewClient(cfg config.AUSFConfig, factory *nfclient.Factory) *Client {
 	return &Client{
 		baseURL: cfg.BaseURL,
-		httpClient: &http.Client{
-			Timeout:   cfg.Timeout,
-			Transport: otelhttp.NewTransport(http.DefaultTransport),
-		},
-		cbRegistry: cbRegistry,
+		factory: factory,
 	}
+}
+
+func (c *Client) doRequest(ctx context.Context, method, path string, body []byte) (int, []byte, error) {
+	return c.factory.Do(ctx, c.baseURL, method, path, body)
 }
 
 // ForwardMSK forwards the Master Session Key (MSK) to AUSF after EAP-TLS completion.
@@ -43,15 +39,6 @@ func (c *Client) ForwardMSK(ctx context.Context, authCtxID string, msk []byte) e
 	if c.baseURL == "" {
 		return fmt.Errorf("ausf: baseURL not configured")
 	}
-
-	var cb *resilience.CircuitBreaker
-	if c.cbRegistry != nil {
-		cb = c.cbRegistry.Get(c.baseURL)
-		if !cb.Allow() {
-			return fmt.Errorf("ausf: circuit breaker open for %s", c.baseURL)
-		}
-	}
-
 	payload := map[string]interface{}{
 		"authCtxId": authCtxID,
 		"msk":       msk,
@@ -60,31 +47,12 @@ func (c *Client) ForwardMSK(ctx context.Context, authCtxID string, msk []byte) e
 	if err != nil {
 		return fmt.Errorf("ausf: marshal msk: %w", err)
 	}
-
-	url := fmt.Sprintf("%s/nnssaaaf-aiw/v1/msk", c.baseURL)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	status, _, err := c.doRequest(ctx, http.MethodPost, "/nnssaaaf-aiw/v1/msk", body)
 	if err != nil {
-		return fmt.Errorf("ausf: create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		if cb != nil {
-			cb.RecordFailure()
-		}
 		return fmt.Errorf("ausf: forward msk: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode >= 400 {
-		if cb != nil {
-			cb.RecordFailure()
-		}
-		return fmt.Errorf("ausf: unexpected status %d", resp.StatusCode)
-	}
-	if cb != nil {
-		cb.RecordSuccess()
+	if status >= 400 {
+		return fmt.Errorf("ausf: unexpected status %d", status)
 	}
 	return nil
 }

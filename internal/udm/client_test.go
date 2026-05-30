@@ -10,31 +10,20 @@ import (
 	"time"
 
 	"github.com/operator/nssAAF/internal/config"
+	"github.com/operator/nssAAF/internal/nfclient"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestNewClient(t *testing.T) {
 	cfg := config.UDMConfig{
 		BaseURL: "http://udm.operator.com:8080",
-		Timeout: 10 * time.Second,
 	}
+	factory := nfclient.NewFactory(nil)
 
-	client := NewClient(cfg, nil, nil)
+	client := NewClient(cfg, factory, nil)
 
 	assert.NotNil(t, client)
 	assert.Equal(t, "http://udm.operator.com:8080", client.baseURL)
-	assert.NotNil(t, client.httpClient)
-	assert.Equal(t, 10*time.Second, client.httpClient.Timeout)
-}
-
-func TestNewClient_Defaults(t *testing.T) {
-	cfg := config.UDMConfig{}
-
-	client := NewClient(cfg, nil, nil)
-
-	assert.NotNil(t, client)
-	assert.Equal(t, "", client.baseURL)
-	assert.NotNil(t, client.httpClient)
 }
 
 func TestGetAuthContext_Success(t *testing.T) {
@@ -55,10 +44,11 @@ func TestGetAuthContext_Success(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(resp)
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
-	cfg := config.UDMConfig{BaseURL: server.URL, Timeout: 5 * time.Second}
-	client := NewClient(cfg, nil, nil)
+	cfg := config.UDMConfig{BaseURL: server.URL}
+	factory := nfclient.NewFactory(nil)
+	client := NewClient(cfg, factory, nil)
 
 	ctx := context.Background()
 	result, err := client.GetAuthContext(ctx, "imsi-208001000000000")
@@ -75,10 +65,11 @@ func TestGetAuthContext_NotFound(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
-	cfg := config.UDMConfig{BaseURL: server.URL, Timeout: 5 * time.Second}
-	client := NewClient(cfg, nil, nil)
+	cfg := config.UDMConfig{BaseURL: server.URL}
+	factory := nfclient.NewFactory(nil)
+	client := NewClient(cfg, factory, nil)
 
 	ctx := context.Background()
 	result, err := client.GetAuthContext(ctx, "imsi-999999999999999")
@@ -92,10 +83,11 @@ func TestGetAuthContext_UnexpectedStatus(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
-	cfg := config.UDMConfig{BaseURL: server.URL, Timeout: 5 * time.Second}
-	client := NewClient(cfg, nil, nil)
+	cfg := config.UDMConfig{BaseURL: server.URL}
+	factory := nfclient.NewFactory(nil)
+	client := NewClient(cfg, factory, nil)
 
 	ctx := context.Background()
 	result, err := client.GetAuthContext(ctx, "imsi-208001000000000")
@@ -114,10 +106,11 @@ func TestGetAuthContext_EmptyAuthContexts(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(resp)
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
-	cfg := config.UDMConfig{BaseURL: server.URL, Timeout: 5 * time.Second}
-	client := NewClient(cfg, nil, nil)
+	cfg := config.UDMConfig{BaseURL: server.URL}
+	factory := nfclient.NewFactory(nil)
+	client := NewClient(cfg, factory, nil)
 
 	ctx := context.Background()
 	result, err := client.GetAuthContext(ctx, "imsi-208001000000000")
@@ -133,10 +126,11 @@ func TestGetAuthContext_InvalidJSON(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{invalid json`))
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
-	cfg := config.UDMConfig{BaseURL: server.URL, Timeout: 5 * time.Second}
-	client := NewClient(cfg, nil, nil)
+	cfg := config.UDMConfig{BaseURL: server.URL}
+	factory := nfclient.NewFactory(nil)
+	client := NewClient(cfg, factory, nil)
 
 	ctx := context.Background()
 	result, err := client.GetAuthContext(ctx, "imsi-208001000000000")
@@ -151,10 +145,11 @@ func TestGetAuthContext_ContextCanceled(t *testing.T) {
 		time.Sleep(5 * time.Second)
 		w.WriteHeader(http.StatusOK)
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
-	cfg := config.UDMConfig{BaseURL: server.URL, Timeout: 5 * time.Second}
-	client := NewClient(cfg, nil, nil)
+	cfg := config.UDMConfig{BaseURL: server.URL}
+	factory := nfclient.NewFactory(nil)
+	client := NewClient(cfg, factory, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -165,45 +160,17 @@ func TestGetAuthContext_ContextCanceled(t *testing.T) {
 	assert.Nil(t, result)
 }
 
-func TestGetAuthContext_NRFDiscovery(t *testing.T) {
-	// When BaseURL is empty, client should fall back to NRF discovery
-	var callCount atomic.Int32
-
-	nrfServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		callCount.Add(1)
-		// NRF discovery returns UDM endpoint
-		resp := map[string]interface{}{
-			"nfInstances": []map[string]interface{}{
-				{
-					"nfInstanceId": "udm-1",
-					"nfServices": []map[string]interface{}{
-						{
-							"serviceName": "nudm-uem",
-							"ipEndPoints": []map[string]string{
-								{"ipv4Address": "10.60.0.5", "port": "8080"},
-							},
-						},
-					},
-				},
-			},
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(resp)
-	}))
-	defer nrfServer.Close()
-
-	// We can't easily mock NRF here since the client calls nrfClient.DiscoverUDM.
-	// Instead, test that with an empty baseURL and nil nrfClient, we get a clear error.
-	cfg := config.UDMConfig{BaseURL: "", Timeout: 5 * time.Second}
-	client := NewClient(cfg, nil, nil)
+func TestGetAuthContext_NoBaseURL(t *testing.T) {
+	cfg := config.UDMConfig{BaseURL: ""}
+	factory := nfclient.NewFactory(nil)
+	client := NewClient(cfg, factory, nil)
 
 	ctx := context.Background()
 	result, err := client.GetAuthContext(ctx, "imsi-208001000000000")
 
 	assert.Error(t, err)
 	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "unsupported protocol scheme")
+	assert.Contains(t, err.Error(), "no baseURL and no NRF client configured")
 }
 
 func TestUpdateAuthContext_Success(t *testing.T) {
@@ -223,10 +190,11 @@ func TestUpdateAuthContext_Success(t *testing.T) {
 
 		w.WriteHeader(http.StatusOK)
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
-	cfg := config.UDMConfig{BaseURL: server.URL, Timeout: 5 * time.Second}
-	client := NewClient(cfg, nil, nil)
+	cfg := config.UDMConfig{BaseURL: server.URL}
+	factory := nfclient.NewFactory(nil)
+	client := NewClient(cfg, factory, nil)
 
 	ctx := context.Background()
 	err := client.UpdateAuthContext(ctx, "imsi-208001000000000", "auth-123", "EAP_SUCCESS")
@@ -243,10 +211,11 @@ func TestUpdateAuthContext_UnexpectedStatus(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
-	cfg := config.UDMConfig{BaseURL: server.URL, Timeout: 5 * time.Second}
-	client := NewClient(cfg, nil, nil)
+	cfg := config.UDMConfig{BaseURL: server.URL}
+	factory := nfclient.NewFactory(nil)
+	client := NewClient(cfg, factory, nil)
 
 	ctx := context.Background()
 	err := client.UpdateAuthContext(ctx, "imsi-208001000000000", "auth-456", "EAP_FAILURE")
@@ -260,10 +229,11 @@ func TestUpdateAuthContext_ContextCanceled(t *testing.T) {
 		time.Sleep(5 * time.Second)
 		w.WriteHeader(http.StatusOK)
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
-	cfg := config.UDMConfig{BaseURL: server.URL, Timeout: 5 * time.Second}
-	client := NewClient(cfg, nil, nil)
+	cfg := config.UDMConfig{BaseURL: server.URL}
+	factory := nfclient.NewFactory(nil)
+	client := NewClient(cfg, factory, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -273,16 +243,16 @@ func TestUpdateAuthContext_ContextCanceled(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestUpdateAuthContext_NRFDiscovery(t *testing.T) {
-	// When BaseURL is empty and nrfClient is nil, should get a clear error
-	cfg := config.UDMConfig{BaseURL: "", Timeout: 5 * time.Second}
-	client := NewClient(cfg, nil, nil)
+func TestUpdateAuthContext_NoBaseURL(t *testing.T) {
+	cfg := config.UDMConfig{BaseURL: ""}
+	factory := nfclient.NewFactory(nil)
+	client := NewClient(cfg, factory, nil)
 
 	ctx := context.Background()
 	err := client.UpdateAuthContext(ctx, "imsi-208001000000000", "auth-xyz", "EAP_SUCCESS")
 
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "unsupported protocol scheme")
+	assert.Contains(t, err.Error(), "no baseURL and no NRF client configured")
 }
 
 func TestExtractPLMNFromSupi(t *testing.T) {
@@ -294,7 +264,7 @@ func TestExtractPLMNFromSupi(t *testing.T) {
 		{"imsi-440010123456789", "440010"},
 		{"imsi-310410999999999", "310410"},
 		{"imsi-12345", "208001"},  // too short → default
-		{"", "208001"},           // empty → default
+		{"", "208001"},            // empty → default
 		{"imsi-208", "208001"},    // just enough for "imsi-" + MCC = 7 chars → "208001"
 		{"imsi-208001", "208001"}, // "imsi-"(4) + "208001"(6) = 10 → matches
 	}
@@ -308,7 +278,6 @@ func TestExtractPLMNFromSupi(t *testing.T) {
 }
 
 func TestAuthSubscription_JSON(t *testing.T) {
-	// Verify AuthSubscription marshals/unmarshals correctly
 	sub := AuthSubscription{
 		AuthType:  "EAP_AKA_PRIME",
 		AAAServer: "radius://aaa.operator.com:1813",

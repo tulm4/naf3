@@ -1,7 +1,6 @@
 package nrf
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,8 +11,7 @@ import (
 	"time"
 
 	"github.com/operator/nssAAF/internal/config"
-	"github.com/operator/nssAAF/internal/resilience"
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"github.com/operator/nssAAF/internal/nfclient"
 )
 
 // Client is the NRF service discovery client.
@@ -22,11 +20,10 @@ import (
 // REQ-03: Discovery with 5-min TTL cache.
 type Client struct {
 	baseURL      string
-	httpClient   *http.Client
 	nfInstanceID string
 	cache        *NRFDiscoveryCache
 	registered   atomic.Bool
-	cbRegistry   *resilience.Registry
+	factory      *nfclient.Factory
 }
 
 // NRFDiscoveryCache holds cached NF discovery results with 5-min TTL.
@@ -89,24 +86,24 @@ type NFProfile struct {
 }
 
 // NewClient creates a new NRF client.
-// cbRegistry may be nil for testing; if non-nil, HTTP calls are wrapped with circuit breaker.
-func NewClient(cfg config.NRFConfig, cbRegistry *resilience.Registry) *Client {
+func NewClient(cfg config.NRFConfig, factory *nfclient.Factory) *Client {
 	cacheTTL := cfg.CacheTTL
 	if cacheTTL == 0 {
 		cacheTTL = 5 * time.Minute
 	}
 	return &Client{
-		baseURL: cfg.BaseURL,
-		httpClient: &http.Client{
-			Timeout:   cfg.DiscoverTimeout,
-			Transport: otelhttp.NewTransport(http.DefaultTransport),
-		},
+		baseURL:      cfg.BaseURL,
 		nfInstanceID: fmt.Sprintf("nssAAF-instance-%d", time.Now().UnixNano()),
 		cache: &NRFDiscoveryCache{
 			ttl: cacheTTL,
 		},
-		cbRegistry: cbRegistry,
+		factory: factory,
 	}
+}
+
+// doRequest executes an HTTP request using the factory.
+func (c *Client) doRequest(ctx context.Context, method, path string, body []byte) (int, []byte, error) {
+	return c.factory.Do(ctx, c.baseURL, method, path, body)
 }
 
 // RegisterAsync registers the NSSAAF profile with NRF in a background goroutine.
@@ -149,14 +146,6 @@ func (c *Client) RegisterAsync(ctx context.Context) {
 // Register sends Nnrf_NFRegistration to the NRF.
 // REQ-01: POST /nnrf-disc/v1/nf-instances with NFProfile.
 func (c *Client) Register(ctx context.Context) error {
-	var cb *resilience.CircuitBreaker
-	if c.cbRegistry != nil {
-		cb = c.cbRegistry.Get(c.baseURL)
-		if !cb.Allow() {
-			return fmt.Errorf("nrf: circuit breaker open for %s", c.baseURL)
-		}
-	}
-
 	profile := NFProfile{
 		NFInstanceID:   c.nfInstanceID,
 		NFType:         "NSSAAF",
@@ -168,28 +157,12 @@ func (c *Client) Register(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("nrf: marshal profile: %w", err)
 	}
-	url := fmt.Sprintf("%s/nnrf-disc/v1/nf-instances", c.baseURL)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	status, respBody, err := c.doRequest(ctx, http.MethodPost, "/nnrf-disc/v1/nf-instances", body)
 	if err != nil {
-		return fmt.Errorf("nrf: create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		if cb != nil {
-			cb.RecordFailure()
-		}
 		return fmt.Errorf("nrf: register: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusCreated {
-		if cb != nil {
-			cb.RecordFailure()
-		}
-		return fmt.Errorf("nrf: unexpected status %d", resp.StatusCode)
-	}
-	if cb != nil {
-		cb.RecordSuccess()
+	if status != http.StatusCreated {
+		return fmt.Errorf("nrf: unexpected status %d: %s", status, respBody)
 	}
 	c.registered.Store(true)
 	return nil
@@ -198,14 +171,6 @@ func (c *Client) Register(ctx context.Context) error {
 // Heartbeat sends Nnrf_NFHeartBeat every 5 minutes.
 // REQ-02: PUT /nnrf-disc/v1/nf-instances/{id} with nfStatus="REGISTERED", heartBeatTimer=300, load=0-100.
 func (c *Client) Heartbeat(ctx context.Context) error {
-	var cb *resilience.CircuitBreaker
-	if c.cbRegistry != nil {
-		cb = c.cbRegistry.Get(c.baseURL)
-		if !cb.Allow() {
-			return fmt.Errorf("nrf: circuit breaker open for %s", c.baseURL)
-		}
-	}
-
 	payload := map[string]interface{}{
 		"nfInstanceId":   c.nfInstanceID,
 		"nfStatus":       "REGISTERED",
@@ -216,28 +181,13 @@ func (c *Client) Heartbeat(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("nrf: marshal heartbeat: %w", err)
 	}
-	url := fmt.Sprintf("%s/nnrf-disc/v1/nf-instances/%s", c.baseURL, c.nfInstanceID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(body))
+	path := fmt.Sprintf("/nnrf-disc/v1/nf-instances/%s", c.nfInstanceID)
+	status, respBody, err := c.doRequest(ctx, http.MethodPut, path, body)
 	if err != nil {
-		return fmt.Errorf("nrf: create heartbeat request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		if cb != nil {
-			cb.RecordFailure()
-		}
 		return fmt.Errorf("nrf: heartbeat: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		if cb != nil {
-			cb.RecordFailure()
-		}
-		return fmt.Errorf("nrf: heartbeat status %d", resp.StatusCode)
-	}
-	if cb != nil {
-		cb.RecordSuccess()
+	if status != http.StatusOK {
+		return fmt.Errorf("nrf: heartbeat status %d: %s", status, respBody)
 	}
 	return nil
 }
@@ -266,36 +216,13 @@ func (c *Client) DiscoverUDM(ctx context.Context, plmnID string) (string, error)
 		return endpoint.(string), nil
 	}
 
-	var cb *resilience.CircuitBreaker
-	if c.cbRegistry != nil {
-		cb = c.cbRegistry.Get(c.baseURL)
-		if !cb.Allow() {
-			return "", fmt.Errorf("nrf: circuit breaker open for %s", c.baseURL)
-		}
-	}
-
-	// NRF discovery query
-	url := fmt.Sprintf("%s/nnrf-disc/v1/nf-instances?target-nf-type=UDM&service-names=nudm-uem", c.baseURL)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	path := "/nnrf-disc/v1/nf-instances?target-nf-type=UDM&service-names=nudm-uem"
+	status, respBody, err := c.doRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
-		return "", fmt.Errorf("nrf: create discovery request: %w", err)
-	}
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		if cb != nil {
-			cb.RecordFailure()
-		}
 		return "", fmt.Errorf("nrf: discover udm: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		if cb != nil {
-			cb.RecordFailure()
-		}
-		return "", fmt.Errorf("nrf: discover udm status %d", resp.StatusCode)
-	}
-	if cb != nil {
-		cb.RecordSuccess()
+	if status != http.StatusOK {
+		return "", fmt.Errorf("nrf: discover udm status %d: %s", status, respBody)
 	}
 	var result struct {
 		NFInstances []struct {
@@ -307,7 +234,7 @@ func (c *Client) DiscoverUDM(ctx context.Context, plmnID string) (string, error)
 			} `json:"nfServices"`
 		} `json:"nfInstances"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(respBody, &result); err != nil {
 		return "", fmt.Errorf("nrf: decode discovery: %w", err)
 	}
 	// Extract first UDM's nudm-uem endpoint
@@ -331,40 +258,18 @@ func (c *Client) DiscoverAMF(ctx context.Context, amfID string) (string, error) 
 		return endpoint.(string), nil
 	}
 
-	var cb *resilience.CircuitBreaker
-	if c.cbRegistry != nil {
-		cb = c.cbRegistry.Get(c.baseURL)
-		if !cb.Allow() {
-			return "", fmt.Errorf("nrf: circuit breaker open for %s", c.baseURL)
-		}
-	}
-
-	url := fmt.Sprintf("%s/nnrf-disc/v1/nf-instances/%s", c.baseURL, amfID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	path := fmt.Sprintf("/nnrf-disc/v1/nf-instances/%s", amfID)
+	status, respBody, err := c.doRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
-		return "", fmt.Errorf("nrf: create amf request: %w", err)
-	}
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		if cb != nil {
-			cb.RecordFailure()
-		}
 		return "", fmt.Errorf("nrf: discover amf: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		if cb != nil {
-			cb.RecordFailure()
-		}
-		return "", fmt.Errorf("nrf: discover amf status %d", resp.StatusCode)
-	}
-	if cb != nil {
-		cb.RecordSuccess()
+	if status != http.StatusOK {
+		return "", fmt.Errorf("nrf: discover amf status %d: %s", status, respBody)
 	}
 	var amf struct {
 		NFInstanceID string `json:"nfInstanceId"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&amf); err != nil {
+	if err := json.Unmarshal(respBody, &amf); err != nil {
 		return "", fmt.Errorf("nrf: decode amf: %w", err)
 	}
 	c.cache.Set(key, amf.NFInstanceID)
@@ -373,29 +278,13 @@ func (c *Client) DiscoverAMF(ctx context.Context, amfID string) (string, error) 
 
 // Deregister sends Nnrf_NFDeregistration to remove the NF profile.
 func (c *Client) Deregister(ctx context.Context) error {
-	var cb *resilience.CircuitBreaker
-	if c.cbRegistry != nil {
-		cb = c.cbRegistry.Get(c.baseURL)
-		if !cb.Allow() {
-			return fmt.Errorf("nrf: circuit breaker open for %s", c.baseURL)
-		}
-	}
-
-	url := fmt.Sprintf("%s/nnrf-disc/v1/nf-instances/%s", c.baseURL, c.nfInstanceID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
+	path := fmt.Sprintf("/nnrf-disc/v1/nf-instances/%s", c.nfInstanceID)
+	status, respBody, err := c.doRequest(ctx, http.MethodDelete, path, nil)
 	if err != nil {
-		return fmt.Errorf("nrf: create deregister request: %w", err)
-	}
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		if cb != nil {
-			cb.RecordFailure()
-		}
 		return fmt.Errorf("nrf: deregister: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
-	if cb != nil {
-		cb.RecordSuccess()
+	if status != http.StatusNoContent && status != http.StatusOK {
+		return fmt.Errorf("nrf: deregister status %d: %s", status, respBody)
 	}
 	c.registered.Store(false)
 	return nil
