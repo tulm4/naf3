@@ -26,8 +26,8 @@ func NewSessionStore(pool *Pool, enc *encryptor) *Store {
 }
 
 // Load retrieves a slice authentication context by authCtxID.
-func (s *Store) Load(_ context.Context, id string) (*nssaa.AuthCtx, error) {
-	session, err := s.repo.GetByAuthCtxID(context.Background(), id)
+func (s *Store) Load(ctx context.Context, id string) (*nssaa.AuthCtx, error) {
+	session, err := s.repo.GetByAuthCtxID(ctx, id)
 	if err != nil {
 		if errors.Is(err, ErrSessionNotFound) {
 			return nil, nssaa.ErrNotFound
@@ -40,18 +40,18 @@ func (s *Store) Load(_ context.Context, id string) (*nssaa.AuthCtx, error) {
 // Save stores or updates a slice authentication context.
 // If the session does not exist (Update returns ErrSessionNotFound),
 // Create is called to insert it first.
-func (s *Store) Save(_ context.Context, ctx *nssaa.AuthCtx) error {
-	session := authCtxToSession(ctx)
-	err := s.repo.Update(context.Background(), session)
+func (s *Store) Save(ctx context.Context, authCtx *nssaa.AuthCtx) error {
+	session := authCtxToSession(authCtx)
+	err := s.repo.Update(ctx, session)
 	if errors.Is(err, ErrSessionNotFound) {
-		return s.repo.Create(context.Background(), session)
+		return s.repo.Create(ctx, session)
 	}
 	return err
 }
 
 // Delete removes a slice authentication context by authCtxID.
-func (s *Store) Delete(_ context.Context, id string) error {
-	return s.repo.Delete(context.Background(), id)
+func (s *Store) Delete(ctx context.Context, id string) error {
+	return s.repo.Delete(ctx, id)
 }
 
 // Close is a no-op. Pool lifecycle managed by main.go.

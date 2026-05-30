@@ -139,7 +139,7 @@ func (d *DLQ) Process(ctx context.Context, hc *http.Client) {
 				continue
 			}
 
-			ok, retryErr := d.deliverToAMF(ctx, hc, item)
+			ok, retryErr := d.deliverToAMF(innerCtx, hc, item)
 			if ok {
 				slog.Info("dlq: delivered", "id", item.ID, "type", item.Type, "auth_ctx_id", item.AuthCtxID)
 				metrics.DLQProcessed.WithLabelValues("success").Inc()
@@ -150,7 +150,7 @@ func (d *DLQ) Process(ctx context.Context, hc *http.Client) {
 			if retryErr != nil {
 				item.LastError = retryErr.Error()
 			}
-			if reErr := d.Enqueue(ctx, item); reErr != nil {
+			if reErr := d.Enqueue(innerCtx, item); reErr != nil {
 				slog.Error("dlq: re-enqueue failed", "id", item.ID, "error", reErr)
 				metrics.DLQProcessed.WithLabelValues("error").Inc()
 			} else {
