@@ -1,11 +1,6 @@
 # Binaries
 bin/
-nssAAF
-nssAAF.exe
 *.exe
-biz
-aaa-gateway
-http-gateway
 
 # Coverage
 coverage.out
@@ -57,3 +52,4 @@ temp/
 nrm
 nrm.test
 .worktrees/
+.planning/
