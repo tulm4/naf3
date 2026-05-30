@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -252,4 +254,22 @@ func AssembleEAPMessage(attrs []Attribute) []byte {
 // HasMessageAuthenticator checks if a packet contains a Message-Authenticator attribute.
 func HasMessageAuthenticator(data []byte) bool {
 	return FindMessageAuthenticator(data) >= 0
+}
+
+// decodeSnssaiKey parses a composite S-NSSAI key into SST and SD components.
+// Input formats: "sst" or "sst-sd" (e.g. "1", "1-000001", "2-abc123").
+// Returns sst=0, sd="" for invalid input.
+func decodeSnssaiKey(key string) (sst uint8, sd string) {
+	if key == "" {
+		return 0, ""
+	}
+	parts := strings.SplitN(key, "-", 2)
+	sstVal, err := strconv.ParseUint(parts[0], 10, 8)
+	if err != nil {
+		return 0, ""
+	}
+	if len(parts) == 1 {
+		return uint8(sstVal), ""
+	}
+	return uint8(sstVal), parts[1]
 }

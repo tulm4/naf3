@@ -373,6 +373,8 @@ func (e *Engine) forwardToAAA(ctx context.Context, session *Session, eapPayload 
 		return nil, errors.New("aaa client not configured")
 	}
 
+	routing := e.aaaClient.RoutingContext(session)
+
 	e.logger.Debug("eap_forward_to_aaa",
 		"auth_ctx_id", session.AuthCtxID,
 		"snssai_key", session.SnssaiKey,
@@ -380,7 +382,7 @@ func (e *Engine) forwardToAAA(ctx context.Context, session *Session, eapPayload 
 		"rounds", session.Rounds,
 	)
 
-	response, err := e.aaaClient.SendEAP(ctx, session, eapPayload)
+	response, err := e.aaaClient.SendEAP(ctx, session, routing, eapPayload)
 	if err != nil {
 		e.logger.Error("eap_aaa_error",
 			"auth_ctx_id", session.AuthCtxID,
@@ -443,5 +445,31 @@ func authResultFromEapResult(r Result) types.AuthResult {
 		return types.AuthResultFailure
 	default:
 		return types.AuthResultFailure
+	}
+}
+
+// NewEngineWithWriteThrough creates an EAP engine backed by a write-through store
+// (TTL cache + long-term audit). Use this for production with both Redis and Postgres.
+// The sessions parameter must implement SessionStore (e.g., *storage.WriteThroughStore).
+func NewEngineWithWriteThrough(cfg Config, aaaClient AAARouter, sessions SessionStore, logger *slog.Logger) *Engine {
+	if cfg.MaxRounds == 0 {
+		cfg.MaxRounds = DefaultMaxRounds
+	}
+	if cfg.RoundTimeout == 0 {
+		cfg.RoundTimeout = DefaultRoundTimeout
+	}
+	if cfg.SessionTTL == 0 {
+		cfg.SessionTTL = DefaultSessionTTL
+	}
+	if cfg.FragmentTTLSeconds == 0 {
+		cfg.FragmentTTLSeconds = 60
+	}
+
+	return &Engine{
+		cfg:         cfg,
+		sessions:    sessions,
+		fragmentMgr: NewFragmentManager(cfg.FragmentTTLSeconds),
+		aaaClient:   aaaClient,
+		logger:      &defaultLogger{logger},
 	}
 }

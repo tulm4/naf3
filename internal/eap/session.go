@@ -18,6 +18,7 @@ var (
 	ErrSessionTimeout         = errors.New("eap: session timeout")
 	ErrInvalidStateTransition = errors.New("eap: invalid state transition")
 	ErrMissingAuthCtxID       = errors.New("eap: missing auth context ID")
+	ErrNoAAAClient            = errors.New("eap: aaa client not configured")
 )
 
 // Default session limits.
@@ -245,4 +246,19 @@ func (s *TLSSessionState) AppendTLSData(data []byte) {
 // ResetTLSData clears the accumulated TLS data.
 func (s *TLSSessionState) ResetTLSData() {
 	s.TLSData = nil
+}
+
+// DecodeSnssaiKey decodes the composite SnssaiKey into SST and SD components.
+// The SnssaiKey format is "SST:SD" where SD may be empty.
+func (s *Session) DecodeSnssaiKey() (sst uint8, sd string) {
+	if s.SnssaiKey == "" {
+		return 0, ""
+	}
+	// Format: "SST:SD" or just "SST" if SD is empty
+	var sstStr, sdStr string
+	fmt.Sscanf(s.SnssaiKey, "%s:%s", &sstStr, &sdStr)
+	if sstStr != "" {
+		fmt.Sscanf(sstStr, "%d", &sst)
+	}
+	return sst, sdStr
 }

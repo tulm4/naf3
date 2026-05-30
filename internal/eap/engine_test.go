@@ -43,7 +43,7 @@ func newMockAAAClient() *mockAAAClient {
 	}
 }
 
-func (m *mockAAAClient) SendEAP(ctx context.Context, session *Session, eapPayload []byte) ([]byte, error) {
+func (m *mockAAAClient) SendEAP(ctx context.Context, session *Session, routing RoutingContext, eapPayload []byte) ([]byte, error) {
 	m.mu.Lock()
 	m.eapPayload = eapPayload
 	m.callCount.Add(1)
@@ -106,6 +106,17 @@ func (m *mockAAAClient) LastPayload() []byte {
 
 func (m *mockAAAClient) CallCount() int {
 	return int(m.callCount.Load())
+}
+
+// RoutingContext implements AAARouter for test mock.
+func (m *mockAAAClient) RoutingContext(session *Session) RoutingContext {
+	sst, sd := session.DecodeSnssaiKey()
+	return RoutingContext{
+		GPSI:      session.Gpsi,
+		Sst:       sst,
+		Sd:        sd,
+		AuthCtxID: session.AuthCtxID,
+	}
 }
 
 // ---------------------------------------------------------------------------

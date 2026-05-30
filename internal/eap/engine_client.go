@@ -5,28 +5,9 @@ package eap
 import (
 	"context"
 	"crypto/sha256"
-	"errors"
 	"sync"
 	"time"
 )
-
-// ErrNoAAAClient is returned when no AAA client is configured.
-var ErrNoAAAClient = errors.New("eap: aaa client not configured")
-
-// AAARouter is the interface for forwarding EAP messages to AAA-S.
-// Spec: TS 29.561 §16-17
-//
-// Both the NSSAA handler and the AIW handler use this interface.
-// Protocol clients (RADIUS, Diameter) implement it by extracting routing
-// context (GPSI, S-NSSAI) from the eap.Session.
-type AAARouter interface {
-	// SendEAP forwards an EAP message to AAA-S for the given session
-	// and returns the AAA response (EAP-Request, Success, or Failure).
-	//
-	// The session carries all routing context (GPSI, S-NSSAI, etc.)
-	// so the protocol client can determine the correct AAA server.
-	SendEAP(ctx context.Context, session *Session, eapPayload []byte) ([]byte, error)
-}
 
 // sha256Hash computes the SHA-256 hash of data.
 func sha256Hash(data []byte) []byte {
