@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: unknown
-last_updated: "2026-04-30T04:03:28.549Z"
-last_activity: 2026-04-29
+status: active
+last_updated: "2026-05-30T06:09:00.000Z"
+last_activity: 2026-05-01
 progress:
   total_phases: 10
-  completed_phases: 1
+  completed_phases: 7
   total_plans: 6
   completed_plans: 11
-  percent: 100
+  percent: 70
 ---
 
 # State: NSSAAF
@@ -22,43 +22,52 @@ progress:
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-04-25)
+See: `.planning/PROJECT.md` (updated 2026-05-30)
 
 ## Current Milestone
 
-**Phase 6: Integration Testing & NRM**
+**Phase 6: Integration Testing & NRM** — COMPLETE
 
 ## Milestone Progress
 
 ### Phases
 
-| Phase | Status | Notes |
-|-------|--------|-------|
-| 0: Setup | ✅ Done | `cmd/nssAAF/` |
-| 1: Foundation | ✅ Done | Types, N58/N60 API, config |
-| 2: Protocol | ✅ Done | EAP engine, RADIUS, Diameter |
-| 3: Data & Storage | ✅ Done | PostgreSQL, Redis |
-| R: 3-Component Refactor | ✅ Done | HTTP GW, Biz Pod, AAA GW |
-| 4: NF Integration & Observability | ✅ Done | 5 plans, 26 tasks, 5 waves — REQ-01 to REQ-19 |
-| 5: Security & Crypto | ✅ Done | TLS, mTLS, KEK/DEK, KeyManager, Vault, SoftHSM |
-| 6: Integration Testing & NRM | ✅ Done | 6 plans — PLAN-1 through PLAN-6 complete |
-| 7: Kubernetes Deployment | ⏳ Pending | Helm, Kustomize, ArgoCD |
-| 8: Performance & Load Testing | ⏳ Pending | Load, chaos |
+|| Phase | Status | Notes |
+||-------|--------|-------|
+|| 0: Setup | ✅ Done | `cmd/nssAAF/` |
+|| 1: Foundation | ✅ Done | Types, N58/N60 API, config |
+|| 2: Protocol | ✅ Done | EAP engine, RADIUS, Diameter |
+|| 3: Data & Storage | ✅ Done | PostgreSQL, Redis |
+|| R: 3-Component Refactor | ✅ Done | HTTP GW, Biz Pod, AAA GW |
+|| 4: NF Integration & Observability | ✅ Done | 5 plans, 26 tasks, 5 waves — REQ-01 to REQ-19 |
+|| 5: Security & Crypto | ✅ Done | TLS, mTLS, KEK/DEK, KeyManager, Vault, SoftHSM |
+|| 6: Integration Testing & NRM | ✅ Done | 6 plans — PLAN-1 through PLAN-6 complete |
+|| 7: Kubernetes Deployment | ⏳ Pending | Helm, Kustomize, ArgoCD |
+|| 8: Performance & Load Testing | ⏳ Pending | Load, chaos |
 
 ## Recent Commits
 
-| Commit | Description |
-|--------|-------------|
-| `6f54f49` | docs(06-PLAN-6): complete PLAN-6 summary |
-| `aad45fa` | feat(06-PLAN-6): reject empty snssai {} with HTTP 400 per TS 29.526 §7.2.2 |
-| `f8d6eb0` | feat(06-PLAN-6): add HTTP Gateway auth bypass for E2E tests (Gap E2E-02) |
-| `29e172a` | refactor(06-PLAN-6): remove obsolete compose files and migrate to docker compose V2 |
-| `d8bd880` | test(06-PLAN-5): add E2E harness and conformance test suites |
-| `ccd80f1` | docs(06-PLAN-2): add PLAN-2 summary |
-| `8799c72` | feat(06-PLAN-2): NRM RESTCONF server and AlarmManager |
-| `...` | (see `git log --oneline`) |
+|| Commit | Description |
+||--------|-------------|
+|| `6f54f49` | docs(06-PLAN-6): complete PLAN-6 summary |
+|| `aad45fa` | feat(06-PLAN-6): reject empty snssai {} with HTTP 400 per TS 29.526 §7.2.2 |
+|| `f8d6eb0` | feat(06-PLAN-6): add HTTP Gateway auth bypass for E2E tests (Gap E2E-02) |
+|| `29e172a` | refactor(06-PLAN-6): remove obsolete compose files and migrate to docker compose V2 |
+|| `d8bd880` | test(06-PLAN-5): add E2E harness and conformance test suites |
+|| `ccd80f1` | docs(06-PLAN-2): add PLAN-2 summary |
+|| `8799c72` | feat(06-PLAN-2): NRM RESTCONF server and AlarmManager |
+|| `...` | (see `git log --oneline`) |
 
 ## Session Notes
+
+### 2026-05-30 — Planning Files Update
+
+Planning files updated to reflect Phase 6 completion:
+
+- STATE.md: Updated progress (7/10 phases complete, 70%)
+- PROJECT.md: REQ-01 through REQ-34 moved to Validated
+- REQUIREMENTS.md: All Phase 4-6 requirements marked complete
+- ROADMAP.md: Phase 4-6 status updated to ✅ DONE
 
 ### 2026-04-25 — Phase 4 planning
 
@@ -82,19 +91,6 @@ Phase 4 context gathered. Key decisions:
 
 See: `.planning/phases/04-NFIntegration_Observability/04-CONTEXT.md`
 
----
-
-### 2026-04-27 — Phase 5 discussion
-
-Phase 5 context gathered. Key decisions:
-
-- HTTP Gateway validates all inbound N58/N60 Bearer tokens (not Biz Pod)
-- Go stdlib mTLS throughout, config-driven; Istio mode optional via ISTIO_MTLS=1 env var
-- KeyManager interface + soft/SoftHSM/Vault transit engine (kubeadm, not AWS)
-- kubeadm deployment — HashiCorp Vault runs as K8s deployment for production KEK management
-
-See: `.planning/phases/05-security-crypto/05-CONTEXT.md`
-
 ### 2026-04-25 — Phase 4 execution complete
 
 Phase 4 fully executed across 5 waves:
@@ -108,6 +104,17 @@ Phase 4 fully executed across 5 waves:
 All tasks validated and tests passing.
 
 ---
+
+### 2026-04-27 — Phase 5 discussion
+
+Phase 5 context gathered. Key decisions:
+
+- HTTP Gateway validates all inbound N58/N60 Bearer tokens (not Biz Pod)
+- Go stdlib mTLS throughout, config-driven; Istio mode optional via ISTIO_MTLS=1 env var
+- KeyManager interface + soft/SoftHSM/Vault transit engine (kubeadm, not AWS)
+- kubeadm deployment — HashiCorp Vault runs as K8s deployment for production KEK management
+
+See: `.planning/phases/05-security-crypto/05-CONTEXT.md`
 
 ### 2026-04-28 — Phase 5 execution complete
 
@@ -192,8 +199,6 @@ Updated: module_index.md, roadmap/README.md, 06-UAT.md
 
 ---
 
-*Last updated: 2026-04-30*
-
 ### 2026-04-30 — Phase 6 PLAN-6 execution complete
 
 PLAN-6 gap fixes executed in 3 tasks across 18 minutes:
@@ -207,15 +212,20 @@ Key fixes: exec.CommandContext variadic args bug, duplicate test function declar
 
 ### Quick Tasks Completed
 
-| # | Description | Date | Commit | Status | Directory |
-|---|-------------|------|--------|--------|-----------|
-| 260428-m0i | AIW E2E flows in test_strategy.md | 2026-04-28 | | Verified | [260428-m0i-b-sung-y-flow-e2e-c-a-nssaaf-cho-t-i-li-](./quick/260428-m0i-b-sung-y-flow-e2e-c-a-nssaaf-cho-t-i-li-/) |
-| 260430-kt4 | Run make test-e2e and fix all issues, ensure all tests pass | 2026-04-30 | ae073ad | Verified | [260430-kt4-run-make-test-e2e-and-fix-all-issues-ens](./quick/260430-kt4-run-make-test-e2e-and-fix-all-issues-ens/) |
-| 260430-qey | Refactor e2e harness to use YAML config, HTTPS/TLS with CA store, remove hardcoded values | 2026-04-30 | bebeacb | Verified | [260430-qey-refactor-e2e-harness-to-use-docker-compo](./quick/260430-qey-refactor-e2e-harness-to-use-docker-compo/) |
-| 260430-u3c | Remove binary startup from harness, add NRM to dev.yaml, add E2E NRM tests, fix all issues | 2026-04-30 | d4e297d | Verified | [260430-u3c-remove-binary-process-startup-from-harne](./quick/260430-u3c-remove-binary-process-startup-from-harne/) |
-| 260430-vq5 | Fix E2E flow tests: sharedHarness init, TLS, body bugs | 2026-04-30 | | Verified | [260430-vq5-fix-e2e-flow-tests](./quick/260430-vq5-fix-e2e-flow-tests/) |
-| 260501-hke | Audit and fix all non-3GPP-compliant constant values in the codebase | 2026-05-01 | | Verified | [260501-hke-audit-and-fix-all-non-3gpp-compliant-con](./quick/260501-hke-audit-and-fix-all-non-3gpp-compliant-con/) |
+|| # | Description | Date | Commit | Status | Directory |
+||---|-------------|------|--------|--------|-----------|
+|| 260428-m0i | AIW E2E flows in test_strategy.md | 2026-04-28 | | Verified | [260428-m0i-b-sung-y-flow-e2e-c-a-nssaaf-cho-t-i-li-](./quick/260428-m0i-b-sung-y-flow-e2e-c-a-nssaaf-cho-t-i-li-/) |
+|| 260430-kt4 | Run make test-e2e and fix all issues, ensure all tests pass | 2026-04-30 | ae073ad | Verified | [260430-kt4-run-make-test-e2e-and-fix-all-issues-ens](./quick/260430-kt4-run-make-test-e2e-and-fix-all-issues-ens/) |
+|| 260430-qey | Refactor e2e harness to use YAML config, HTTPS/TLS with CA store, remove hardcoded values | 2026-04-30 | bebeacb | Verified | [260430-qey-refactor-e2e-harness-to-use-docker-compo](./quick/260430-qey-refactor-e2e-harness-to-use-docker-compo/) |
+|| 260430-u3c | Remove binary startup from harness, add NRM to dev.yaml, add E2E NRM tests, fix all issues | 2026-04-30 | d4e297d | Verified | [260430-u3c-remove-binary-process-startup-from-harne](./quick/260430-u3c-remove-binary-process-startup-from-harne/) |
+|| 260430-vq5 | Fix E2E flow tests: sharedHarness init, TLS, body bugs | 2026-04-30 | | Verified | [260430-vq5-fix-e2e-flow-tests](./quick/260430-vq5-fix-e2e-flow-tests/) |
+|| 260501-hke | Audit and fix all non-3GPP-compliant constant values in the codebase | 2026-05-01 | | Verified | [260501-hke-audit-and-fix-all-non-3gpp-compliant-con](./quick/260501-hke-audit-and-fix-all-non-3gpp-compliant-con/) |
+||| 260530-ihu | Improve codebase, using mcp tools for clear picture | 2026-05-30 | 6be09a8 | Verified | [260530-ihu-improve-codebase-using-mcp-tools-for-cle](./quick/260530-ihu-improve-codebase-using-mcp-tools-for-cle/) |
 
-Last activity: 2026-05-01 — Completed quick task 260501-hkf: update GPSI regex to match TS 29.571 §5.2.2 (fixed 3GPP compliance)
+Last activity: 2026-05-30 — Completed quick task 260530-ihu: improve codebase (envelope encryption tests, context propagation fixes)
 
-**Planned Phase:** 06 (integration-testing-nrm) — 6 plans — 2026-04-29T19:14:46.985Z
+**Planned Phase:** 7 (Kubernetes Deployment) — pending
+
+---
+
+*Last updated: 2026-05-30*
