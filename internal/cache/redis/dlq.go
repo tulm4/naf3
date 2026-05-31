@@ -127,6 +127,7 @@ func (d *DLQ) Process(ctx context.Context, hc *http.Client) {
 				case <-innerCtx.Done():
 					return
 				default:
+					time.Sleep(250 * time.Millisecond)
 				}
 				continue
 			}
