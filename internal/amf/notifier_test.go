@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/operator/nssAAF/internal/config"
+	"github.com/operator/nssAAF/internal/nfclient"
 	"github.com/operator/nssAAF/internal/resilience"
 	redisclient "github.com/operator/nssAAF/internal/cache/redis"
 	"github.com/stretchr/testify/assert"
@@ -43,9 +44,10 @@ func TestSendReAuthNotification_Success(t *testing.T) {
 	defer server.Close()
 
 	cbRegistry := resilience.NewRegistry(5, 30*time.Second, 3)
+	factory := nfclient.NewFactory(cbRegistry)
 	dlq := &mockDLQ{}
 
-	client := NewClient(5*time.Second, cbRegistry, dlq, testCBCfg(), testRetryCfg())
+	client := NewClient(factory, cbRegistry, dlq, testCBCfg(), testRetryCfg())
 
 	err := client.SendReAuthNotification(context.Background(), server.URL+"/notify/reauth", "auth-123", []byte(`{"reason":"expired"}`))
 	assert.NoError(t, err)
@@ -68,9 +70,10 @@ func TestSendReAuthNotification_RetryThenSuccess(t *testing.T) {
 	defer server.Close()
 
 	cbRegistry := resilience.NewRegistry(5, 30*time.Second, 3)
+	factory := nfclient.NewFactory(cbRegistry)
 	dlq := &mockDLQ{}
 
-	client := NewClient(2*time.Second, cbRegistry, dlq, testCBCfg(), testRetryCfg())
+	client := NewClient(factory, cbRegistry, dlq, testCBCfg(), testRetryCfg())
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -91,9 +94,10 @@ func TestSendReAuthNotification_RetryExhausted_DLQEnqueued(t *testing.T) {
 	defer server.Close()
 
 	cbRegistry := resilience.NewRegistry(5, 30*time.Second, 3)
+	factory := nfclient.NewFactory(cbRegistry)
 	dlq := &mockDLQ{}
 
-	client := NewClient(1*time.Second, cbRegistry, dlq, testCBCfg(), testRetryCfg())
+	client := NewClient(factory, cbRegistry, dlq, testCBCfg(), testRetryCfg())
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -114,9 +118,10 @@ func TestSendRevocationNotification_Success(t *testing.T) {
 	defer server.Close()
 
 	cbRegistry := resilience.NewRegistry(5, 30*time.Second, 3)
+	factory := nfclient.NewFactory(cbRegistry)
 	dlq := &mockDLQ{}
 
-	client := NewClient(5*time.Second, cbRegistry, dlq, testCBCfg(), testRetryCfg())
+	client := NewClient(factory, cbRegistry, dlq, testCBCfg(), testRetryCfg())
 
 	err := client.SendRevocationNotification(context.Background(), server.URL, "auth-789", []byte(`{"reason":"policy_change"}`))
 	assert.NoError(t, err)
@@ -134,9 +139,10 @@ func TestSendRevocationNotification_RetryExhausted_DLQEnqueued(t *testing.T) {
 	defer server.Close()
 
 	cbRegistry := resilience.NewRegistry(5, 30*time.Second, 3)
+	factory := nfclient.NewFactory(cbRegistry)
 	dlq := &mockDLQ{}
 
-	client := NewClient(1*time.Second, cbRegistry, dlq, testCBCfg(), testRetryCfg())
+	client := NewClient(factory, cbRegistry, dlq, testCBCfg(), testRetryCfg())
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -161,9 +167,10 @@ func TestSendNotification_ClientError_StillRetried(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	cbRegistry := resilience.NewRegistry(5, 30*time.Second, 3)
+	factory := nfclient.NewFactory(cbRegistry)
 	dlq := &mockDLQ{}
 
-	client := NewClient(1*time.Second, cbRegistry, dlq, testCBCfg(), testRetryCfg())
+	client := NewClient(factory, cbRegistry, dlq, testCBCfg(), testRetryCfg())
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -174,22 +181,32 @@ func TestSendNotification_ClientError_StillRetried(t *testing.T) {
 	assert.Equal(t, int32(1), dlq.EnqueueCount.Load()) // DLQ enqueued after retries
 }
 
-func TestExtractHostPort(t *testing.T) {
+func TestExtractBaseURLAndPath(t *testing.T) {
 	tests := []struct {
 		uri      string
-		expected string
+		baseURL  string
+		path     string
+		hasError bool
 	}{
-		{"http://amf:8080/notify", "amf:8080"},
-		{"http://10.0.0.1:9090/path", "10.0.0.1:9090"},
-		{"http://host:80/", "host:80"},
-		{"http://host/", "host"},
-		{"http://192.168.1.1:8080/n62/notify", "192.168.1.1:8080"},
+		{"http://amf:8080/notify", "http://amf:8080", "/notify", false},
+		{"http://10.0.0.1:9090/path", "http://10.0.0.1:9090", "/path", false},
+		{"http://host:80/", "http://host:80", "/", false},
+		{"http://host/", "http://host", "/", false},
+		{"http://192.168.1.1:8080/n62/notify", "http://192.168.1.1:8080", "/n62/notify", false},
+		{"", "", "", true},
+		{"no-scheme", "", "", true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.uri, func(t *testing.T) {
-			result := extractHostPort(tt.uri)
-			assert.Equal(t, tt.expected, result)
+			baseURL, path, err := extractBaseURLAndPath(tt.uri)
+			if tt.hasError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.baseURL, baseURL)
+				assert.Equal(t, tt.path, path)
+			}
 		})
 	}
 }

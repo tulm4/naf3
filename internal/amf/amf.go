@@ -3,17 +3,17 @@
 package amf
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/operator/nssAAF/internal/config"
+	"github.com/operator/nssAAF/internal/nfclient"
 	"github.com/operator/nssAAF/internal/resilience"
 	redisclient "github.com/operator/nssAAF/internal/cache/redis"
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 // NotificationType identifies the type of AMF notification.
@@ -33,31 +33,25 @@ const (
 // REQ-07: Revocation notification POST to revocNotifUri.
 // REQ-10: DLQ on retry exhaustion.
 type Client struct {
-	httpClient    *http.Client
-	cbRegistry    *resilience.Registry
-	dlq           interface {
+	factory      *nfclient.Factory
+	cbRegistry   *resilience.Registry
+	dlq          interface {
 		Enqueue(ctx context.Context, item interface{}) error
 	}
 	notifyTimeout time.Duration
-	cbCfg         config.CircuitBreakerConfig
-	retryCfg      resilience.RetryConfig
+	cbCfg        config.CircuitBreakerConfig
+	retryCfg     resilience.RetryConfig
 }
 
 // NewClient creates a new AMF notifier.
-func NewClient(timeout time.Duration, cbRegistry *resilience.Registry, dlq interface {
+func NewClient(factory *nfclient.Factory, cbRegistry *resilience.Registry, dlq interface {
 	Enqueue(ctx context.Context, item interface{}) error
 }, cbCfg config.CircuitBreakerConfig, retryCfg resilience.RetryConfig) *Client {
-	if timeout == 0 {
-		timeout = 30 * time.Second
-	}
 	return &Client{
-		httpClient: &http.Client{
-			Timeout:   timeout,
-			Transport: otelhttp.NewTransport(http.DefaultTransport),
-		},
-		cbRegistry:    cbRegistry,
+		factory:      factory,
+		cbRegistry:   cbRegistry,
 		dlq:          dlq,
-		notifyTimeout: timeout,
+		notifyTimeout: 30 * time.Second,
 		cbCfg:        cbCfg,
 		retryCfg:     retryCfg,
 	}
@@ -80,9 +74,6 @@ func (c *Client) SendRevocationNotification(ctx context.Context, uri, authCtxID 
 // sendNotification sends a notification with retry and DLQ fallback.
 // D-02: On retry exhaustion, enqueue to DLQ instead of dropping.
 func (c *Client) sendNotification(ctx context.Context, typ NotificationType, uri, authCtxID string, payload []byte) error {
-	cbKey := extractHostPort(uri)
-	cb := c.cbRegistry.Get(cbKey)
-
 	item := &redisclient.AMFDLQItem{
 		ID:          fmt.Sprintf("%s-%d", authCtxID, time.Now().UnixNano()),
 		Type:        string(typ),
@@ -97,34 +88,26 @@ func (c *Client) sendNotification(ctx context.Context, typ NotificationType, uri
 	err := resilience.Do(ctx, c.retryCfg, func() error {
 		item.Attempt++
 
-		if !cb.Allow() {
-			cb.RecordFailure()
-			return fmt.Errorf("circuit breaker open for %s", cbKey)
+		// Extract baseURL and path from full URI.
+		// uri like "http://amf:8080/nsmf-callback/..." → baseURL="http://amf:8080", path="/nsmf-callback/..."
+		baseURL, path, err := extractBaseURLAndPath(uri)
+		if err != nil {
+			return fmt.Errorf("amf: parse uri: %w", err)
 		}
 
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, uri, bytes.NewReader(payload))
+		status, _, err := c.factory.Do(ctx, baseURL, http.MethodPost, path, payload)
 		if err != nil {
-			return fmt.Errorf("amf: create request: %w", err)
-		}
-		req.Header.Set("Content-Type", "application/json")
-
-		resp, err := c.httpClient.Do(req)
-		if err != nil {
-			cb.RecordFailure()
 			return fmt.Errorf("amf: send %s: %w", typ, err)
 		}
-		defer func() { _ = resp.Body.Close() }()
 
-		if resp.StatusCode >= 500 {
-			cb.RecordFailure()
-			return fmt.Errorf("amf: server error %d", resp.StatusCode)
+		// Factory already recorded CB failure/success internally based on status.
+		if status >= 500 {
+			return fmt.Errorf("amf: server error %d", status)
 		}
-		if resp.StatusCode >= 400 {
-			cb.RecordSuccess()
-			return fmt.Errorf("amf: client error %d (not retryable)", resp.StatusCode)
+		if status >= 400 {
+			return fmt.Errorf("amf: client error %d (not retryable)", status)
 		}
 
-		cb.RecordSuccess()
 		return nil
 	})
 
@@ -151,37 +134,22 @@ func (c *Client) sendNotification(ctx context.Context, typ NotificationType, uri
 	return nil
 }
 
-// extractHostPort extracts host:port from a URI.
-// "http://host:port/path" → "host:port"
-func extractHostPort(uri string) string {
-	if len(uri) > 7 && uri[:7] == "http://" {
-		rest := uri[7:]
-		// Find the colon after the host
-		for i := 0; i < len(rest); i++ {
-			if rest[i] == ':' {
-				// Found colon — port starts at i+1
-				end := i + 1
-				for end < len(rest) && rest[end] != '/' {
-					end++
-				}
-				return rest[:end] // host:port
-			}
-			if rest[i] == '/' {
-				// No port found — return host only
-				return rest[:i]
-			}
-		}
-		// No colon or slash found — return the rest as host
-		return rest
+// extractBaseURLAndPath splits a full URI into baseURL and path.
+// "http://host:port/path" → ("http://host:port", "/path")
+func extractBaseURLAndPath(uri string) (string, string, error) {
+	if len(uri) == 0 {
+		return "", "", fmt.Errorf("empty uri")
 	}
-	// No http:// prefix — parse as-is
-	for i, ch := range uri {
-		if ch == ':' {
-			return uri[:i+1] + uri[i+1:min(i+6, len(uri))]
-		}
-		if ch == '/' {
-			return uri[:i]
-		}
+
+	schemeEnd := strings.Index(uri, "://")
+	if schemeEnd == -1 {
+		return "", "", fmt.Errorf("no scheme in uri: %s", uri)
 	}
-	return uri
+	rest := uri[schemeEnd+3:] // after "://"
+	slashIdx := strings.Index(rest, "/")
+	if slashIdx == -1 {
+		return uri, "/", nil
+	}
+	hostEnd := schemeEnd + 3 + slashIdx
+	return uri[:hostEnd], uri[hostEnd:], nil
 }

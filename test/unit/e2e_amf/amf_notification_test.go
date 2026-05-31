@@ -14,6 +14,7 @@ import (
 
 	"github.com/operator/nssAAF/internal/amf"
 	"github.com/operator/nssAAF/internal/config"
+	"github.com/operator/nssAAF/internal/nfclient"
 	"github.com/operator/nssAAF/internal/resilience"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -97,10 +98,11 @@ func TestNotifier_ReAuthNotification(t *testing.T) {
 	defer srv.Close()
 
 	cbRegistry := resilience.NewRegistry(5, 30*time.Second, 3)
+	factory := nfclient.NewFactory(cbRegistry)
 	dlq := &mockDLQ{}
 	cbCfg := config.CircuitBreakerConfig{}
 	retryCfg := resilience.RetryConfig{}
-	client := amf.NewClient(5*time.Second, cbRegistry, dlq, cbCfg, retryCfg)
+	client := amf.NewClient(factory, cbRegistry, dlq, cbCfg, retryCfg)
 
 	payload := []byte(`{"notificationType":"SLICE_RE_AUTH","reason":"expired"}`)
 	err := client.SendReAuthNotification(context.Background(), srv.URL+"/namf-callback/v1/", "auth-ctx-reauth-001", payload)
@@ -118,10 +120,11 @@ func TestNotifier_RevocationNotification(t *testing.T) {
 	defer srv.Close()
 
 	cbRegistry := resilience.NewRegistry(5, 30*time.Second, 3)
+	factory := nfclient.NewFactory(cbRegistry)
 	dlq := &mockDLQ{}
 	cbCfg := config.CircuitBreakerConfig{}
 	retryCfg := resilience.RetryConfig{}
-	client := amf.NewClient(5*time.Second, cbRegistry, dlq, cbCfg, retryCfg)
+	client := amf.NewClient(factory, cbRegistry, dlq, cbCfg, retryCfg)
 
 	payload := []byte(`{"notificationType":"SLICE_REVOCATION","reason":"policy_change"}`)
 	err := client.SendRevocationNotification(context.Background(), srv.URL+"/namf-callback/v1/", "auth-ctx-revoc-001", payload)
@@ -148,10 +151,11 @@ func TestNotifier_RetryOnFailure(t *testing.T) {
 	defer srv.Close()
 
 	cbRegistry := resilience.NewRegistry(5, 30*time.Second, 3)
+	factory := nfclient.NewFactory(cbRegistry)
 	dlq := &mockDLQ{}
 	cbCfg := config.CircuitBreakerConfig{}
 	retryCfg := resilience.RetryConfig{}
-	client := amf.NewClient(1*time.Second, cbRegistry, dlq, cbCfg, retryCfg)
+	client := amf.NewClient(factory, cbRegistry, dlq, cbCfg, retryCfg)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -174,10 +178,11 @@ func TestNotifier_RetryExhausted(t *testing.T) {
 	defer srv.Close()
 
 	cbRegistry := resilience.NewRegistry(5, 30*time.Second, 3)
+	factory := nfclient.NewFactory(cbRegistry)
 	dlq := &mockDLQ{}
 	cbCfg := config.CircuitBreakerConfig{}
 	retryCfg := resilience.RetryConfig{}
-	client := amf.NewClient(1*time.Second, cbRegistry, dlq, cbCfg, retryCfg)
+	client := amf.NewClient(factory, cbRegistry, dlq, cbCfg, retryCfg)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()

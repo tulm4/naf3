@@ -213,8 +213,9 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 	ausfClient := ausf.NewClient(f.cfg.AUSF, nrfFactory)
 
 	// ─── AMF notifier with circuit breaker (CB-G3) ────────────────────
+	amfFactory := nfclient.NewFactory(amfRegistry)
 	_ = amf.NewClient(
-		30*time.Second,
+		amfFactory,
 		amfRegistry,
 		dlq,
 		amfCfg,
