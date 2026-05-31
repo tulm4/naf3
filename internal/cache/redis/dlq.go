@@ -33,11 +33,11 @@ type AMFDLQItem struct {
 }
 
 type DLQ struct {
-	pool     *Pool
-	wg       sync.WaitGroup
-	mu       sync.Mutex
-	stopCh   chan struct{}
-	doneCh   chan struct{}
+	pool      *Pool
+	wg        sync.WaitGroup
+	mu        sync.Mutex
+	stopCh    chan struct{}
+	doneCh    chan struct{}
 	cancelCtx context.CancelFunc // cancels the internal goroutine context
 }
 
@@ -191,7 +191,7 @@ func (d *DLQ) Stop() {
 	d.mu.Unlock()
 
 	close(d.stopCh)
-	cancel()   // cancel innerCtx so BRPOP returns immediately in the goroutine
+	cancel() // cancel innerCtx so BRPOP returns immediately in the goroutine
 	d.wg.Wait()
 }
 

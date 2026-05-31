@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
+	redisclient "github.com/operator/nssAAF/internal/cache/redis"
 	"github.com/operator/nssAAF/internal/config"
 	"github.com/operator/nssAAF/internal/nfclient"
 	"github.com/operator/nssAAF/internal/resilience"
-	redisclient "github.com/operator/nssAAF/internal/cache/redis"
 	"github.com/stretchr/testify/assert"
 )
 

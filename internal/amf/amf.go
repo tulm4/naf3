@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
+	redisclient "github.com/operator/nssAAF/internal/cache/redis"
 	"github.com/operator/nssAAF/internal/config"
 	"github.com/operator/nssAAF/internal/nfclient"
 	"github.com/operator/nssAAF/internal/resilience"
-	redisclient "github.com/operator/nssAAF/internal/cache/redis"
 )
 
 // NotificationType identifies the type of AMF notification.
@@ -33,14 +33,14 @@ const (
 // REQ-07: Revocation notification POST to revocNotifUri.
 // REQ-10: DLQ on retry exhaustion.
 type Client struct {
-	factory      *nfclient.Factory
-	cbRegistry   *resilience.Registry
-	dlq          interface {
+	factory    *nfclient.Factory
+	cbRegistry *resilience.Registry
+	dlq        interface {
 		Enqueue(ctx context.Context, item interface{}) error
 	}
 	notifyTimeout time.Duration
-	cbCfg        config.CircuitBreakerConfig
-	retryCfg     resilience.RetryConfig
+	cbCfg         config.CircuitBreakerConfig
+	retryCfg      resilience.RetryConfig
 }
 
 // NewClient creates a new AMF notifier.
@@ -48,12 +48,12 @@ func NewClient(factory *nfclient.Factory, cbRegistry *resilience.Registry, dlq i
 	Enqueue(ctx context.Context, item interface{}) error
 }, cbCfg config.CircuitBreakerConfig, retryCfg resilience.RetryConfig) *Client {
 	return &Client{
-		factory:      factory,
-		cbRegistry:   cbRegistry,
-		dlq:          dlq,
+		factory:       factory,
+		cbRegistry:    cbRegistry,
+		dlq:           dlq,
 		notifyTimeout: 30 * time.Second,
-		cbCfg:        cbCfg,
-		retryCfg:     retryCfg,
+		cbCfg:         cbCfg,
+		retryCfg:      retryCfg,
 	}
 }
 
