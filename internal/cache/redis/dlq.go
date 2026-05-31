@@ -151,11 +151,28 @@ func (d *DLQ) Process(ctx context.Context, hc *http.Client) {
 				item.LastError = retryErr.Error()
 			}
 			if reErr := d.Enqueue(innerCtx, item); reErr != nil {
-				slog.Error("dlq: re-enqueue failed", "id", item.ID, "error", reErr)
-				metrics.DLQProcessed.WithLabelValues("error").Inc()
-			} else {
-				slog.Warn("dlq: re-enqueued", "id", item.ID, "attempt", item.Attempt, "error", retryErr)
-				time.Sleep(500 * time.Millisecond)
+				// Re-enqueue with retry
+				const enqueueRetryMax = 5
+				var enqueueErr error
+				for attempt := 0; attempt < enqueueRetryMax; attempt++ {
+					if err := d.Enqueue(innerCtx, item); err == nil {
+						enqueueErr = nil
+						break
+					}
+					enqueueErr = err
+					if attempt < enqueueRetryMax-1 {
+						delay := time.Duration(1<<attempt) * 200 * time.Millisecond
+						time.Sleep(delay)
+					}
+				}
+				if enqueueErr != nil {
+					slog.Error("dlq: re-enqueue failed after all retries",
+						"id", item.ID, "error", enqueueErr)
+					metrics.DLQProcessed.WithLabelValues("error").Inc()
+				} else {
+					slog.Warn("dlq: re-enqueued", "id", item.ID, "attempt", item.Attempt, "error", retryErr)
+					time.Sleep(500 * time.Millisecond)
+				}
 			}
 		}
 	}()
