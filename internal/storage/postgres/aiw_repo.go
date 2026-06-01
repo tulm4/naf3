@@ -5,7 +5,6 @@ package postgres
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"time"
@@ -118,18 +117,18 @@ func (r *AiwRepository) loadRow(ctx context.Context, authCtxID string) (*aiwRow,
 
 // createRow inserts a new AIW session row.
 func (r *AiwRepository) createRow(ctx context.Context, s *aiwRow) error {
-	stateCiphertext, err := r.encryptState(s.EAPSessionState)
+	stateCiphertext, err := encryptState(r.enc, s.EAPSessionState)
 	if err != nil {
 		return fmt.Errorf("aiw create: encrypt state: %w", err)
 	}
-	encryptedSUPI, err := r.encryptField(s.Supi)
+	encryptedSUPI, err := encryptField(r.enc, s.Supi)
 	if err != nil {
 		return fmt.Errorf("aiw create: encrypt supi: %w", err)
 	}
 
 	var mskCiphertext []byte
 	if len(s.MSK) > 0 {
-		mskCiphertext, err = r.encryptState(s.MSK)
+		mskCiphertext, err = encryptState(r.enc, s.MSK)
 		if err != nil {
 			return fmt.Errorf("aiw create: encrypt msk: %w", err)
 		}
@@ -172,18 +171,18 @@ func (r *AiwRepository) createRow(ctx context.Context, s *aiwRow) error {
 
 // updateRow updates an existing AIW session row.
 func (r *AiwRepository) updateRow(ctx context.Context, s *aiwRow) error {
-	stateCiphertext, err := r.encryptState(s.EAPSessionState)
+	stateCiphertext, err := encryptState(r.enc, s.EAPSessionState)
 	if err != nil {
 		return fmt.Errorf("aiw update: encrypt state: %w", err)
 	}
-	encryptedSUPI, err := r.encryptField(s.Supi)
+	encryptedSUPI, err := encryptField(r.enc, s.Supi)
 	if err != nil {
 		return fmt.Errorf("aiw update: encrypt supi: %w", err)
 	}
 
 	var mskCiphertext []byte
 	if len(s.MSK) > 0 {
-		mskCiphertext, err = r.encryptState(s.MSK)
+		mskCiphertext, err = encryptState(r.enc, s.MSK)
 		if err != nil {
 			return fmt.Errorf("aiw update: encrypt msk: %w", err)
 		}
@@ -250,7 +249,7 @@ func (r *AiwRepository) scanRow(row pgx.Row) (*aiwRow, error) {
 		return nil, err
 	}
 
-	s.Supi, _ = r.decryptField(rawSUPI)
+	s.Supi, _ = decryptField(r.enc, rawSUPI)
 	if completedAt.Valid {
 		s.CompletedAt = &completedAt.Time
 	}
@@ -259,10 +258,10 @@ func (r *AiwRepository) scanRow(row pgx.Row) (*aiwRow, error) {
 		s.AAAConfigID = &idStr
 	}
 	if len(stateBytes) > 0 {
-		s.EAPSessionState, _ = r.decryptState(stateBytes)
+		s.EAPSessionState, _ = decryptState(r.enc, stateBytes)
 	}
 	if len(mskBytes) > 0 {
-		s.MSK, _ = r.decryptState(mskBytes)
+		s.MSK, _ = decryptState(r.enc, mskBytes)
 	}
 	s.PvsInfo = pvsInfoJSON
 	s.TtlsInner = ttlsInner
@@ -322,44 +321,6 @@ func (r *AiwRepository) sessionToRow(s *storage.AiwSession) *aiwRow {
 		ExpiresAt:         expiresAt,
 		CompletedAt:       s.CompletedAt,
 	}
-}
-
-// encryptField encrypts a string value and returns base64-encoded ciphertext.
-func (r *AiwRepository) encryptField(plaintext string) (string, error) {
-	if plaintext == "" {
-		return "", nil
-	}
-	ciphertext, err := r.enc.Encrypt([]byte(plaintext))
-	if err != nil {
-		return "", err
-	}
-	return base64.StdEncoding.EncodeToString(ciphertext), nil
-}
-
-// decryptField decrypts a base64-encoded ciphertext back to plaintext.
-func (r *AiwRepository) decryptField(encoded string) (string, error) {
-	if encoded == "" {
-		return "", nil
-	}
-	ciphertext, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil {
-		return "", err
-	}
-	plaintext, err := r.enc.Decrypt(ciphertext)
-	if err != nil {
-		return "", err
-	}
-	return string(plaintext), nil
-}
-
-// encryptState encrypts raw session state bytes.
-func (r *AiwRepository) encryptState(state []byte) ([]byte, error) {
-	return r.enc.Encrypt(state)
-}
-
-// decryptState decrypts session state ciphertext.
-func (r *AiwRepository) decryptState(ciphertext []byte) ([]byte, error) {
-	return r.enc.Decrypt(ciphertext)
 }
 
 // Compile-time interface check.

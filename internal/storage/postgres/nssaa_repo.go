@@ -4,7 +4,6 @@ package postgres
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"net"
@@ -124,11 +123,11 @@ func (r *NssaaRepository) loadRow(ctx context.Context, authCtxID string) (*nssaa
 
 // createRow inserts a new NSSAA session row.
 func (r *NssaaRepository) createRow(ctx context.Context, s *nssaaRow) error {
-	stateCiphertext, err := r.encryptState(s.EAPSessionState)
+	stateCiphertext, err := encryptState(r.enc, s.EAPSessionState)
 	if err != nil {
 		return fmt.Errorf("nssaa create: encrypt state: %w", err)
 	}
-	encryptedGPSI, err := r.encryptField(s.GPSI)
+	encryptedGPSI, err := encryptField(r.enc, s.GPSI)
 	if err != nil {
 		return fmt.Errorf("nssaa create: encrypt gpsi: %w", err)
 	}
@@ -173,11 +172,11 @@ func (r *NssaaRepository) createRow(ctx context.Context, s *nssaaRow) error {
 
 // updateRow updates an existing NSSAA session row.
 func (r *NssaaRepository) updateRow(ctx context.Context, s *nssaaRow) error {
-	stateCiphertext, err := r.encryptState(s.EAPSessionState)
+	stateCiphertext, err := encryptState(r.enc, s.EAPSessionState)
 	if err != nil {
 		return fmt.Errorf("nssaa update: encrypt state: %w", err)
 	}
-	encryptedGPSI, err := r.encryptField(s.GPSI)
+	encryptedGPSI, err := encryptField(r.enc, s.GPSI)
 	if err != nil {
 		return fmt.Errorf("nssaa update: encrypt gpsi: %w", err)
 	}
@@ -237,7 +236,7 @@ func (r *NssaaRepository) scanRow(row pgx.Row) (*nssaaRow, error) {
 		return nil, err
 	}
 
-	s.GPSI, _ = r.decryptField(rawGPSI)
+	s.GPSI, _ = decryptField(r.enc, rawGPSI)
 	if amfIP != nil {
 		ipStr := amfIP.String()
 		s.AMFIP = &ipStr
@@ -253,7 +252,7 @@ func (r *NssaaRepository) scanRow(row pgx.Row) (*nssaaRow, error) {
 		s.TerminatedAt = &terminatedAt.Time
 	}
 	if len(stateBytes) > 0 {
-		s.EAPSessionState, _ = r.decryptState(stateBytes)
+		s.EAPSessionState, _ = decryptState(r.enc, stateBytes)
 	}
 	return &s, nil
 }
@@ -306,44 +305,6 @@ func (r *NssaaRepository) sessionToRow(s *storage.NssaaSession) *nssaaRow {
 		UpdatedAt:       updatedAt,
 		ExpiresAt:       expiresAt,
 	}
-}
-
-// encryptField encrypts a string value and returns base64-encoded ciphertext.
-func (r *NssaaRepository) encryptField(plaintext string) (string, error) {
-	if plaintext == "" {
-		return "", nil
-	}
-	ciphertext, err := r.enc.Encrypt([]byte(plaintext))
-	if err != nil {
-		return "", err
-	}
-	return base64.StdEncoding.EncodeToString(ciphertext), nil
-}
-
-// decryptField decrypts a base64-encoded ciphertext back to plaintext.
-func (r *NssaaRepository) decryptField(encoded string) (string, error) {
-	if encoded == "" {
-		return "", nil
-	}
-	ciphertext, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil {
-		return "", err
-	}
-	plaintext, err := r.enc.Decrypt(ciphertext)
-	if err != nil {
-		return "", err
-	}
-	return string(plaintext), nil
-}
-
-// encryptState encrypts raw session state bytes.
-func (r *NssaaRepository) encryptState(state []byte) ([]byte, error) {
-	return r.enc.Encrypt(state)
-}
-
-// decryptState decrypts session state ciphertext.
-func (r *NssaaRepository) decryptState(ciphertext []byte) ([]byte, error) {
-	return r.enc.Decrypt(ciphertext)
 }
 
 // Compile-time interface check.
