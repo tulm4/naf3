@@ -21,6 +21,7 @@ import (
 	"github.com/operator/nssAAF/internal/eap"
 	"github.com/operator/nssAAF/internal/metrics"
 	ratelimit "github.com/operator/nssAAF/internal/cache/redis"
+	"github.com/operator/nssAAF/internal/storage"
 	aiwnats "github.com/operator/nssAAF/oapi-gen/gen/aiw"
 	"github.com/operator/nssAAF/oapi-gen/gen/specs"
 )
@@ -76,6 +77,34 @@ type AuthCtxStore interface {
 // ErrNotFound is returned when an authentication context is not found.
 var ErrNotFound = errors.New("auth context not found")
 
+// AiwStore is the interface for AIW session persistence.
+// Aliased from storage.AiwStore for API convenience.
+type AiwStore = storage.AiwStore
+
+// authContextToAiwSession converts aiw.AuthContext → storage.AiwSession.
+func authContextToAiwSession(a *AuthContext) *storage.AiwSession {
+	expiresAt := a.ExpiresAt
+	if expiresAt.IsZero() {
+		expiresAt = time.Now().Add(24 * time.Hour)
+	}
+	return &storage.AiwSession{
+		AuthCtxID:         a.AuthCtxID,
+		Supi:              a.Supi,
+		EapPayload:        a.EapPayload,
+		TtlsInner:         a.TtlsInner,
+		MSK:               a.MSK,
+		PvsInfo:           a.PvsInfo,
+		AusfID:            a.AusfID,
+		SupportedFeatures:  a.SupportedFeatures,
+		Status:            a.Status,
+		AuthResult:        a.AuthResult,
+		CreatedAt:         a.CreatedAt,
+		UpdatedAt:         a.UpdatedAt,
+		ExpiresAt:         expiresAt,
+		CompletedAt:       a.CompletedAt,
+	}
+}
+
 // eapPayloadFromPtr safely dereferences a nullable *EapMessage ([]byte alias) or returns empty.
 func eapPayloadFromPtr(p *aiwnats.EapMessage) []byte {
 	if p == nil {
@@ -84,32 +113,32 @@ func eapPayloadFromPtr(p *aiwnats.EapMessage) []byte {
 	return *p
 }
 
-// InMemoryStore is a simple in-memory implementation of AuthCtxStore.
+// InMemoryStore is a simple in-memory implementation of AiwStore.
 // Phase 3 replaces this with Redis-based storage.
 type InMemoryStore struct {
-	data map[string]*AuthContext
+	data map[string]*storage.AiwSession
 }
 
 // NewInMemoryStore creates a new in-memory auth context store.
 func NewInMemoryStore() *InMemoryStore {
-	return &InMemoryStore{data: make(map[string]*AuthContext)}
+	return &InMemoryStore{data: make(map[string]*storage.AiwSession)}
 }
 
-// Load implements AuthCtxStore.
-func (s *InMemoryStore) Load(_ context.Context, id string) (*AuthContext, error) {
+// Load implements AiwStore.
+func (s *InMemoryStore) Load(_ context.Context, id string) (*storage.AiwSession, error) {
 	if ctx, ok := s.data[id]; ok {
 		return ctx, nil
 	}
-	return nil, ErrNotFound
+	return nil, storage.ErrSessionNotFound
 }
 
-// Save implements AuthCtxStore.
-func (s *InMemoryStore) Save(_ context.Context, ctx *AuthContext) error {
+// Save implements AiwStore.
+func (s *InMemoryStore) Save(_ context.Context, ctx *storage.AiwSession) error {
 	s.data[ctx.AuthCtxID] = ctx
 	return nil
 }
 
-// Delete implements AuthCtxStore.
+// Delete implements AiwStore.
 func (s *InMemoryStore) Delete(_ context.Context, id string) error {
 	delete(s.data, id)
 	return nil
@@ -123,7 +152,7 @@ func (s *InMemoryStore) Close() error {
 
 // Handler implements aiwnats.ServerInterface.
 type Handler struct {
-	store       AuthCtxStore
+	store       AiwStore
 	aaa         AAARouter
 	apiRoot     string
 	rateLimiter *ratelimit.RateLimiter
@@ -158,7 +187,7 @@ func WithRateLimiter(rl *ratelimit.RateLimiter) HandlerOption {
 }
 
 // NewHandler creates a new AIW handler.
-func NewHandler(store AuthCtxStore, opts ...HandlerOption) *Handler {
+func NewHandler(store AiwStore, opts ...HandlerOption) *Handler {
 	h := &Handler{store: store}
 	for _, opt := range opts {
 		opt(h)
@@ -225,7 +254,8 @@ func (h *Handler) CreateAuthenticationContext(w http.ResponseWriter, r *http.Req
 		Status:     "PENDING", // Initial AIW session state per TS 29.526 §7.3
 	}
 
-	if err := h.store.Save(r.Context(), authCtx); err != nil {
+	session := authContextToAiwSession(authCtx)
+	if err := h.store.Save(r.Context(), session); err != nil {
 		common.WriteProblem(w, common.InternalServerProblem(
 			fmt.Sprintf("failed to create auth context: %s", err)))
 		return
@@ -285,9 +315,9 @@ func (h *Handler) ConfirmAuthentication(w http.ResponseWriter, r *http.Request, 
 
 	// Note: eapMessage is []byte alias in generated types, so JSON auto-decodes base64.
 
-	authCtx, err := h.store.Load(r.Context(), authCtxId)
+	domSession, err := h.store.Load(r.Context(), authCtxId)
 	if err != nil {
-		if errors.Is(err, ErrNotFound) {
+		if errors.Is(err, storage.ErrSessionNotFound) {
 			common.WriteProblem(w, common.NotFoundProblem(
 				fmt.Sprintf("authentication context %q not found", authCtxId)))
 			return
@@ -297,15 +327,15 @@ func (h *Handler) ConfirmAuthentication(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	if string(body.Supi) != authCtx.Supi {
+	if string(body.Supi) != domSession.Supi {
 		common.WriteProblem(w, common.ValidationProblem("supi",
 			"SUPI does not match the authenticated SUPI for this session"))
 		return
 	}
 
 	// Store the Phase 2 EAP payload so it survives across round-trips.
-	authCtx.EapPayload = eapPayloadFromPtr(body.EapMessage)
-	if err := h.store.Save(r.Context(), authCtx); err != nil {
+	domSession.EapPayload = eapPayloadFromPtr(body.EapMessage)
+	if err := h.store.Save(r.Context(), domSession); err != nil {
 		common.WriteProblem(w, common.InternalServerProblem(
 			fmt.Sprintf("failed to update auth context: %s", err)))
 		return
