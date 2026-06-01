@@ -10,12 +10,17 @@
 
 ---
 
+### Task 1 Notes
+
+- `internal/storage/` already has `bridge.go` defining `storage.ErrSessionNotFound` and `storage.AuthSession`. The new domain types (`NssaaSession`, `AiwSession`) are separate from `bridge.AuthSession`. No collision.
+- `bridge.go` defines `SessionPersistence` interface (used for EAP audit via `WriteThroughStore`). This is separate from the new `NssaaStore`/`AiwStore` interfaces. No collision.
+
 ## Task 1: Create domain types and interfaces in `internal/storage/`
 
 **Files:**
 - Create: `internal/storage/types.go`
 - Create: `internal/storage/store.go`
-- Create: `internal/storage/errors.go`
+- Modify: `internal/storage/bridge.go` (remove duplicate `ErrSessionNotFound` — use from errors.go)
 
 - [ ] **Step 1: Create `internal/storage/types.go`**
 
@@ -89,16 +94,15 @@ type AiwStore interface {
 }
 ```
 
-- [ ] **Step 3: Create `internal/storage/errors.go`**
+- [ ] **Step 3: Remove duplicate `ErrSessionNotFound` from `internal/storage/bridge.go`**
 
+Open `internal/storage/bridge.go`. Remove line 18:
 ```go
-package storage
-
-import "errors"
-
 // ErrSessionNotFound is returned when a session is not found.
 var ErrSessionNotFound = errors.New("session not found")
 ```
+
+This error is now defined in `errors.go` (Step 4). Keep `bridge.go`'s other content (types, interfaces, functions).
 
 - [ ] **Step 4: Verify `go build ./internal/storage/...` compiles**
 
@@ -109,6 +113,7 @@ Expected: No output (success)
 
 ```bash
 git add internal/storage/types.go internal/storage/store.go internal/storage/errors.go
+git add internal/storage/bridge.go  # ErrSessionNotFound removed
 git commit -m "feat: add domain types and interfaces to storage package
 
 Defines NssaaSession/AiwSession domain types and NssaaStore/AiwStore
@@ -413,7 +418,21 @@ func (r *NssaaRepository) rowToSession(s *nssaaRow) *storage.NssaaSession {
 }
 
 // sessionToRow converts a domain session to a DB row.
+// Sets CreatedAt/UpdatedAt to now if zero (handles both create and update paths).
 func (r *NssaaRepository) sessionToRow(s *storage.NssaaSession) *nssaaRow {
+    now := time.Now()
+    createdAt := s.CreatedAt
+    if createdAt.IsZero() {
+        createdAt = now
+    }
+    updatedAt := s.UpdatedAt
+    if updatedAt.IsZero() {
+        updatedAt = now
+    }
+    expiresAt := s.ExpiresAt
+    if expiresAt.IsZero() {
+        expiresAt = now.Add(5 * time.Minute)
+    }
     return &nssaaRow{
         AuthCtxID:       s.AuthCtxID,
         GPSI:            s.GPSI,
@@ -424,9 +443,9 @@ func (r *NssaaRepository) sessionToRow(s *storage.NssaaSession) *nssaaRow {
         RevocNotifURI:   s.RevocURI,
         EAPSessionState: s.EapPayload,
         NssaaStatus:     types.NssaaStatus(s.Status),
-        CreatedAt:       s.CreatedAt,
-        UpdatedAt:       s.UpdatedAt,
-        ExpiresAt:       s.ExpiresAt,
+        CreatedAt:       createdAt,
+        UpdatedAt:       updatedAt,
+        ExpiresAt:       expiresAt,
     }
 }
 
@@ -768,7 +787,21 @@ func (r *AiwRepository) rowToSession(s *aiwRow) *storage.AiwSession {
 }
 
 // sessionToRow converts a domain session to a DB row.
+// Sets CreatedAt/UpdatedAt to now if zero.
 func (r *AiwRepository) sessionToRow(s *storage.AiwSession) *aiwRow {
+    now := time.Now()
+    createdAt := s.CreatedAt
+    if createdAt.IsZero() {
+        createdAt = now
+    }
+    updatedAt := s.UpdatedAt
+    if updatedAt.IsZero() {
+        updatedAt = now
+    }
+    expiresAt := s.ExpiresAt
+    if expiresAt.IsZero() {
+        expiresAt = now.Add(24 * time.Hour)
+    }
     return &aiwRow{
         AuthCtxID:         s.AuthCtxID,
         Supi:              s.Supi,
@@ -780,9 +813,9 @@ func (r *AiwRepository) sessionToRow(s *storage.AiwSession) *aiwRow {
         SupportedFeatures: s.SupportedFeatures,
         NssaaStatus:       s.Status,
         AuthResult:        s.AuthResult,
-        CreatedAt:         s.CreatedAt,
-        UpdatedAt:         s.UpdatedAt,
-        ExpiresAt:         s.ExpiresAt,
+        CreatedAt:         createdAt,
+        UpdatedAt:         updatedAt,
+        ExpiresAt:         expiresAt,
         CompletedAt:       s.CompletedAt,
     }
 }
@@ -869,15 +902,18 @@ Refs: docs/superpowers/specs/2026-06-02-storage-dependency-fix-design.md
 **Files:**
 - Modify: `internal/api/nssaa/handler.go`
 - Modify: `internal/api/aiw/handler.go`
-- Modify: `internal/api/nssaa/redis_store.go`
+- Note: `internal/api/nssaa/redis_store.go` stays in api/nssaa — it implements the local `NssaaStore` alias (type `NssaaStore = storage.NssaaStore`) which has no circular import. No changes needed to redis_store.go for this task.
 
 - [ ] **Step 1: Add type aliases and conversion functions to `internal/api/nssaa/handler.go`**
 
+Add `"github.com/operator/nssAAF/internal/storage"` to imports (keep it last).
 After the existing type definitions (around line 53), add:
 
 ```go
 // NssaaStore is the interface for NSSAA session persistence.
 // Aliased from storage.NssaaStore for API convenience.
+// This alias lets the handler use the interface without importing storage
+// in places where only the local name is needed.
 type NssaaStore = storage.NssaaStore
 
 // authCtxToNssaaSession converts nssaa.AuthCtx → storage.NssaaSession.
@@ -911,7 +947,7 @@ func nssaaSessionToAuthCtx(s *storage.NssaaSession) *AuthCtx {
 }
 ```
 
-Also add `"time"` to the imports if not present.
+Add `"time"` to the imports.
 
 - [ ] **Step 2: Update `CreateSliceAuthenticationContext` to use storage interface**
 
@@ -932,33 +968,54 @@ if err := h.store.Save(r.Context(), session); err != nil {
 
 - [ ] **Step 3: Update `ConfirmSliceAuthentication` to use storage interface**
 
-Find the `Load` call (around line 305) and `Save` call (around line 335). Change:
+Find the `Load` call (around line 305) and `Save` call (around line 335). The full change:
 
 ```go
+// OLD:
 authCtx, err := h.store.Load(r.Context(), authCtxId)
-// ...
+if err != nil {
+    if errors.Is(err, ErrNotFound) {
+        common.WriteProblem(w, common.NotFoundProblem(
+            fmt.Sprintf("slice authentication context %q not found", authCtxId)))
+        return
+    }
+    // ...
+}
+if string(body.Gpsi) != authCtx.GPSI { // field access
+    // ...
+}
+if authCtx.SnssaiSST != body.Snssai.Sst || authCtx.SnssaiSD != body.Snssai.Sd { // field access
+    // ...
+}
+eapPayload := []byte(*body.EapMessage)
 authCtx.EapPayload = eapPayload
-if err := h.store.Save(r.Context(), authCtx); err != nil {
-```
+if err := h.store.Save(r.Context(), authCtx); err != nil { // field access
 
-To:
-
-```go
+// NEW:
 domSession, err := h.store.Load(r.Context(), authCtxId)
 if err != nil {
     if errors.Is(err, storage.ErrSessionNotFound) {
-        common.WriteProblem(w, common.NotFoundProblem(...))
+        common.WriteProblem(w, common.NotFoundProblem(
+            fmt.Sprintf("slice authentication context %q not found", authCtxId)))
         return
     }
-    common.WriteProblem(w, common.InternalServerProblem(...))
-    return
+    // ...
 }
-// GPSI and SNSSAI validation using domSession fields...
+if string(body.Gpsi) != domSession.GPSI { // field access
+    // ...
+}
+if domSession.SnssaiSST != body.Snssai.Sst || domSession.SnssaiSD != body.Snssai.Sd { // field access
+    // ...
+}
+eapPayload := []byte(*body.EapMessage)
 domSession.EapPayload = eapPayload
-if err := h.store.Save(r.Context(), domSession); err != nil {
+if err := h.store.Save(r.Context(), domSession); err != nil { // field access
 ```
 
-Note: Update field accesses from `authCtx.GPSI` to `domSession.GPSI`, etc.
+Key changes:
+- `authCtx` → `domSession`
+- `ErrNotFound` → `storage.ErrSessionNotFound`
+- All field accesses: `authCtx.GPSI` → `domSession.GPSI`, `authCtx.SnssaiSST` → `domSession.SnssaiSST`, etc.
 
 - [ ] **Step 4: Add type alias and conversion functions to `internal/api/aiw/handler.go`**
 
@@ -1039,93 +1096,14 @@ if err := h.store.Save(r.Context(), domSession); err != nil {
 
 Update field accesses from `authCtx.Supi` to `domSession.Supi`.
 
-- [ ] **Step 7: Update `internal/api/nssaa/redis_store.go` to implement storage.NssaaStore**
-
-Replace the entire file content:
-
-```go
-// Package nssaa provides HTTP handlers for the Nnssaaf_NSSAA service (N58 interface).
-// Spec: TS 29.526 §7.2, TS 23.502 §4.2.9
-package nssaa
-
-import (
-    "context"
-    "encoding/json"
-    "fmt"
-    "time"
-
-    "github.com/redis/go-redis/v9"
-
-    "github.com/operator/nssAAF/internal/storage"
-)
-
-const (
-    AuthCtxKeyPrefix = "nssaa:auth:ctx:"
-    AuthCtxTTL       = 24 * time.Hour
-)
-
-// RedisNssaaStore implements storage.NssaaStore backed by Redis.
-// For caching only — primary storage is PostgreSQL via NssaaRepository.
-type RedisNssaaStore struct {
-    client redis.Cmdable
-}
-
-// NewRedisNssaaStore creates a new Redis-backed NSSAA session store.
-func NewRedisNssaaStore(client redis.Cmdable) *RedisNssaaStore {
-    return &RedisNssaaStore{client: client}
-}
-
-// Load implements storage.NssaaStore.
-func (s *RedisNssaaStore) Load(ctx context.Context, id string) (*storage.NssaaSession, error) {
-    key := AuthCtxKeyPrefix + id
-    data, err := s.client.Get(ctx, key).Bytes()
-    if err != nil {
-        if err == redis.Nil {
-            return nil, storage.ErrSessionNotFound
-        }
-        return nil, fmt.Errorf("redis get: %w", err)
-    }
-    var session storage.NssaaSession
-    if err := json.Unmarshal(data, &session); err != nil {
-        return nil, fmt.Errorf("unmarshal session: %w", err)
-    }
-    return &session, nil
-}
-
-// Save implements storage.NssaaStore.
-func (s *RedisNssaaStore) Save(ctx context.Context, session *storage.NssaaSession) error {
-    key := AuthCtxKeyPrefix + session.AuthCtxID
-    data, err := json.Marshal(session)
-    if err != nil {
-        return fmt.Errorf("marshal session: %w", err)
-    }
-    if err := s.client.Set(ctx, key, data, AuthCtxTTL).Err(); err != nil {
-        return fmt.Errorf("redis set: %w", err)
-    }
-    return nil
-}
-
-// Delete implements storage.NssaaStore.
-func (s *RedisNssaaStore) Delete(ctx context.Context, id string) error {
-    key := AuthCtxKeyPrefix + id
-    return s.client.Del(ctx, key).Err()
-}
-
-// Close implements storage.NssaaStore. No-op for Redis client.
-func (s *RedisNssaaStore) Close() error {
-    return nil
-}
-
-// Compile-time interface check.
-var _ storage.NssaaStore = (*RedisNssaaStore)(nil)
-```
-
-- [ ] **Step 8: Verify `go build ./internal/api/nssaa/... ./internal/api/aiw/...` compiles**
+- [ ] **Step 7: Verify `go build ./internal/api/nssaa/... ./internal/api/aiw/...` compiles**
 
 Run: `go build ./internal/api/nssaa/... ./internal/api/aiw/...`
 Expected: No output (success)
 
-- [ ] **Step 9: Update tests**
+Note: `internal/api/nssaa/redis_store.go` already implements `AuthCtxStore` which is aliased as `storage.NssaaStore`. No changes needed there — the alias makes it compatible automatically.
+
+- [ ] **Step 8: Update tests**
 
 Update `test/conformance/ts29526_test.go` to use `storage.NssaaStore` / `storage.AiwStore` interfaces instead of `nssaa.AuthCtxStore` / `aiw.AuthCtxStore`.
 
@@ -1161,23 +1139,26 @@ Refs: docs/superpowers/specs/2026-06-02-storage-dependency-fix-design.md
 - Delete: `internal/session/session.go`
 - Delete: `internal/storage/postgres/session_store.go`
 - Delete: `internal/storage/postgres/aiw_repository.go`
-- Delete: `internal/storage/postgres/session.go` (merge into new repos)
+- Delete: `internal/storage/postgres/session.go` (contains old `Session` DB type and old `Repository` — both superseded by new repos)
 - Modify: `internal/storage/postgres/pool.go`
 
 - [ ] **Step 1: Update `cmd/biz/factory.go` to use new repository types**
 
-Update the `BizPod` struct and factory method to use `*postgres.NssaaRepository` and `*postgres.AiwRepository`:
+Update the `BizPod` struct and factory method. The handlers accept `storage.NssaaStore` / `storage.AiwStore` interfaces, so `BizPod` should hold the interfaces:
 
 In `BizPod` struct (around line 33):
 ```go
 type BizPod struct {
     Server          *http.Server
     NRFClient       *nrf.Client
-    NssaaStore      *postgres.NssaaRepository
-    AiwStore        *postgres.AiwRepository
+    NssaaStore      storage.NssaaStore
+    AiwStore        storage.AiwStore
+    Pool            *postgres.Pool
     // ... rest unchanged
 }
 ```
+
+Also add `"github.com/operator/nssAAF/internal/storage"` to the imports in factory.go.
 
 In `Build` method (around lines 151-152):
 ```go
@@ -1185,7 +1166,7 @@ nssaaStore := postgres.NewNssaaRepository(pgPool, encryptor)
 aiwStore := postgres.NewAiwRepository(pgPool, encryptor)
 ```
 
-Also update the return statement and the `Close` method to match.
+Also update the return statement to use `nssaaStore` and `aiwStore` directly. The `Close()` method doesn't need changes — `Close()` on the interface is a no-op for postgres repositories.
 
 - [ ] **Step 2: Verify `go build ./cmd/biz/...` compiles**
 
@@ -1201,7 +1182,7 @@ rm internal/storage/postgres/session_store.go
 rm internal/storage/postgres/aiw_repository.go
 ```
 
-Note: Keep `internal/storage/postgres/session.go` — it defines `Session` (DB type), `Repository` (old), and `encryptor`. The new repos embed the encryptor functionality directly, so `session.go` can be deleted only after verifying no other code references `Session`, `Repository`, or the encryptor from that file.
+Note: `internal/storage/postgres/session.go` defines `Session` (DB type), `Repository` (old), and `encryptor`. The `encryptor` type is used by pool.go and the migrator. The new repos (`NssaaRepository`, `AiwRepository`) embed their own encryptor. `session.go` can be deleted only after verifying no other code references `Session` or `Repository` from that file.
 
 - [ ] **Step 4: Verify `go build ./...` compiles**
 
