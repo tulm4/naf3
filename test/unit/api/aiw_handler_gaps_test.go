@@ -14,33 +14,34 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/operator/nssAAF/internal/api/common"
 	"github.com/operator/nssAAF/internal/api/aiw"
+	"github.com/operator/nssAAF/internal/storage"
 	aiwnats "github.com/operator/nssAAF/oapi-gen/gen/aiw"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 type mockStoreAIW struct {
-	data      map[string]*aiw.AuthContext
+	data      map[string]*storage.AiwSession
 	loadErr   error
 	saveErr   error
 	deleteErr error
 }
 
 func newMockStoreAIW() *mockStoreAIW {
-	return &mockStoreAIW{data: make(map[string]*aiw.AuthContext)}
+	return &mockStoreAIW{data: make(map[string]*storage.AiwSession)}
 }
 
-func (m *mockStoreAIW) Load(_ context.Context, id string) (*aiw.AuthContext, error) {
+func (m *mockStoreAIW) Load(_ context.Context, id string) (*storage.AiwSession, error) {
 	if m.loadErr != nil {
 		return nil, m.loadErr
 	}
 	if ctx, ok := m.data[id]; ok {
 		return ctx, nil
 	}
-	return nil, aiw.ErrNotFound
+	return nil, storage.ErrSessionNotFound
 }
 
-func (m *mockStoreAIW) Save(_ context.Context, ctx *aiw.AuthContext) error {
+func (m *mockStoreAIW) Save(_ context.Context, ctx *storage.AiwSession) error {
 	if m.saveErr != nil {
 		return m.saveErr
 	}
@@ -192,7 +193,7 @@ func TestConfirmAuth_SessionNotFound(t *testing.T) {
 // request body and the stored session returns HTTP 400.
 func TestConfirmAuth_SupiMismatchInBody(t *testing.T) {
 	store := newMockStoreAIW()
-	store.data["ctx-supi"] = &aiw.AuthContext{
+	store.data["ctx-supi"] = &storage.AiwSession{
 		AuthCtxID: "ctx-supi",
 		Supi:      "imsi-208046000000001",
 	}
@@ -214,7 +215,7 @@ func TestConfirmAuth_SupiMismatchInBody(t *testing.T) {
 // eapMessage returns HTTP 400.
 func TestConfirmAuth_InvalidBase64EapMessage(t *testing.T) {
 	store := newMockStoreAIW()
-	store.data["ctx-eap-valid"] = &aiw.AuthContext{
+	store.data["ctx-eap-valid"] = &storage.AiwSession{
 		AuthCtxID: "ctx-eap-valid",
 		Supi:      "imsi-208046000000001",
 	}
@@ -234,7 +235,7 @@ func TestConfirmAuth_InvalidBase64EapMessage(t *testing.T) {
 // in confirm returns HTTP 400.
 func TestConfirmAuth_MissingEapMessage(t *testing.T) {
 	store := newMockStoreAIW()
-	store.data["ctx-missing-eap"] = &aiw.AuthContext{
+	store.data["ctx-missing-eap"] = &storage.AiwSession{
 		AuthCtxID: "ctx-missing-eap",
 		Supi:      "imsi-208046000000001",
 	}
@@ -270,7 +271,7 @@ func TestConfirmAuth_StoreLoadError(t *testing.T) {
 // returns HTTP 500.
 func TestConfirmAuth_StoreSaveError(t *testing.T) {
 	store := newMockStoreAIW()
-	store.data["ctx-save-err"] = &aiw.AuthContext{
+	store.data["ctx-save-err"] = &storage.AiwSession{
 		AuthCtxID: "ctx-save-err",
 		Supi:      "imsi-208046000000001",
 	}
@@ -290,7 +291,7 @@ func TestConfirmAuth_StoreSaveError(t *testing.T) {
 // TestConfirmAuth_InvalidJSON verifies that non-JSON body in confirm returns HTTP 400.
 func TestConfirmAuth_InvalidJSON(t *testing.T) {
 	store := newMockStoreAIW()
-	store.data["ctx-json-err"] = &aiw.AuthContext{
+	store.data["ctx-json-err"] = &storage.AiwSession{
 		AuthCtxID: "ctx-json-err",
 		Supi:      "imsi-208046000000001",
 	}

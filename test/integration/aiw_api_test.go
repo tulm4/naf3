@@ -18,6 +18,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/operator/nssAAF/internal/api/aiw"
 	"github.com/operator/nssAAF/internal/api/common"
+	"github.com/operator/nssAAF/internal/storage"
 	"github.com/operator/nssAAF/internal/storage/postgres"
 	aiwnats "github.com/operator/nssAAF/oapi-gen/gen/aiw"
 	"github.com/stretchr/testify/assert"
@@ -50,16 +51,16 @@ func runMigrationsAIW(t *testing.T, pool *postgres.Pool) {
 	require.NoError(t, err, "failed to run migrations")
 }
 
-// aiwStoreWithCache wraps a postgres.AIWStore and propagates saves to Redis cache.
+// aiwStoreWithCache wraps a storage.AiwStore and propagates saves to Redis cache.
 type aiwStoreWithCache struct {
-	pg    *postgres.AIWStore
+	pg storage.AiwStore
 }
 
-func (s *aiwStoreWithCache) Load(_ context.Context, id string) (*aiw.AuthContext, error) {
+func (s *aiwStoreWithCache) Load(_ context.Context, id string) (*storage.AiwSession, error) {
 	return s.pg.Load(context.Background(), id)
 }
 
-func (s *aiwStoreWithCache) Save(_ context.Context, ctx *aiw.AuthContext) error {
+func (s *aiwStoreWithCache) Save(_ context.Context, ctx *storage.AiwSession) error {
 	return s.pg.Save(context.Background(), ctx)
 }
 
@@ -70,7 +71,7 @@ func (s *aiwStoreWithCache) Delete(_ context.Context, id string) error {
 func (s *aiwStoreWithCache) Close() error { return s.pg.Close() }
 
 // aiwRouter builds a chi router wired to the AIW handler with the given store.
-func aiwRouter(store aiw.AuthCtxStore) http.Handler {
+func aiwRouter(store storage.AiwStore) http.Handler {
 	handler := aiw.NewHandler(store)
 	r := chi.NewRouter()
 	r.Use(common.RequestIDMiddleware)
@@ -102,7 +103,7 @@ func TestIntegration_AIW_CreateSession(t *testing.T) {
 
 	enc, err := postgres.NewEncryptor(make([]byte, 32))
 	require.NoError(t, err)
-	store := &aiwStoreWithCache{pg: postgres.NewAIWSessionStore(pool, enc)}
+	store := &aiwStoreWithCache{pg: postgres.NewAiwRepository(pool, enc)}
 	router := aiwRouter(store)
 
 	body := map[string]interface{}{
@@ -132,7 +133,7 @@ func TestIntegration_AIW_ConfirmSession(t *testing.T) {
 
 	enc, err := postgres.NewEncryptor(make([]byte, 32))
 	require.NoError(t, err)
-	store := &aiwStoreWithCache{pg: postgres.NewAIWSessionStore(pool, enc)}
+	store := &aiwStoreWithCache{pg: postgres.NewAiwRepository(pool, enc)}
 	router := aiwRouter(store)
 
 	// Create session first.
@@ -170,7 +171,7 @@ func TestIntegration_AIW_GetSession(t *testing.T) {
 
 	enc, err := postgres.NewEncryptor(make([]byte, 32))
 	require.NoError(t, err)
-	pgStore := postgres.NewAIWSessionStore(pool, enc)
+	pgStore := postgres.NewAiwRepository(pool, enc)
 	store := &aiwStoreWithCache{pg: pgStore}
 	router := aiwRouter(store)
 
@@ -200,12 +201,12 @@ func TestIntegration_AIW_GetSession_NotFound(t *testing.T) {
 
 	enc, err := postgres.NewEncryptor(make([]byte, 32))
 	require.NoError(t, err)
-	store := postgres.NewAIWSessionStore(pool, enc)
+	store := postgres.NewAiwRepository(pool, enc)
 
 	// Verify store returns ErrNotFound for nonexistent session.
 	_, err = store.Load(context.Background(), "nonexistent-uuid-99999")
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, aiw.ErrNotFound))
+	assert.True(t, errors.Is(err, storage.ErrSessionNotFound))
 }
 
 // ─── Test: Session stored in PostgreSQL ──────────────────────────────────────
@@ -218,7 +219,7 @@ func TestIntegration_AIW_SessionInRedis(t *testing.T) {
 
 	enc, err := postgres.NewEncryptor(make([]byte, 32))
 	require.NoError(t, err)
-	pgStore := postgres.NewAIWSessionStore(pool, enc)
+	pgStore := postgres.NewAiwRepository(pool, enc)
 	store := &aiwStoreWithCache{pg: pgStore}
 	router := aiwRouter(store)
 
@@ -246,7 +247,7 @@ func TestIntegration_AIW_InvalidSupi(t *testing.T) {
 
 	enc, err := postgres.NewEncryptor(make([]byte, 32))
 	require.NoError(t, err)
-	store := &aiwStoreWithCache{pg: postgres.NewAIWSessionStore(pool, enc)}
+	store := &aiwStoreWithCache{pg: postgres.NewAiwRepository(pool, enc)}
 	router := aiwRouter(store)
 
 	body := map[string]interface{}{
@@ -273,7 +274,7 @@ func TestIntegration_AIW_SupiMismatch(t *testing.T) {
 
 	enc, err := postgres.NewEncryptor(make([]byte, 32))
 	require.NoError(t, err)
-	store := &aiwStoreWithCache{pg: postgres.NewAIWSessionStore(pool, enc)}
+	store := &aiwStoreWithCache{pg: postgres.NewAiwRepository(pool, enc)}
 	router := aiwRouter(store)
 
 	// Create session with SUPI imsi-208046000000005.
@@ -307,7 +308,7 @@ func TestIntegration_AIW_ConcurrentSessions(t *testing.T) {
 
 	enc, err := postgres.NewEncryptor(make([]byte, 32))
 	require.NoError(t, err)
-	store := &aiwStoreWithCache{pg: postgres.NewAIWSessionStore(pool, enc)}
+	store := &aiwStoreWithCache{pg: postgres.NewAiwRepository(pool, enc)}
 	router := aiwRouter(store)
 
 	const n = 10
