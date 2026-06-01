@@ -24,6 +24,7 @@ import (
 	"github.com/operator/nssAAF/internal/nfclient"
 	"github.com/operator/nssAAF/internal/nrf"
 	"github.com/operator/nssAAF/internal/resilience"
+	"github.com/operator/nssAAF/internal/storage"
 	"github.com/operator/nssAAF/internal/storage/postgres"
 	"github.com/operator/nssAAF/internal/tracing"
 	"github.com/operator/nssAAF/internal/udm"
@@ -31,15 +32,15 @@ import (
 
 // BizPod holds all dependencies for the Biz Pod.
 type BizPod struct {
-	Server          *http.Server
-	NRFClient      *nrf.Client
-	SessionStore   *postgres.Store
-	AIWSessionStore *postgres.AIWStore
-	Pool           *postgres.Pool
-	RedisPool      *redis.Pool
-	DLQ            *redis.DLQ
-	AAAClient      *httpAAAClient
-	Logger         *slog.Logger
+	Server    *http.Server
+	NRFClient *nrf.Client
+	NssaaStore storage.NssaaStore
+	AiwStore   storage.AiwStore
+	Pool      *postgres.Pool
+	RedisPool *redis.Pool
+	DLQ       *redis.DLQ
+	AAAClient *httpAAAClient
+	Logger    *slog.Logger
 	HeartbeatCancel func() // cancels the podHeartbeat goroutine on shutdown
 }
 
@@ -148,8 +149,8 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 	}
 
 	// ─── Session stores ──────────────────────────────────────────────────
-	nssaaStore := postgres.NewSessionStore(pgPool, encryptor)
-	aiwStore := postgres.NewAIWSessionStore(pgPool, encryptor)
+	nssaaStore := postgres.NewNssaaRepository(pgPool, encryptor)
+	aiwStore := postgres.NewAiwRepository(pgPool, encryptor)
 
 	// ─── Redis pool + DLQ ───────────────────────────────────────────────
 	redisPool, err := redis.NewPool(ctx, redis.Config{
@@ -316,15 +317,15 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 	)
 
 	return &BizPod{
-		Server:          srv,
-		NRFClient:       nrfClient,
-		SessionStore:    nssaaStore,
-		AIWSessionStore: aiwStore,
-		Pool:            pgPool,
-		RedisPool:       redisPool,
-		DLQ:             dlq,
-		AAAClient:       aaaClient,
-		Logger:          f.logger,
+		Server:    srv,
+		NRFClient: nrfClient,
+		NssaaStore: nssaaStore,
+		AiwStore:   aiwStore,
+		Pool:       pgPool,
+		RedisPool:  redisPool,
+		DLQ:        dlq,
+		AAAClient:  aaaClient,
+		Logger:     f.logger,
 	}, cleanup, nil
 }
 
