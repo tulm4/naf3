@@ -28,7 +28,7 @@ api/nssaa/handler.go  ──depends on──►  storage.NssaaStore (interface)
 api/aiw/handler.go    ──depends on──►  storage.AiwStore (interface)
                                           ↑
                                           │
-internal/eap/              ──depends on──►  storage.AuthSession (domain)
+internal/eap/              ──depends on──►  storage.NssaaSession (domain)
                                           │
 storage/postgres/           ──implements──┘
 ```
@@ -221,9 +221,9 @@ func (r *NssaaRepository) Close() error
 
 Create `internal/storage/types.go`, `internal/storage/store.go`, `internal/storage/errors.go`.
 
-### Step 2: Move session models to storage
+### Step 2: Verify domain types align with existing session models
 
-Move content from `internal/session/session.go` to `internal/storage/types.go`.
+Review `internal/session/session.go` to ensure `storage.NssaaSession` and `storage.AiwSession` fields match. The session types already exist in `session/` and should inform the domain types.
 
 ### Step 3: Create postgres repositories
 
