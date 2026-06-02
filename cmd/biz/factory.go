@@ -33,6 +33,7 @@ import (
 type BizPod struct {
 	Server          *http.Server
 	NRFClient      *nrf.Client
+	NRFRegistry    *resilience.Registry
 	SessionStore   *postgres.Store
 	AIWSessionStore *postgres.AIWStore
 	Pool           *postgres.Pool
@@ -72,10 +73,26 @@ func WithPodID(podID string) BizPodOption {
 	return func(f *bizPodFactory) { f.podID = podID }
 }
 
+// newNFRegistry creates the circuit breaker registry from the canonical config path.
+// Exposed for unit testing; callers should prefer Build() in production.
+func (f *bizPodFactory) newNFRegistry() *resilience.Registry {
+	cfg := f.cfg.InternalComm.Native.CB
+	if cfg.FailureThreshold == 0 {
+		cfg.FailureThreshold = 3
+	}
+	if cfg.RecoveryTimeout == 0 {
+		cfg.RecoveryTimeout = 10 * time.Second
+	}
+	if cfg.SuccessThreshold == 0 {
+		cfg.SuccessThreshold = 2
+	}
+	return resilience.NewRegistry(cfg.FailureThreshold, cfg.RecoveryTimeout, cfg.SuccessThreshold)
+}
+
 // Build creates a fully initialized BizPod with all dependencies wired.
 // The caller is responsible for closing resources via Close().
 func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
-	var cleanup func()
+	cleanup := func() {}
 
 	// Initialize OpenTelemetry tracing
 	tracingShutdown := tracing.Init("nssAAF-biz", f.cfg.Version, f.podID)
@@ -178,22 +195,8 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 	go dlq.Process(ctx, dlqHTTPClient)
 
 	// ─── Three isolated CB registries for blast-radius isolation ───────
-	// Internal NF registry (NRF, UDM, AUSF)
-	internalNFCfg := f.cfg.InternalComm.Native.CB
-	if internalNFCfg.FailureThreshold == 0 {
-		internalNFCfg.FailureThreshold = 3
-	}
-	if internalNFCfg.RecoveryTimeout == 0 {
-		internalNFCfg.RecoveryTimeout = 10 * time.Second
-	}
-	if internalNFCfg.SuccessThreshold == 0 {
-		internalNFCfg.SuccessThreshold = 2
-	}
-	internalNFRegistry := resilience.NewRegistry(
-		internalNFCfg.FailureThreshold,
-		internalNFCfg.RecoveryTimeout,
-		internalNFCfg.SuccessThreshold,
-	)
+	// Internal NF registry (NRF, UDM, AUSF) — wired from canonical config path (CB-G1)
+	internalNFRegistry := f.newNFRegistry()
 
 	// AMF registry (for AMF notification delivery)
 	amfCfg := config.CircuitBreakerConfig{
@@ -318,6 +321,7 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 	return &BizPod{
 		Server:          srv,
 		NRFClient:       nrfClient,
+		NRFRegistry:     internalNFRegistry,
 		SessionStore:    nssaaStore,
 		AIWSessionStore: aiwStore,
 		Pool:            pgPool,

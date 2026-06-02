@@ -132,6 +132,27 @@ func (cb *CircuitBreaker) State() State {
 	return cb.state
 }
 
+// FailureThreshold returns the configured failure threshold.
+func (cb *CircuitBreaker) FailureThreshold() int {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	return cb.failureThreshold
+}
+
+// RecoveryTimeout returns the configured recovery timeout.
+func (cb *CircuitBreaker) RecoveryTimeout() time.Duration {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	return cb.recoveryTimeout
+}
+
+// SuccessThreshold returns the configured success threshold.
+func (cb *CircuitBreaker) SuccessThreshold() int {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	return cb.successThreshold
+}
+
 // Reset forces the circuit breaker to CLOSED state.
 // Used by VIP health check to immediately restore connectivity after failover.
 func (cb *CircuitBreaker) Reset() {
