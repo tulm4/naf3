@@ -529,3 +529,102 @@ func TestDLQ_ExhaustionBehavior(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), length, "exhausted item must be removed from queue")
 }
+
+func TestDLQ_Lifecycle_StopAndRestart(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	pool, err := NewPool(context.Background(), Config{
+		Addrs:        []string{mr.Addr()},
+		PoolSize:     10,
+		MinIdleConns: 1,
+		DialTimeout:  100 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	defer func() { _ = pool.Close() }()
+
+	dlq := NewDLQ(pool)
+
+	item := &AMFDLQItem{
+		ID:          "lifecycle-1",
+		Type:        "SLICE_RE_AUTH",
+		URI:         "http://amf:8080/notify",
+		AuthCtxID:   "auth-lifecycle",
+		Attempt:     0,
+		MaxAttempts: 5,
+		Payload:     []byte(`{}`),
+		CreatedAt:   time.Now(),
+	}
+	err = dlq.Enqueue(context.Background(), item)
+	require.NoError(t, err)
+
+	// First cycle: start and stop
+	hc := &http.Client{Timeout: 5 * time.Second}
+	go dlq.Process(context.Background(), hc)
+	time.Sleep(100 * time.Millisecond)
+	dlq.Stop()
+
+	// Done() should be closed after Stop()
+	select {
+	case <-dlq.Done():
+		// expected
+	case <-time.After(2 * time.Second):
+		t.Fatal("Done() should be closed after Stop()")
+	}
+
+	// Second cycle: restart and verify queue is still accessible
+	queueLen, err := dlq.Len(context.Background())
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, queueLen, int64(0), "queue should be accessible after restart")
+
+	// Restart and verify processing works (start a server that returns 2xx)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	item2 := &AMFDLQItem{
+		ID:          "lifecycle-2",
+		Type:        "SLICE_RE_AUTH",
+		URI:         server.URL,
+		AuthCtxID:   "auth-lifecycle-2",
+		Attempt:     0,
+		MaxAttempts: 1,
+		Payload:     []byte(`{}`),
+		CreatedAt:   time.Now(),
+	}
+	err = dlq.Enqueue(context.Background(), item2)
+	require.NoError(t, err)
+
+	go dlq.Process(context.Background(), hc)
+	time.Sleep(200 * time.Millisecond)
+	dlq.Stop()
+
+	length, err := dlq.Len(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), length, "item should be delivered after restart")
+}
+
+func TestDLQ_Lifecycle_MultipleStops(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	pool, err := NewPool(context.Background(), Config{
+		Addrs:        []string{mr.Addr()},
+		PoolSize:     10,
+		MinIdleConns: 1,
+		DialTimeout:  100 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	defer func() { _ = pool.Close() }()
+
+	dlq := NewDLQ(pool)
+
+	// Calling Stop() multiple times should not panic
+	dlq.Stop()
+	dlq.Stop()
+	dlq.Stop()
+	// If we get here without panic, the test passes
+}

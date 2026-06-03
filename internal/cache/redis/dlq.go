@@ -41,6 +41,7 @@ type DLQ struct {
 	stopCh    chan struct{}
 	doneCh    chan struct{}
 	cancelCtx context.CancelFunc // cancels the internal goroutine context
+	stopped   bool              // prevents double-close of stopCh
 }
 
 func NewDLQ(pool *Pool) *DLQ {
@@ -143,7 +144,9 @@ func classifyError(err error) string {
 // The goroutine exits when ctx is cancelled or Stop() is called.
 func (d *DLQ) Process(ctx context.Context, hc *http.Client) {
 	d.mu.Lock()
+	d.stopCh = make(chan struct{})
 	d.doneCh = make(chan struct{})
+	d.stopped = false
 	innerCtx, cancel := context.WithCancel(ctx)
 	d.cancelCtx = cancel
 	d.mu.Unlock()
@@ -221,11 +224,13 @@ func (d *DLQ) Process(ctx context.Context, hc *http.Client) {
 // Safe to call multiple times.
 func (d *DLQ) Stop() {
 	d.mu.Lock()
-	if d.cancelCtx == nil {
+	if d.cancelCtx == nil || d.stopped {
 		d.mu.Unlock()
 		return
 	}
+	d.stopped = true
 	cancel := d.cancelCtx
+	d.cancelCtx = nil
 	d.mu.Unlock()
 
 	close(d.stopCh)
