@@ -169,7 +169,7 @@ func (d *DLQ) Process(ctx context.Context, hc *http.Client) {
 				continue
 			}
 
-			if item.MaxAttempts > 0 && item.Attempt > item.MaxAttempts {
+			if item.MaxAttempts > 0 && item.Attempt >= item.MaxAttempts {
 				slog.Error("dlq: max attempts exhausted, discarding item",
 					"id", item.ID, "type", item.Type, "auth_ctx_id", item.AuthCtxID,
 					"attempt", item.Attempt, "max_attempts", item.MaxAttempts)

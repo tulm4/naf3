@@ -343,7 +343,9 @@ func TestDLQ_Process_MultipleRetriesThenExhaustion(t *testing.T) {
 	defer server.Close()
 
 	// One item in the queue with MaxAttempts=3. Process repeatedly dequeues,
-	// fails delivery, and re-enqueues. After 3 failures the item is discarded.
+	// fails delivery, and re-enqueues with incremented Attempt.
+	// Delivery sequence: attempt 0 (fail, re-enqueue as 1), 1 (fail, re-enqueue as 2),
+	// 2 (fail, re-enqueue as 3), then 3 >= 3 triggers discard. Total: 3 deliveries.
 	// Total time: ~1s for the retry cycle + 1s for final BRPOP wait < 5s deadline.
 	item := &AMFDLQItem{
 		ID:          "fail-1",
@@ -409,8 +411,8 @@ func TestDLQ_Process_MetadataPreservation(t *testing.T) {
 		Type:        "SLICE_RE_AUTH",
 		URI:         server.URL,
 		AuthCtxID:   "auth-meta",
-		Attempt:     1,
-		MaxAttempts: 3,
+		Attempt:     0, // start at 0 so all 3 attempts (0,1,2) are delivered before exhaustion
+		MaxAttempts: 3, // exhaustion check: 2 >= 3? NO → deliver; 3 >= 3? YES → discard
 		Payload:     []byte(`{}`),
 		CreatedAt:   time.Now(),
 		LastError:   "previous error",
@@ -422,8 +424,8 @@ func TestDLQ_Process_MetadataPreservation(t *testing.T) {
 
 	go dlq.Process(context.Background(), hc)
 
-	// Poll until 3 attempts are captured, with a generous safety timeout.
-	// Must hold the lock during the length check to avoid race with server appending.
+	// Poll until 3 attempts are captured (attempts 0, 1, 2), with a generous safety timeout.
+	// With Attempt=0, MaxAttempts=3: attempts 0,1 delivered; attempt 2 (3>=3) discarded.
 	deadline := time.Now().Add(30 * time.Second)
 	for {
 		mu.Lock()
@@ -451,7 +453,17 @@ func TestDLQ_Process_MetadataPreservation(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		assert.Equal(t, 3, receivedMaxAttempts[i], "MaxAttempts must be preserved on attempt %d", i+1)
 	}
-	assert.Equal(t, 1, receivedAttempts[0], "first attempt should be 1")
-	assert.Equal(t, 2, receivedAttempts[1], "second attempt should be 2")
-	assert.Equal(t, 3, receivedAttempts[2], "third attempt should be 3")
+	// With Attempt=0, MaxAttempts=3 and >= exhaustion:
+	// attempt 0 (0>=3? no) → deliver → re-enqueue as 1
+	// attempt 1 (1>=3? no) → deliver → re-enqueue as 2
+	// attempt 2 (2>=3? no) → deliver → re-enqueue as 3
+	// attempt 3 (3>=3? yes) → discard (no delivery)
+	assert.Equal(t, 0, receivedAttempts[0], "first attempt should be 0")
+	assert.Equal(t, 1, receivedAttempts[1], "second attempt should be 1")
+	assert.Equal(t, 2, receivedAttempts[2], "third attempt should be 2")
+
+	// Verify item was eventually exhausted and removed from queue
+	length, err := dlq.Len(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), length, "item should be exhausted and removed from queue after 3 retries")
 }
