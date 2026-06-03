@@ -48,12 +48,26 @@ func NewDLQ(pool *Pool) *DLQ {
 	}
 }
 
+// updateDepth increments the DLQ depth gauge.
+func (d *DLQ) updateDepth() {
+	metrics.DLQDepth.Inc()
+}
+
+// updateDepthDecr decrements the DLQ depth gauge.
+func (d *DLQ) updateDepthDecr() {
+	metrics.DLQDepth.Dec()
+}
+
 func (d *DLQ) Enqueue(ctx context.Context, item interface{}) error {
 	data, err := json.Marshal(item)
 	if err != nil {
 		return fmt.Errorf("dlq: marshal: %w", err)
 	}
-	return d.pool.Client().LPush(ctx, amfDLQKey, data).Err()
+	if err := d.pool.Client().LPush(ctx, amfDLQKey, data).Err(); err != nil {
+		return err
+	}
+	d.updateDepth()
+	return nil
 }
 
 // Dequeue blocks on BRPOP until an item is available or the timeout expires.
@@ -75,6 +89,7 @@ func (d *DLQ) Dequeue(ctx context.Context, timeout time.Duration) (*AMFDLQItem, 
 	if err := json.Unmarshal([]byte(result[1]), &item); err != nil {
 		return nil, fmt.Errorf("dlq: unmarshal: %w", err)
 	}
+	d.updateDepthDecr()
 	return &item, nil
 }
 
