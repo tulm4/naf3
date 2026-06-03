@@ -2,6 +2,7 @@ package redis
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -627,4 +628,41 @@ func TestDLQ_Lifecycle_MultipleStops(t *testing.T) {
 	dlq.Stop()
 	dlq.Stop()
 	// If we get here without panic, the test passes
+}
+
+func TestDLQ_DepthGauge_Updates(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	pool, err := NewPool(context.Background(), Config{
+		Addrs:        []string{mr.Addr()},
+		PoolSize:     10,
+		MinIdleConns: 1,
+		DialTimeout:  100 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	defer func() { _ = pool.Close() }()
+
+	dlq := NewDLQ(pool)
+
+	// Enqueue 3 items and verify depth increases
+	for i := 0; i < 3; i++ {
+		item := &AMFDLQItem{ID: fmt.Sprintf("depth-%d", i)}
+		err := dlq.Enqueue(context.Background(), item)
+		require.NoError(t, err)
+	}
+
+	length, err := dlq.Len(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), length)
+
+	// Dequeue one item and verify depth decreases
+	got, err := dlq.Dequeue(context.Background(), 1*time.Second)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+
+	length, err = dlq.Len(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), length)
 }
