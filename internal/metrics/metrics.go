@@ -23,6 +23,14 @@ func newCounterVec(opts prometheus.CounterOpts, labels []string) *prometheus.Cou
 	return c
 }
 
+func newCounter(opts prometheus.CounterOpts) prometheus.Counter {
+	c := prometheus.NewCounter(opts)
+	if err := Registry.Register(c); err != nil {
+		panic("prometheus: failed to register counter: " + err.Error())
+	}
+	return c
+}
+
 func newGauge(opts prometheus.GaugeOpts) prometheus.Gauge {
 	g := prometheus.NewGauge(opts)
 	if err := Registry.Register(g); err != nil {
@@ -168,6 +176,18 @@ var (
 		Name: "nssAAF_dlq_processed_total",
 		Help: "Total DLQ items processed",
 	}, []string{"result"})
+
+	// DLQRetry tracks retry attempts (delivery failed, item re-enqueued).
+	DLQRetry = newCounterVec(prometheus.CounterOpts{
+		Name: "nssAAF_dlq_retry_total",
+		Help: "Total DLQ retry attempts after delivery failure",
+	}, []string{"error_type"})
+
+	// DLQReenqueueFailures tracks failed re-enqueue attempts after all retries exhausted.
+	DLQReenqueueFailures = newCounter(prometheus.CounterOpts{
+		Name: "nssAAF_dlq_reenqueue_failures_total",
+		Help: "Total DLQ re-enqueue failures after internal retries exhausted",
+	})
 
 	// RateLimitRequests tracks rate-limited requests by handler.
 	RateLimitRequests = newCounterVec(prometheus.CounterOpts{

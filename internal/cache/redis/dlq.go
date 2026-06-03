@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -115,6 +116,24 @@ func (d *DLQ) deliverToAMF(ctx context.Context, hc *http.Client, item *AMFDLQIte
 	return false, fmt.Errorf("dlq: non-2xx status: %d", resp.StatusCode)
 }
 
+// classifyError categorizes delivery errors for metrics labeling.
+func classifyError(err error) string {
+	if err == nil {
+		return "unknown"
+	}
+	errStr := err.Error()
+	switch {
+	case strings.Contains(errStr, "connection refused"),
+		strings.Contains(errStr, "timeout"),
+		strings.Contains(errStr, "i/o timeout"):
+		return "network"
+	case strings.Contains(errStr, "non-2xx"):
+		return "http"
+	default:
+		return "unknown"
+	}
+}
+
 // Process starts a background goroutine that continuously polls the DLQ and
 // attempts to deliver items to AMF. Items are re-enqueued on delivery failure
 // with an incremented Attempt counter. Items exceeding MaxAttempts are discarded.
@@ -165,9 +184,9 @@ func (d *DLQ) Process(ctx context.Context, hc *http.Client) {
 			item.Attempt++
 			if retryErr != nil {
 				item.LastError = retryErr.Error()
+				metrics.DLQRetry.WithLabelValues(classifyError(retryErr)).Inc()
 			}
 			if err := d.Enqueue(innerCtx, item); err != nil {
-				// Re-enqueue with retry
 				const enqueueRetryMax = 5
 				var enqueueErr error
 				for attempt := 0; attempt < enqueueRetryMax; attempt++ {
@@ -185,6 +204,7 @@ func (d *DLQ) Process(ctx context.Context, hc *http.Client) {
 					slog.Error("dlq: re-enqueue failed after all retries",
 						"id", item.ID, "error", enqueueErr)
 					metrics.DLQProcessed.WithLabelValues("error").Inc()
+					metrics.DLQReenqueueFailures.Inc()
 				} else {
 					slog.Info("dlq: re-enqueued after transient failure", "id", item.ID, "attempt", item.Attempt, "error", retryErr)
 					time.Sleep(500 * time.Millisecond)
