@@ -41,7 +41,7 @@ type DLQ struct {
 	stopCh    chan struct{}
 	doneCh    chan struct{}
 	cancelCtx context.CancelFunc // cancels the internal goroutine context
-	stopped   bool              // prevents double-close of stopCh
+	stopped   bool               // prevents double-close of stopCh
 }
 
 func NewDLQ(pool *Pool) *DLQ {
