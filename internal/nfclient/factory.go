@@ -97,3 +97,13 @@ func (f *Factory) recordSuccess(baseURL string) {
 		f.cbRegistry.Get(baseURL).RecordSuccess()
 	}
 }
+
+// BreakerState returns the current state of the circuit breaker for the given baseURL.
+// Returns resilience.StateClosed if the registry is nil or the breaker has not been initialized.
+// This method exists for testability only — production code should not depend on breaker state.
+func (f *Factory) BreakerState(baseURL string) resilience.State {
+	if f.cbRegistry == nil {
+		return resilience.StateClosed
+	}
+	return f.cbRegistry.Get(baseURL).State()
+}

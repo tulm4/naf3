@@ -11,6 +11,7 @@ import (
 
 	"github.com/operator/nssAAF/internal/config"
 	"github.com/operator/nssAAF/internal/nfclient"
+	"github.com/operator/nssAAF/internal/resilience"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -303,3 +304,116 @@ var _ interface {
 var _ interface {
 	UpdateAuthContext(context.Context, string, string, string) error
 } = (*Client)(nil)
+
+func TestUDMClient_OpensBreakerOnRepeatedFailures(t *testing.T) {
+	// Server that always returns 503 Service Unavailable.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	cfg := config.UDMConfig{BaseURL: server.URL}
+	// Use a real registry with low thresholds so we can trip the breaker quickly.
+	cbRegistry := resilience.NewRegistry(3, 10*time.Second, 2)
+	factory := nfclient.NewFactory(cbRegistry)
+	client := NewClient(cfg, factory, nil)
+
+	ctx := context.Background()
+	supi := "imsi-208001000000000"
+
+	// First three calls should all fail and trip the breaker.
+	for i := 0; i < 3; i++ {
+		_, err := client.GetAuthContext(ctx, supi)
+		assert.Error(t, err, "call %d should fail", i+1)
+	}
+
+	// The breaker should now be OPEN — verify its state.
+	cb := cbRegistry.Get(server.URL)
+	assert.Equal(t, resilience.StateOpen, cb.State(), "breaker should be OPEN after 3 failures")
+
+	// Subsequent calls should fast-fail without hitting the server.
+	fastFailCount := 0
+	for i := 0; i < 5; i++ {
+		_, err := client.GetAuthContext(ctx, supi)
+		if err != nil {
+			fastFailCount++
+			assert.Contains(t, err.Error(), "circuit breaker open",
+				"call %d should fail fast due to open breaker", i+1)
+		}
+	}
+	assert.Greater(t, fastFailCount, 0, "at least one call should have fast-failed")
+
+	// Verify the breaker is still open.
+	assert.Equal(t, resilience.StateOpen, cb.State(), "breaker should still be OPEN")
+
+	// Verify via the factory testability method too.
+	assert.Equal(t, resilience.StateOpen, factory.BreakerState(server.URL),
+		"factory.BreakerState should reflect OPEN breaker")
+}
+
+func TestUDMClient_UpdateAuthContext_OpensBreakerOnRepeatedFailures(t *testing.T) {
+	// Server that always returns 503 Service Unavailable.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	cfg := config.UDMConfig{BaseURL: server.URL}
+	cbRegistry := resilience.NewRegistry(2, 10*time.Second, 1)
+	factory := nfclient.NewFactory(cbRegistry)
+	client := NewClient(cfg, factory, nil)
+
+	ctx := context.Background()
+	supi := "imsi-208001000000000"
+	authCtxID := "auth-123"
+
+	// Trip the breaker with UpdateAuthContext calls.
+	for i := 0; i < 2; i++ {
+		err := client.UpdateAuthContext(ctx, supi, authCtxID, "EAP_SUCCESS")
+		assert.Error(t, err, "call %d should fail", i+1)
+	}
+
+	cb := cbRegistry.Get(server.URL)
+	assert.Equal(t, resilience.StateOpen, cb.State(), "breaker should be OPEN after 2 failures")
+
+	// Subsequent calls should fast-fail.
+	err := client.UpdateAuthContext(ctx, supi, authCtxID, "EAP_SUCCESS")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "circuit breaker open",
+		"subsequent call should fail fast due to open breaker")
+}
+
+func TestUDMClient_BreakerHalfOpenAfterRecoveryTimeout(t *testing.T) {
+	// Server that always returns 503 Service Unavailable.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	cfg := config.UDMConfig{BaseURL: server.URL}
+	// Very short recovery timeout so we can test the transition in unit test time.
+	cbRegistry := resilience.NewRegistry(2, 50*time.Millisecond, 1)
+	factory := nfclient.NewFactory(cbRegistry)
+	client := NewClient(cfg, factory, nil)
+
+	ctx := context.Background()
+	supi := "imsi-208001000000000"
+
+	// Trip the breaker: 2 failures open it.
+	for i := 0; i < 2; i++ {
+		_, _ = client.GetAuthContext(ctx, supi)
+	}
+
+	cb := cbRegistry.Get(server.URL)
+	assert.Equal(t, resilience.StateOpen, cb.State(), "breaker should be OPEN")
+
+	// Wait for recovery timeout to expire — breaker transitions to HALF_OPEN on next Allow().
+	time.Sleep(70 * time.Millisecond)
+
+	// The next GetAuthContext call should trigger Allow() which transitions to HALF_OPEN.
+	// The call will still fail (server is still down), which should reopen the breaker.
+	_, _ = client.GetAuthContext(ctx, supi)
+
+	// The breaker should have gone OPEN → HALF_OPEN → OPEN again.
+	assert.Equal(t, resilience.StateOpen, cb.State(), "breaker should be OPEN after failed half-open probe")
+}
