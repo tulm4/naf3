@@ -133,6 +133,12 @@ var (
 		Help: "Circuit breaker state (0=closed, 1=open, 2=half-open)",
 	}, []string{"server"})
 
+	// CircuitBreakerTransitions tracks circuit breaker state transitions for NF clients.
+	CircuitBreakerTransitions = newCounterVec(prometheus.CounterOpts{
+		Name: "nssAAF_circuit_breaker_transitions_total",
+		Help: "Total circuit breaker state transitions",
+	}, []string{"server", "from_state", "to_state"})
+
 	// CircuitBreakerFailures tracks circuit breaker failures.
 	CircuitBreakerFailures = newCounterVec(prometheus.CounterOpts{
 		Name: "nssAAF_circuit_breaker_failures_total",

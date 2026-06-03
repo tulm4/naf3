@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/operator/nssAAF/internal/metrics"
 	"github.com/operator/nssAAF/internal/resilience"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
@@ -41,8 +42,9 @@ func (f *Factory) WithTimeout(timeout time.Duration) *Factory {
 // Returns (statusCode, responseBody, error).
 // The caller provides method, path, and body; factory owns transport + CB + OTel.
 func (f *Factory) Do(ctx context.Context, baseURL, method, path string, body []byte) (int, []byte, error) {
+	var cb *resilience.CircuitBreaker
 	if f.cbRegistry != nil {
-		cb := f.cbRegistry.Get(baseURL)
+		cb = f.cbRegistry.Get(baseURL)
 		if !cb.Allow() {
 			return 0, nil, fmt.Errorf("nfclient: circuit breaker open for %s", baseURL)
 		}
@@ -56,7 +58,7 @@ func (f *Factory) Do(ctx context.Context, baseURL, method, path string, body []b
 
 	req, err := http.NewRequestWithContext(ctx, method, url, bodyReader)
 	if err != nil {
-		f.recordFailure(baseURL)
+		f.recordFailureAndEmitTransition(baseURL, cb)
 		return 0, nil, fmt.Errorf("nfclient: create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -67,7 +69,7 @@ func (f *Factory) Do(ctx context.Context, baseURL, method, path string, body []b
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		f.recordFailure(baseURL)
+		f.recordFailureAndEmitTransition(baseURL, cb)
 		return 0, nil, fmt.Errorf("nfclient: do request: %w", err)
 	}
 	defer resp.Body.Close()
@@ -78,23 +80,39 @@ func (f *Factory) Do(ctx context.Context, baseURL, method, path string, body []b
 	}
 
 	if resp.StatusCode >= 400 {
-		f.recordFailure(baseURL)
+		f.recordFailureAndEmitTransition(baseURL, cb)
 	} else {
-		f.recordSuccess(baseURL)
+		f.recordSuccessAndEmitTransition(baseURL, cb)
 	}
 
 	return resp.StatusCode, respBody, nil
 }
 
-func (f *Factory) recordFailure(baseURL string) {
-	if f.cbRegistry != nil {
-		f.cbRegistry.Get(baseURL).RecordFailure()
+// recordFailureAndEmitTransition records a failure and emits a transition metric
+// only if the circuit breaker state actually changed.
+func (f *Factory) recordFailureAndEmitTransition(baseURL string, cb *resilience.CircuitBreaker) {
+	if f.cbRegistry != nil && cb != nil {
+		prevState := cb.State()
+		cb.RecordFailure()
+		currState := cb.State()
+		if prevState != currState {
+			metrics.CircuitBreakerTransitions.WithLabelValues(baseURL, prevState.String(), currState.String()).Inc()
+		}
+		metrics.CircuitBreakerState.WithLabelValues(baseURL).Set(float64(currState))
 	}
 }
 
-func (f *Factory) recordSuccess(baseURL string) {
-	if f.cbRegistry != nil {
-		f.cbRegistry.Get(baseURL).RecordSuccess()
+// recordSuccessAndEmitTransition records a success and emits a transition metric
+// only if the circuit breaker state actually changed.
+func (f *Factory) recordSuccessAndEmitTransition(baseURL string, cb *resilience.CircuitBreaker) {
+	if f.cbRegistry != nil && cb != nil {
+		prevState := cb.State()
+		cb.RecordSuccess()
+		currState := cb.State()
+		if prevState != currState {
+			metrics.CircuitBreakerTransitions.WithLabelValues(baseURL, prevState.String(), currState.String()).Inc()
+		}
+		metrics.CircuitBreakerState.WithLabelValues(baseURL).Set(float64(currState))
 	}
 }
 

@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/operator/nssAAF/internal/metrics"
+	"github.com/operator/nssAAF/internal/resilience"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -94,4 +96,47 @@ func TestFactory_WithTimeout(t *testing.T) {
 	})
 	factory = factory.WithTimeout(5 * time.Second)
 	assert.Equal(t, 5*time.Second, factory.timeout)
+}
+
+// TestBreakerTransitionMetric_NotEmittedOnNoStateChange verifies that transition
+// metrics are emitted only when the circuit breaker state actually changes, not
+// on every call (CLOSED→CLOSED spurious emissions).
+// Bug: before the fix, transition metrics were emitted even when no state change occurred.
+func TestBreakerTransitionMetric_NotEmittedOnNoStateChange(t *testing.T) {
+	cbRegistry := resilience.NewRegistry(5, 30*time.Second, 3)
+	factory := NewFactory(cbRegistry)
+	factory.transport = roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+	})
+	factory.timeout = time.Second
+
+	// Make successful requests that don't change the breaker state.
+	for i := 0; i < 3; i++ {
+		_, _, err := factory.Do(context.Background(), "http://amf:8080/nsmf", http.MethodPost, "/callback", []byte(`{}`))
+		require.NoError(t, err)
+	}
+
+	// Check for spurious transitions in the metric registry.
+	gatherer := metrics.Registry
+	metricFamilies, err := gatherer.Gather()
+	require.NoError(t, err)
+
+	for _, mf := range metricFamilies {
+		if strings.Contains(mf.GetName(), "circuit_breaker_transitions") {
+			for _, m := range mf.GetMetric() {
+				from, to := "", ""
+				for _, label := range m.GetLabel() {
+					if label.GetName() == "from_state" {
+						from = label.GetValue()
+					}
+					if label.GetName() == "to_state" {
+						to = label.GetValue()
+					}
+				}
+				if from == to {
+					t.Errorf("spurious %s→%s transition metric emitted", from, to)
+				}
+			}
+		}
+	}
 }
