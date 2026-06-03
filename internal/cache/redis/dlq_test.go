@@ -467,3 +467,65 @@ func TestDLQ_Process_MetadataPreservation(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), length, "item should be exhausted and removed from queue after 3 retries")
 }
+
+func TestDLQ_ExhaustionBehavior(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	pool, err := NewPool(context.Background(), Config{
+		Addrs:        []string{mr.Addr()},
+		PoolSize:     10,
+		MinIdleConns: 1,
+		DialTimeout:  100 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	defer func() { _ = pool.Close() }()
+
+	dlq := NewDLQ(pool)
+
+	var deliveryCount int
+	var mu sync.Mutex
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		deliveryCount++
+		mu.Unlock()
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	item := &AMFDLQItem{
+		ID:          "exhaust-verify",
+		Type:        "SLICE_REVOCATION",
+		URI:         server.URL,
+		AuthCtxID:   "auth-exhaust",
+		Attempt:     2, // start at attempt 2 of 3; 2>=3? no → deliver; 3>=3? yes → discard
+		MaxAttempts: 3,
+		Payload:     []byte(`{}`),
+		CreatedAt:   time.Now(),
+	}
+	err = dlq.Enqueue(context.Background(), item)
+	require.NoError(t, err)
+
+	hc := &http.Client{Timeout: 5 * time.Second}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	go dlq.Process(ctx, hc)
+	<-ctx.Done()
+	dlq.Done()
+
+	// Dequeue attempt 2: 2>=3? no → deliver once, fail, re-enqueue as 3
+	// Dequeue attempt 3: 3>=3? yes → discard without delivery
+	// Total: exactly 1 delivery attempt
+	mu.Lock()
+	count := deliveryCount
+	mu.Unlock()
+	assert.Equal(t, 1, count, "should deliver exactly once before exhausting (2>=3? no → deliver; 3>=3? yes → discard)")
+
+	// Verify item was removed from queue
+	length, err := dlq.Len(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), length, "exhausted item must be removed from queue")
+}
