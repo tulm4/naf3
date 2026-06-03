@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -104,6 +105,8 @@ func (d *DLQ) deliverToAMF(ctx context.Context, hc *http.Client, item *AMFDLQIte
 		return false, fmt.Errorf("dlq: create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-DLQ-Attempt", strconv.Itoa(item.Attempt))
+	req.Header.Set("X-DLQ-MaxAttempts", strconv.Itoa(item.MaxAttempts))
 	resp, err := hc.Do(req)
 	if err != nil {
 		return false, fmt.Errorf("dlq: do request: %w", err)
@@ -166,7 +169,7 @@ func (d *DLQ) Process(ctx context.Context, hc *http.Client) {
 				continue
 			}
 
-			if item.MaxAttempts > 0 && item.Attempt >= item.MaxAttempts {
+			if item.MaxAttempts > 0 && item.Attempt > item.MaxAttempts {
 				slog.Error("dlq: max attempts exhausted, discarding item",
 					"id", item.ID, "type", item.Type, "auth_ctx_id", item.AuthCtxID,
 					"attempt", item.Attempt, "max_attempts", item.MaxAttempts)

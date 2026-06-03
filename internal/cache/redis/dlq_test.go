@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -368,4 +369,89 @@ func TestDLQ_Process_MultipleRetriesThenExhaustion(t *testing.T) {
 	length, err := dlq.Len(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), length, "all attempts exhausted, item should be discarded")
+}
+
+func TestDLQ_Process_MetadataPreservation(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	pool, err := NewPool(context.Background(), Config{
+		Addrs:        []string{mr.Addr()},
+		PoolSize:     10,
+		MinIdleConns: 1,
+		DialTimeout:  100 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	defer func() { _ = pool.Close() }()
+
+	dlq := NewDLQ(pool)
+
+	var mu sync.Mutex
+	var receivedAttempts []int
+	var receivedMaxAttempts []int
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		attemptStr := r.Header.Get("X-DLQ-Attempt")
+		maxAttemptsStr := r.Header.Get("X-DLQ-MaxAttempts")
+		attempt, _ := strconv.Atoi(attemptStr)
+		maxAttempts, _ := strconv.Atoi(maxAttemptsStr)
+		receivedAttempts = append(receivedAttempts, attempt)
+		receivedMaxAttempts = append(receivedMaxAttempts, maxAttempts)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	item := &AMFDLQItem{
+		ID:          "metadata-1",
+		Type:        "SLICE_RE_AUTH",
+		URI:         server.URL,
+		AuthCtxID:   "auth-meta",
+		Attempt:     1,
+		MaxAttempts: 3,
+		Payload:     []byte(`{}`),
+		CreatedAt:   time.Now(),
+		LastError:   "previous error",
+	}
+	err = dlq.Enqueue(context.Background(), item)
+	require.NoError(t, err)
+
+	hc := &http.Client{Timeout: 5 * time.Second}
+
+	go dlq.Process(context.Background(), hc)
+
+	// Poll until 3 attempts are captured, with a generous safety timeout.
+	// Must hold the lock during the length check to avoid race with server appending.
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		mu.Lock()
+		done := len(receivedAttempts) >= 3
+		mu.Unlock()
+		if done {
+			break
+		}
+		if time.Now().After(deadline) {
+			mu.Lock()
+			t.Logf("timeout: only %d attempts captured: %v", len(receivedAttempts), receivedAttempts)
+			mu.Unlock()
+			t.Fatal("DLQ processing did not complete in time")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	dlq.Stop()
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	require.Len(t, receivedAttempts, 3, "should receive 3 delivery attempts")
+	require.Len(t, receivedMaxAttempts, 3, "maxAttempts should be preserved across all retries")
+
+	for i := 0; i < 3; i++ {
+		assert.Equal(t, 3, receivedMaxAttempts[i], "MaxAttempts must be preserved on attempt %d", i+1)
+	}
+	assert.Equal(t, 1, receivedAttempts[0], "first attempt should be 1")
+	assert.Equal(t, 2, receivedAttempts[1], "second attempt should be 2")
+	assert.Equal(t, 3, receivedAttempts[2], "third attempt should be 3")
 }
