@@ -3,6 +3,7 @@ package integration
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -10,7 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/operator/nssAAF/internal/config"
+	"github.com/operator/nssAAF/internal/nfclient"
 	"github.com/operator/nssAAF/internal/nrm"
+	"github.com/operator/nssAAF/internal/nrf"
 	"github.com/operator/nssAAF/internal/resilience"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -148,6 +152,96 @@ func TestIntegration_CB_AAAUnreachableAlarm(t *testing.T) {
 	assert.Equal(t, nrm.AlarmAAAUnreachable, alarms[0].AlarmType)
 	assert.Equal(t, "aaa-server-03:1812", alarms[0].BackupObject)
 	assert.Equal(t, "CRITICAL", alarms[0].Severity)
+}
+
+// ─── Test: Protected Client Uses Breaker (Task 5) ────────────────────
+
+// TestIntegration_ProtectedClientUsesBreaker proves the circuit breaker is active in
+// a real client path through the nfclient.Factory. The test exercises the full
+// protected client path and verifies:
+//  1. Repeated failures trip the breaker (CLOSED → OPEN)
+//  2. Further calls fast-fail without hitting the server
+//  3. After recovery timeout, the breaker allows a probe (OPEN → HALF_OPEN)
+//  4. Failed HALF_OPEN probe reopens the breaker
+//
+// This integrates with the real nfclient.Factory.BreakerState() method which is
+// wired into NRF/UDM/AUSF/AMF clients via cmd/biz/factory.go.
+//
+// Task 5: docs/superpowers/plans/2026-06-03-circuit-breaker-gaps.md
+func TestIntegration_ProtectedClientUsesBreaker(t *testing.T) {
+	// Step 1: Set up a test server that always returns errors.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	// Step 2: Build a client with a low failure threshold (3) to trip quickly.
+	// Create factory and client once so the circuit breaker state persists across calls.
+	cbRegistry := resilience.NewRegistry(3, 100*time.Millisecond, 2)
+	factory := nfclient.NewFactory(cbRegistry)
+	cfg := config.NRFConfig{
+		BaseURL:         server.URL,
+		DiscoverTimeout: 5 * time.Second,
+	}
+	client := nrf.NewClient(cfg, factory)
+
+	ctx := context.Background()
+
+	// Verify initial state is CLOSED.
+	assert.Equal(t, resilience.StateClosed, factory.BreakerState(server.URL),
+		"breaker should be CLOSED before any calls")
+
+	// Step 3: Call 3 times — each returns an error, trips the breaker.
+	// Client is created once, factory is reused, so failures accumulate.
+	for i := 0; i < 3; i++ {
+		err := client.Register(ctx)
+		assert.Error(t, err, "call %d should fail", i+1)
+	}
+
+	// Step 4: Assert the breaker is now OPEN.
+	assert.Equal(t, resilience.StateOpen, factory.BreakerState(server.URL),
+		"breaker should be OPEN after 3 failures")
+	assert.Equal(t, resilience.StateOpen, cbRegistry.Get(server.URL).State())
+
+	// Step 5: Call again — should fast-fail without calling the server.
+	err := client.Register(ctx)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "circuit breaker open",
+		"call should fast-fail when breaker is OPEN")
+
+	// Verify state is still OPEN.
+	assert.Equal(t, resilience.StateOpen, factory.BreakerState(server.URL),
+		"breaker should remain OPEN")
+
+	// Step 6: Wait for recovery timeout — breaker transitions to HALF_OPEN on next Allow().
+	time.Sleep(120 * time.Millisecond)
+
+	// Next Allow() triggers the transition OPEN → HALF_OPEN.
+	// The call goes through (server returns 503), failure recorded → HALF_OPEN → OPEN.
+	err = client.Register(ctx)
+	assert.Error(t, err)
+	// HALF_OPEN probe gets a real server response (503), not a circuit breaker error.
+	assert.NotContains(t, err.Error(), "circuit breaker open",
+		"HALF_OPEN probe should allow request through")
+
+	// Step 7: Verify the breaker is back to OPEN after the failed HALF_OPEN probe.
+	assert.Equal(t, resilience.StateOpen, factory.BreakerState(server.URL),
+		"breaker should be OPEN after failed HALF_OPEN probe")
+
+	// Wait again for the new recovery timeout to expire.
+	time.Sleep(120 * time.Millisecond)
+
+	// Next call should trigger another HALF_OPEN probe.
+	// Allow() transitions OPEN → HALF_OPEN, call goes through → 503 → OPEN.
+	_ = client.Register(ctx)
+	assert.Equal(t, resilience.StateOpen, factory.BreakerState(server.URL),
+		"breaker should be OPEN after second HALF_OPEN failure")
+
+	// Step 8: Verify subsequent calls fast-fail (breaker is still OPEN).
+	err = client.Register(ctx)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "circuit breaker open",
+		"call should fast-fail when breaker is OPEN after HALF_OPEN failure")
 }
 
 // ─── Test: CB_NRMAlarmRaisedViaHTTP ────────────────────────────────────
