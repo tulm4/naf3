@@ -31,16 +31,15 @@ import (
 
 // BizPod holds all dependencies for the Biz Pod.
 type BizPod struct {
-	Server          *http.Server
-	NRFClient      *nrf.Client
-	NRFRegistry    *resilience.Registry
-	SessionStore   *postgres.Store
+	Server           *http.Server
+	NRFClient       *nrf.Client
+	SessionStore    *postgres.Store
 	AIWSessionStore *postgres.AIWStore
-	Pool           *postgres.Pool
-	RedisPool      *redis.Pool
-	DLQ            *redis.DLQ
-	AAAClient      *httpAAAClient
-	Logger         *slog.Logger
+	Pool            *postgres.Pool
+	RedisPool       *redis.Pool
+	DLQ             *redis.DLQ
+	AAAClient       *httpAAAClient
+	Logger          *slog.Logger
 	HeartbeatCancel func() // cancels the podHeartbeat goroutine on shutdown
 }
 
@@ -196,7 +195,17 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 
 	// ─── Three isolated CB registries for blast-radius isolation ───────
 	// Internal NF registry (NRF, UDM, AUSF) — wired from canonical config path (CB-G1)
-	internalNFRegistry := f.newNFRegistry()
+	cbCfg := f.cfg.InternalComm.Native.CB
+	if cbCfg.FailureThreshold == 0 {
+		cbCfg.FailureThreshold = 3
+	}
+	if cbCfg.RecoveryTimeout == 0 {
+		cbCfg.RecoveryTimeout = 10 * time.Second
+	}
+	if cbCfg.SuccessThreshold == 0 {
+		cbCfg.SuccessThreshold = 2
+	}
+	internalNFRegistry := resilience.NewRegistry(cbCfg.FailureThreshold, cbCfg.RecoveryTimeout, cbCfg.SuccessThreshold)
 
 	// AMF registry (for AMF notification delivery)
 	amfCfg := config.CircuitBreakerConfig{
@@ -319,9 +328,8 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 	)
 
 	return &BizPod{
-		Server:          srv,
+		Server:           srv,
 		NRFClient:       nrfClient,
-		NRFRegistry:     internalNFRegistry,
 		SessionStore:    nssaaStore,
 		AIWSessionStore: aiwStore,
 		Pool:            pgPool,
