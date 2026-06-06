@@ -14,33 +14,34 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/operator/nssAAF/internal/api/common"
 	"github.com/operator/nssAAF/internal/api/nssaa"
+	"github.com/operator/nssAAF/internal/storage"
 	nssaanats "github.com/operator/nssAAF/oapi-gen/gen/nssaa"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 type mockStoreNssaa struct {
-	data      map[string]*nssaa.AuthCtx
+	data      map[string]*storage.NssaaSession
 	loadErr   error
 	saveErr   error
 	deleteErr error
 }
 
 func newMockStoreNssaa() *mockStoreNssaa {
-	return &mockStoreNssaa{data: make(map[string]*nssaa.AuthCtx)}
+	return &mockStoreNssaa{data: make(map[string]*storage.NssaaSession)}
 }
 
-func (m *mockStoreNssaa) Load(_ context.Context, id string) (*nssaa.AuthCtx, error) {
+func (m *mockStoreNssaa) Load(_ context.Context, id string) (*storage.NssaaSession, error) {
 	if m.loadErr != nil {
 		return nil, m.loadErr
 	}
 	if ctx, ok := m.data[id]; ok {
 		return ctx, nil
 	}
-	return nil, nssaa.ErrNotFound
+	return nil, storage.ErrSessionNotFound
 }
 
-func (m *mockStoreNssaa) Save(_ context.Context, ctx *nssaa.AuthCtx) error {
+func (m *mockStoreNssaa) Save(_ context.Context, ctx *storage.NssaaSession) error {
 	if m.saveErr != nil {
 		return m.saveErr
 	}
@@ -186,7 +187,7 @@ func TestConfirmSliceAuth_SessionNotFound(t *testing.T) {
 // confirm request body returns HTTP 400.
 func TestConfirmSliceAuth_GPSIMismatch(t *testing.T) {
 	store := newMockStoreNssaa()
-	store.data["ctx-mismatch"] = &nssaa.AuthCtx{
+	store.data["ctx-mismatch"] = &storage.NssaaSession{
 		AuthCtxID: "ctx-mismatch",
 		GPSI:      "520804600000001",
 		SnssaiSST: 1,
@@ -211,7 +212,7 @@ func TestConfirmSliceAuth_GPSIMismatch(t *testing.T) {
 // in eapMessage returns HTTP 400.
 func TestConfirmSliceAuth_InvalidBase64EapMessage(t *testing.T) {
 	store := newMockStoreNssaa()
-	store.data["ctx-valid"] = &nssaa.AuthCtx{
+	store.data["ctx-valid"] = &storage.NssaaSession{
 		AuthCtxID: "ctx-valid",
 		GPSI:      "520804600000001",
 		SnssaiSST: 1,
@@ -238,7 +239,7 @@ func TestConfirmSliceAuth_InvalidBase64EapMessage(t *testing.T) {
 // in confirm returns HTTP 400.
 func TestConfirmSliceAuth_MissingEapMessage(t *testing.T) {
 	store := newMockStoreNssaa()
-	store.data["ctx-eap-missing"] = &nssaa.AuthCtx{
+	store.data["ctx-eap-missing"] = &storage.NssaaSession{
 		AuthCtxID: "ctx-eap-missing",
 		GPSI:      "520804600000001",
 		SnssaiSST: 1,
@@ -260,7 +261,7 @@ func TestConfirmSliceAuth_MissingEapMessage(t *testing.T) {
 // returns HTTP 400.
 func TestConfirmSliceAuth_InvalidGPSI(t *testing.T) {
 	store := newMockStoreNssaa()
-	store.data["ctx-gpsi-valid"] = &nssaa.AuthCtx{
+	store.data["ctx-gpsi-valid"] = &storage.NssaaSession{
 		AuthCtxID: "ctx-gpsi-valid",
 		GPSI:      "520804600000001",
 		SnssaiSST: 1,
@@ -281,7 +282,7 @@ func TestConfirmSliceAuth_InvalidGPSI(t *testing.T) {
 // TestConfirmSliceAuth_InvalidJSON verifies that non-JSON body returns HTTP 400.
 func TestConfirmSliceAuth_InvalidJSON(t *testing.T) {
 	store := newMockStoreNssaa()
-	store.data["ctx-json"] = &nssaa.AuthCtx{
+	store.data["ctx-json"] = &storage.NssaaSession{
 		AuthCtxID: "ctx-json",
 		GPSI:      "520804600000001",
 	}
@@ -302,7 +303,7 @@ func TestConfirmSliceAuth_InvalidJSON(t *testing.T) {
 // during confirm returns HTTP 500.
 func TestConfirmSliceAuth_StoreUpdateError(t *testing.T) {
 	store := newMockStoreNssaa()
-	store.data["ctx-update-err"] = &nssaa.AuthCtx{
+	store.data["ctx-update-err"] = &storage.NssaaSession{
 		AuthCtxID: "ctx-update-err",
 		GPSI:      "520804600000001",
 		SnssaiSST: 1,
@@ -411,7 +412,7 @@ func TestCreateSliceAuth_InvalidSnssaiSD(t *testing.T) {
 // TestConfirmSliceAuth_MissingSnssai verifies that a missing snssai in confirm returns HTTP 400.
 func TestConfirmSliceAuth_MissingSnssai(t *testing.T) {
 	store := newMockStoreNssaa()
-	store.data["ctx-snssai"] = &nssaa.AuthCtx{
+	store.data["ctx-snssai"] = &storage.NssaaSession{
 		AuthCtxID: "ctx-snssai",
 		GPSI:      "520804600000001",
 		SnssaiSST: 1,
@@ -432,7 +433,7 @@ func TestConfirmSliceAuth_MissingSnssai(t *testing.T) {
 // TestConfirmSliceAuth_InvalidSnssaiSST verifies that SST out of range in confirm returns HTTP 400.
 func TestConfirmSliceAuth_InvalidSnssaiSST(t *testing.T) {
 	store := newMockStoreNssaa()
-	store.data["ctx-sst"] = &nssaa.AuthCtx{
+	store.data["ctx-sst"] = &storage.NssaaSession{
 		AuthCtxID: "ctx-sst",
 		GPSI:      "520804600000001",
 		SnssaiSST: 1,
@@ -477,7 +478,7 @@ func TestCreateSliceAuth_EmptySnssai(t *testing.T) {
 // in PUT request is rejected with HTTP 400.
 func TestConfirmSliceAuth_EmptySnssai(t *testing.T) {
 	store := newMockStoreNssaa()
-	store.data["ctx-empty"] = &nssaa.AuthCtx{
+	store.data["ctx-empty"] = &storage.NssaaSession{
 		AuthCtxID: "ctx-empty",
 		GPSI:      "520804600000001",
 		SnssaiSST: 1,

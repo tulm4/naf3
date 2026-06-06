@@ -15,6 +15,7 @@ import (
 	"github.com/operator/nssAAF/internal/api/aiw"
 	"github.com/operator/nssAAF/internal/api/common"
 	"github.com/operator/nssAAF/internal/api/nssaa"
+	"github.com/operator/nssAAF/internal/storage"
 	nssaanats "github.com/operator/nssAAF/oapi-gen/gen/nssaa"
 	aiwnats "github.com/operator/nssAAF/oapi-gen/gen/aiw"
 	"github.com/stretchr/testify/assert"
@@ -22,29 +23,29 @@ import (
 
 // ─── Mock stores ──────────────────────────────────────────────────────────
 
-// nssaaMockStore implements nssaa.AuthCtxStore.
+// nssaaMockStore implements nssaa.NssaaStore (alias of storage.NssaaStore).
 type nssaaMockStore struct {
-	data    map[string]*nssaa.AuthCtx
+	data    map[string]*storage.NssaaSession
 	loadErr error
 	saveErr error
 	delErr  error
 }
 
 func newNssaaMockStore() *nssaaMockStore {
-	return &nssaaMockStore{data: make(map[string]*nssaa.AuthCtx)}
+	return &nssaaMockStore{data: make(map[string]*storage.NssaaSession)}
 }
 
-func (s *nssaaMockStore) Load(_ context.Context, id string) (*nssaa.AuthCtx, error) {
+func (s *nssaaMockStore) Load(_ context.Context, id string) (*storage.NssaaSession, error) {
 	if s.loadErr != nil {
 		return nil, s.loadErr
 	}
 	if ctx, ok := s.data[id]; ok {
 		return ctx, nil
 	}
-	return nil, nssaa.ErrNotFound
+	return nil, storage.ErrSessionNotFound
 }
 
-func (s *nssaaMockStore) Save(_ context.Context, ctx *nssaa.AuthCtx) error {
+func (s *nssaaMockStore) Save(_ context.Context, ctx *storage.NssaaSession) error {
 	if s.saveErr != nil {
 		return s.saveErr
 	}
@@ -62,29 +63,29 @@ func (s *nssaaMockStore) Delete(_ context.Context, id string) error {
 
 func (s *nssaaMockStore) Close() error { return nil }
 
-// aiwMockStore implements aiw.AuthContextStore.
+// aiwMockStore implements aiw.AiwStore (alias of storage.AiwStore).
 type aiwMockStore struct {
-	data    map[string]*aiw.AuthContext
+	data    map[string]*storage.AiwSession
 	loadErr error
 	saveErr error
 	delErr  error
 }
 
 func newAiwMockStore() *aiwMockStore {
-	return &aiwMockStore{data: make(map[string]*aiw.AuthContext)}
+	return &aiwMockStore{data: make(map[string]*storage.AiwSession)}
 }
 
-func (s *aiwMockStore) Load(_ context.Context, id string) (*aiw.AuthContext, error) {
+func (s *aiwMockStore) Load(_ context.Context, id string) (*storage.AiwSession, error) {
 	if s.loadErr != nil {
 		return nil, s.loadErr
 	}
 	if ctx, ok := s.data[id]; ok {
 		return ctx, nil
 	}
-	return nil, aiw.ErrNotFound
+	return nil, storage.ErrSessionNotFound
 }
 
-func (s *aiwMockStore) Save(_ context.Context, ctx *aiw.AuthContext) error {
+func (s *aiwMockStore) Save(_ context.Context, ctx *storage.AiwSession) error {
 	if s.saveErr != nil {
 		return s.saveErr
 	}
@@ -409,7 +410,7 @@ func TestTS29526_NSSAA_CreateSlice_EmptySnssai(t *testing.T) {
 func TestTS29526_NSSAA_ConfirmSlice_ValidConfirm(t *testing.T) {
 	t.Parallel()
 	store := newNssaaMockStore()
-	store.data["ctx-020"] = &nssaa.AuthCtx{
+	store.data["ctx-020"] = &storage.NssaaSession{
 		AuthCtxID: "ctx-020",
 		GPSI:      "520804600000001",
 		SnssaiSST: 1,
@@ -447,7 +448,7 @@ func TestTS29526_NSSAA_ConfirmSlice_SessionNotFound(t *testing.T) {
 func TestTS29526_NSSAA_ConfirmSlice_GPSIMismatch(t *testing.T) {
 	t.Parallel()
 	store := newNssaaMockStore()
-	store.data["ctx-022"] = &nssaa.AuthCtx{
+	store.data["ctx-022"] = &storage.NssaaSession{
 		AuthCtxID: "ctx-022",
 		GPSI:      "520804600000001",
 		SnssaiSST: 1,
@@ -468,7 +469,7 @@ func TestTS29526_NSSAA_ConfirmSlice_GPSIMismatch(t *testing.T) {
 func TestTS29526_NSSAA_ConfirmSlice_SnssaiMismatch(t *testing.T) {
 	t.Parallel()
 	store := newNssaaMockStore()
-	store.data["ctx-023"] = &nssaa.AuthCtx{
+	store.data["ctx-023"] = &storage.NssaaSession{
 		AuthCtxID: "ctx-023",
 		GPSI:      "520804600000001",
 		SnssaiSST: 1,
@@ -491,7 +492,7 @@ func TestTS29526_NSSAA_ConfirmSlice_SnssaiMismatch(t *testing.T) {
 func TestTS29526_NSSAA_ConfirmSlice_MissingEapMessage(t *testing.T) {
 	t.Parallel()
 	store := newNssaaMockStore()
-	store.data["ctx-024"] = &nssaa.AuthCtx{AuthCtxID: "ctx-024", GPSI: "520804600000001", SnssaiSST: 1}
+	store.data["ctx-024"] = &storage.NssaaSession{AuthCtxID: "ctx-024", GPSI: "520804600000001", SnssaiSST: 1}
 	h := nssaaHandlerFromStore(store, nssaa.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
@@ -508,7 +509,7 @@ func TestTS29526_NSSAA_ConfirmSlice_MissingEapMessage(t *testing.T) {
 func TestTS29526_NSSAA_ConfirmSlice_InvalidBase64EapMessage(t *testing.T) {
 	t.Parallel()
 	store := newNssaaMockStore()
-	store.data["ctx-025"] = &nssaa.AuthCtx{AuthCtxID: "ctx-025", GPSI: "520804600000001", SnssaiSST: 1}
+	store.data["ctx-025"] = &storage.NssaaSession{AuthCtxID: "ctx-025", GPSI: "520804600000001", SnssaiSST: 1}
 	h := nssaaHandlerFromStore(store, nssaa.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
@@ -526,7 +527,7 @@ func TestTS29526_NSSAA_ConfirmSlice_InvalidBase64EapMessage(t *testing.T) {
 func TestTS29526_NSSAA_ConfirmSlice_SessionAlreadyCompleted(t *testing.T) {
 	t.Parallel()
 	store := newNssaaMockStore()
-	store.data["ctx-026"] = &nssaa.AuthCtx{
+	store.data["ctx-026"] = &storage.NssaaSession{
 		AuthCtxID: "ctx-026",
 		GPSI:      "520804600000001",
 		SnssaiSST: 1,
@@ -582,7 +583,7 @@ func TestTS29526_NSSAA_ConfirmSlice_RedisUnavailable(t *testing.T) {
 func TestTS29526_NSSAA_ConfirmSlice_AAAGWUnreachable(t *testing.T) {
 	t.Parallel()
 	store := newNssaaMockStore()
-	store.data["ctx-029"] = &nssaa.AuthCtx{
+	store.data["ctx-029"] = &storage.NssaaSession{
 		AuthCtxID: "ctx-029",
 		GPSI:      "520804600000001",
 		SnssaiSST: 1,
@@ -609,7 +610,7 @@ func TestTS29526_NSSAA_ConfirmSlice_AAAGWUnreachable(t *testing.T) {
 func TestTS29526_NSSAA_GetSlice_SessionExists(t *testing.T) {
 	t.Parallel()
 	store := newNssaaMockStore()
-	store.data["ctx-030"] = &nssaa.AuthCtx{
+	store.data["ctx-030"] = &storage.NssaaSession{
 		AuthCtxID: "ctx-030",
 		GPSI:      "520804600000001",
 		SnssaiSST: 1,
@@ -675,7 +676,7 @@ func TestTS29526_AIW_BasicAuthFlow(t *testing.T) {
 func TestTS29526_AIW_MSKReturnedOnSuccess(t *testing.T) {
 	t.Parallel()
 	store := newAiwMockStore()
-	store.data["aiw-02"] = &aiw.AuthContext{AuthCtxID: "aiw-02", Supi: "imsi-208046000000001"}
+	store.data["aiw-02"] = &storage.AiwSession{AuthCtxID: "aiw-02", Supi: "imsi-208046000000001"}
 	h := aiwHandlerFromStore(store, aiw.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
@@ -693,7 +694,7 @@ func TestTS29526_AIW_MSKReturnedOnSuccess(t *testing.T) {
 func TestTS29526_AIW_PVSInfoReturned(t *testing.T) {
 	t.Parallel()
 	store := newAiwMockStore()
-	store.data["aiw-03"] = &aiw.AuthContext{AuthCtxID: "aiw-03", Supi: "imsi-208046000000001"}
+	store.data["aiw-03"] = &storage.AiwSession{AuthCtxID: "aiw-03", Supi: "imsi-208046000000001"}
 	h := aiwHandlerFromStore(store, aiw.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
@@ -710,7 +711,7 @@ func TestTS29526_AIW_PVSInfoReturned(t *testing.T) {
 func TestTS29526_AIW_EAPFailureInBody(t *testing.T) {
 	t.Parallel()
 	store := newAiwMockStore()
-	store.data["aiw-04"] = &aiw.AuthContext{AuthCtxID: "aiw-04", Supi: "imsi-208046000000001"}
+	store.data["aiw-04"] = &storage.AiwSession{AuthCtxID: "aiw-04", Supi: "imsi-208046000000001"}
 	h := aiwHandlerFromStore(store, aiw.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
@@ -766,7 +767,7 @@ func TestTS29526_AIW_AAA_NotConfigured(t *testing.T) {
 func TestTS29526_AIW_MultiRoundChallenge(t *testing.T) {
 	t.Parallel()
 	store := newAiwMockStore()
-	store.data["aiw-07"] = &aiw.AuthContext{AuthCtxID: "aiw-07", Supi: "imsi-208046000000001"}
+	store.data["aiw-07"] = &storage.AiwSession{AuthCtxID: "aiw-07", Supi: "imsi-208046000000001"}
 	h := aiwHandlerFromStore(store, aiw.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{

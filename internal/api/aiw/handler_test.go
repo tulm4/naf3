@@ -15,33 +15,34 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/operator/nssAAF/internal/api/common"
 	rediscache "github.com/operator/nssAAF/internal/cache/redis"
+	"github.com/operator/nssAAF/internal/storage"
 	aiwnats "github.com/operator/nssAAF/oapi-gen/gen/aiw"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 type mockStore struct {
-	data      map[string]*AuthContext
+	data      map[string]*storage.AiwSession
 	loadErr   error
 	saveErr   error
 	deleteErr error
 }
 
 func newMockStore() *mockStore {
-	return &mockStore{data: make(map[string]*AuthContext)}
+	return &mockStore{data: make(map[string]*storage.AiwSession)}
 }
 
-func (m *mockStore) Load(_ context.Context, id string) (*AuthContext, error) {
+func (m *mockStore) Load(_ context.Context, id string) (*storage.AiwSession, error) {
 	if m.loadErr != nil {
 		return nil, m.loadErr
 	}
 	if ctx, ok := m.data[id]; ok {
 		return ctx, nil
 	}
-	return nil, ErrNotFound
+	return nil, storage.ErrSessionNotFound
 }
 
-func (m *mockStore) Save(_ context.Context, ctx *AuthContext) error {
+func (m *mockStore) Save(_ context.Context, ctx *storage.AiwSession) error {
 	if m.saveErr != nil {
 		return m.saveErr
 	}
@@ -181,7 +182,7 @@ func TestCreateAuthenticationContext_InvalidJSON(t *testing.T) {
 
 func TestConfirmAuthentication_OK(t *testing.T) {
 	store := newMockStore()
-	store.data["auth-ctx-001"] = &AuthContext{
+	store.data["auth-ctx-001"] = &storage.AiwSession{
 		AuthCtxID: "auth-ctx-001",
 		Supi:      "imsi-208046000000001",
 	}
@@ -223,7 +224,7 @@ func TestConfirmAuthentication_NotFound(t *testing.T) {
 
 func TestConfirmAuthentication_SupiMismatch(t *testing.T) {
 	store := newMockStore()
-	store.data["auth-ctx-002"] = &AuthContext{
+	store.data["auth-ctx-002"] = &storage.AiwSession{
 		AuthCtxID: "auth-ctx-002",
 		Supi:      "imsi-208046000000001",
 	}
@@ -258,7 +259,7 @@ func TestConfirmAuthentication_InvalidSupi(t *testing.T) {
 
 func TestConfirmAuthentication_MissingEapMessage(t *testing.T) {
 	store := newMockStore()
-	store.data["auth-ctx-003"] = &AuthContext{
+	store.data["auth-ctx-003"] = &storage.AiwSession{
 		AuthCtxID: "auth-ctx-003",
 		Supi:      "imsi-208046000000001",
 	}
@@ -277,7 +278,7 @@ func TestConfirmAuthentication_MissingEapMessage(t *testing.T) {
 
 func TestConfirmAuthentication_EmptyEapMessage(t *testing.T) {
 	store := newMockStore()
-	store.data["auth-ctx-004"] = &AuthContext{
+	store.data["auth-ctx-004"] = &storage.AiwSession{
 		AuthCtxID: "auth-ctx-004",
 		Supi:      "imsi-208046000000001",
 	}
@@ -312,7 +313,7 @@ func TestConfirmAuthentication_StoreLoadError(t *testing.T) {
 
 func TestConfirmAuthentication_InvalidJSON(t *testing.T) {
 	store := newMockStore()
-	store.data["auth-ctx-005"] = &AuthContext{
+	store.data["auth-ctx-005"] = &storage.AiwSession{
 		AuthCtxID: "auth-ctx-005",
 		Supi:      "imsi-208046000000001",
 	}
@@ -335,7 +336,7 @@ func TestInMemoryStore(t *testing.T) {
 	ctx := context.Background()
 	store := NewInMemoryStore()
 
-	authCtx := &AuthContext{AuthCtxID: "id-001", Supi: "imsi-208046000000001"}
+	authCtx := &storage.AiwSession{AuthCtxID: "id-001", Supi: "imsi-208046000000001"}
 	err := store.Save(ctx, authCtx)
 	require.NoError(t, err)
 
@@ -344,12 +345,12 @@ func TestInMemoryStore(t *testing.T) {
 	assert.Equal(t, "imsi-208046000000001", loaded.Supi)
 
 	_, err = store.Load(ctx, "nonexistent")
-	assert.ErrorIs(t, err, ErrNotFound)
+	assert.ErrorIs(t, err, storage.ErrSessionNotFound)
 
 	err = store.Delete(ctx, "id-001")
 	require.NoError(t, err)
 	_, err = store.Load(ctx, "id-001")
-	assert.ErrorIs(t, err, ErrNotFound)
+	assert.ErrorIs(t, err, storage.ErrSessionNotFound)
 
 	assert.NoError(t, store.Close())
 }
@@ -444,7 +445,7 @@ func TestAIWHandler_Confirm_RateLimit_Limited_Returns429(t *testing.T) {
 
 	// Pre-seed the store with an auth context.
 	store := newMockStore()
-	store.data["auth-ctx-100"] = &AuthContext{
+	store.data["auth-ctx-100"] = &storage.AiwSession{
 		AuthCtxID: "auth-ctx-100",
 		Supi:      "imsi-208046000000001",
 	}

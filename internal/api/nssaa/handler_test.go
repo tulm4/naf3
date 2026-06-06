@@ -15,33 +15,34 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/operator/nssAAF/internal/api/common"
 	"github.com/operator/nssAAF/internal/cache/redis"
+	"github.com/operator/nssAAF/internal/storage"
 	nssaanats "github.com/operator/nssAAF/oapi-gen/gen/nssaa"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 type mockStore struct {
-	data      map[string]*AuthCtx
+	data      map[string]*storage.NssaaSession
 	loadErr   error
 	saveErr   error
 	deleteErr error
 }
 
 func newMockStore() *mockStore {
-	return &mockStore{data: make(map[string]*AuthCtx)}
+	return &mockStore{data: make(map[string]*storage.NssaaSession)}
 }
 
-func (m *mockStore) Load(_ context.Context, id string) (*AuthCtx, error) {
+func (m *mockStore) Load(_ context.Context, id string) (*storage.NssaaSession, error) {
 	if m.loadErr != nil {
 		return nil, m.loadErr
 	}
 	if ctx, ok := m.data[id]; ok {
 		return ctx, nil
 	}
-	return nil, ErrNotFound
+	return nil, storage.ErrSessionNotFound
 }
 
-func (m *mockStore) Save(_ context.Context, ctx *AuthCtx) error {
+func (m *mockStore) Save(_ context.Context, ctx *storage.NssaaSession) error {
 	if m.saveErr != nil {
 		return m.saveErr
 	}
@@ -61,32 +62,32 @@ func (m *mockStore) Close() error {
 	return nil
 }
 
-// InMemoryStore is a simple in-memory implementation of AuthCtxStore.
+// InMemoryStore is a simple in-memory implementation of NssaaStore.
 // Used for testing. Phase 3 replaces this with Redis-based storage.
 type InMemoryStore struct {
-	data map[string]*AuthCtx
+	data map[string]*storage.NssaaSession
 }
 
 // NewInMemoryStore creates a new in-memory store.
 func NewInMemoryStore() *InMemoryStore {
-	return &InMemoryStore{data: make(map[string]*AuthCtx)}
+	return &InMemoryStore{data: make(map[string]*storage.NssaaSession)}
 }
 
-// Load implements AuthCtxStore.
-func (s *InMemoryStore) Load(_ context.Context, id string) (*AuthCtx, error) {
+// Load implements NssaaStore.
+func (s *InMemoryStore) Load(_ context.Context, id string) (*storage.NssaaSession, error) {
 	if ctx, ok := s.data[id]; ok {
 		return ctx, nil
 	}
-	return nil, ErrNotFound
+	return nil, storage.ErrSessionNotFound
 }
 
-// Save implements AuthCtxStore.
-func (s *InMemoryStore) Save(_ context.Context, ctx *AuthCtx) error {
+// Save implements NssaaStore.
+func (s *InMemoryStore) Save(_ context.Context, ctx *storage.NssaaSession) error {
 	s.data[ctx.AuthCtxID] = ctx
 	return nil
 }
 
-// Delete implements AuthCtxStore.
+// Delete implements NssaaStore.
 func (s *InMemoryStore) Delete(_ context.Context, id string) error {
 	delete(s.data, id)
 	return nil
@@ -148,10 +149,11 @@ func TestCreateSliceAuthenticationContext_OK(t *testing.T) {
 	assert.NotNil(t, resp.EapMessage)
 
 	require.Len(t, store.data, 1)
-	for _, ctx := range store.data {
-		assert.Equal(t, "520804600000001", ctx.GPSI)
-		assert.Equal(t, uint8(1), ctx.SnssaiSST)
-		assert.Equal(t, "000001", ctx.SnssaiSD)
+	for _, session := range store.data {
+		assert.Equal(t, "520804600000001", session.GPSI)
+		assert.Equal(t, uint8(1), session.SnssaiSST)
+		assert.Equal(t, "000001", session.SnssaiSD)
+		assert.Equal(t, "PENDING", session.Status)
 	}
 }
 
@@ -300,7 +302,7 @@ func TestCreateSliceAuthenticationContext_GPSIWithDash(t *testing.T) {
 
 func TestConfirmSliceAuthentication_OK(t *testing.T) {
 	store := newMockStore()
-	store.data["test-auth-ctx-001"] = &AuthCtx{
+	store.data["test-auth-ctx-001"] = &storage.NssaaSession{
 		AuthCtxID: "test-auth-ctx-001",
 		GPSI:      "520804600000001",
 		SnssaiSST: 1,
@@ -348,7 +350,7 @@ func TestConfirmSliceAuthentication_NotFound(t *testing.T) {
 
 func TestConfirmSliceAuthentication_GPSIMismatch(t *testing.T) {
 	store := newMockStore()
-	store.data["test-auth-ctx-002"] = &AuthCtx{
+	store.data["test-auth-ctx-002"] = &storage.NssaaSession{
 		AuthCtxID: "test-auth-ctx-002",
 		GPSI:      "520804600000001",
 		SnssaiSST: 1,
@@ -389,7 +391,7 @@ func TestConfirmSliceAuthentication_InvalidGPSI(t *testing.T) {
 
 func TestConfirmSliceAuthentication_MissingEapMessage(t *testing.T) {
 	store := newMockStore()
-	store.data["ctx-003"] = &AuthCtx{AuthCtxID: "ctx-003", GPSI: "520804600000001"}
+	store.data["ctx-003"] = &storage.NssaaSession{AuthCtxID: "ctx-003", GPSI: "520804600000001"}
 	h := NewHandler(store, WithAPIRoot("https://nssAAF.example.com"))
 
 	body := map[string]interface{}{
@@ -404,7 +406,7 @@ func TestConfirmSliceAuthentication_MissingEapMessage(t *testing.T) {
 
 func TestConfirmSliceAuthentication_EmptyEapMessage(t *testing.T) {
 	store := newMockStore()
-	store.data["ctx-004"] = &AuthCtx{AuthCtxID: "ctx-004", GPSI: "520804600000001"}
+	store.data["ctx-004"] = &storage.NssaaSession{AuthCtxID: "ctx-004", GPSI: "520804600000001"}
 	h := NewHandler(store, WithAPIRoot("https://nssAAF.example.com"))
 
 	body := map[string]interface{}{
@@ -436,7 +438,7 @@ func TestConfirmSliceAuthentication_StoreLoadError(t *testing.T) {
 
 func TestConfirmSliceAuthentication_InvalidJSON(t *testing.T) {
 	store := newMockStore()
-	store.data["ctx-005"] = &AuthCtx{AuthCtxID: "ctx-005", GPSI: "520804600000001"}
+	store.data["ctx-005"] = &storage.NssaaSession{AuthCtxID: "ctx-005", GPSI: "520804600000001"}
 	h := NewHandler(store, WithAPIRoot("https://nssAAF.example.com"))
 
 	req := httptest.NewRequest(http.MethodPut,
@@ -455,7 +457,7 @@ func TestConfirmSliceAuthentication_InvalidJSON(t *testing.T) {
 func TestInMemoryStore(t *testing.T) {
 	store := NewInMemoryStore()
 
-	ctx := &AuthCtx{AuthCtxID: "id-001", GPSI: "520804600000001"}
+	ctx := &storage.NssaaSession{AuthCtxID: "id-001", GPSI: "520804600000001"}
 	require.NoError(t, store.Save(context.Background(), ctx))
 
 	loaded, err := store.Load(context.Background(), "id-001")
@@ -463,11 +465,11 @@ func TestInMemoryStore(t *testing.T) {
 	assert.Equal(t, "520804600000001", loaded.GPSI)
 
 	_, err = store.Load(context.Background(), "nonexistent")
-	assert.ErrorIs(t, err, ErrNotFound)
+	assert.ErrorIs(t, err, storage.ErrSessionNotFound)
 
 	require.NoError(t, store.Delete(context.Background(), "id-001"))
 	_, err = store.Load(context.Background(), "id-001")
-	assert.ErrorIs(t, err, ErrNotFound)
+	assert.ErrorIs(t, err, storage.ErrSessionNotFound)
 
 	assert.NoError(t, store.Close())
 }
@@ -554,7 +556,7 @@ func TestNSSAAHandler_RateLimit_ConfirmSliceAuthentication_Returns429(t *testing
 	require.False(t, allowed, "second request should be denied")
 
 	store := newMockStore()
-	store.data["ctx-001"] = &AuthCtx{
+	store.data["ctx-001"] = &storage.NssaaSession{
 		AuthCtxID: "ctx-001",
 		GPSI:      "520804600000001",
 		SnssaiSST: 1,
@@ -814,7 +816,7 @@ func TestNSSAAHandler_Confirm_RateLimit_Limited_Returns429(t *testing.T) {
 	require.False(t, allowed, "auth-context limiter should be exhausted")
 
 	store := newMockStore()
-	store.data["ctx-confirm-test"] = &AuthCtx{
+	store.data["ctx-confirm-test"] = &storage.NssaaSession{
 		AuthCtxID: "ctx-confirm-test",
 		GPSI:      "520804600000001",
 		SnssaiSST: 1,

@@ -1,0 +1,317 @@
+---
+description: NSSAAF implementation methodology — how to write code from design docs
+alwaysApply: true
+---
+## Code Analysis (Mandatory)
+
+**Before implementing or modifying any code, build a complete picture using code-review-graph MCP.** See `.cursor/rules/mcp-master-rules.mdc` for tool documentation.
+
+**Never use grep, Grep, Glob, or manual file reading for navigation** — the graph tools provide structural context that manual search cannot.
+
+| Situation | Tool | When to Use |
+|-----------|------|-------------|
+| Find types/functions/structs | `semantic_search_nodes_tool` | First step for any lookup |
+| Trace call chains | `query_graph_tool` (callers_of/callees_of) | Before modifying behavior |
+| Find test coverage | `query_graph_tool` (tests_for) | Before writing tests or refactoring |
+| Understand file dependencies | `query_graph_tool` (imports_of/importers_of) | Before changing interfaces |
+| Get architecture overview | `get_architecture_overview_tool` | New module exploration |
+| Analyze impact of changes | `detect_changes_tool` | At session start or after git changes |
+
+**Analysis Workflow:**
+
+```
+1. semantic_search_nodes_tool → find the target type/function
+2. query_graph_tool (callers_of) → who uses this? (impact analysis)
+3. query_graph_tool (tests_for) → what tests exist? (coverage gaps)
+4. query_graph_tool (file_summary) → what else is in this file?
+5. Read specific code sections only after graph analysis
+```
+
+**Fallback Rule:** Only use Grep/Glob/Read when MCP returns 0 results (graph DB not yet updated).
+
+# NSSAAF Implementation Methodology
+
+## Golden Rule: Always Start with GSD State
+
+When implementing any NSSAAF code, follow this reading order:
+
+```
+1. ALWAYS read: .planning/STATE.md           ← Start here (50 lines)
+2. ALWAYS read: .planning/PROJECT.md         ← Project context
+3. THEN read:   docs/quickref.md             ← 5G domain quick reference
+4. THEN read:   .planning/REQUIREMENTS.md    ← Active requirements
+5. THEN read:   docs/roadmap/PHASE_*.md       ← Relevant phase plan
+6. THEN read:   docs/design/XX_*.md          ← Relevant design doc
+7. THEN write code
+```
+
+For the current phase (Phase 4), also read:
+```
+8. .planning/phases/04-NFIntegration_Observability/04-CONTEXT.md
+   ← Captured implementation decisions
+```
+
+## Context Budget
+
+NSSAAF has 20 design docs (~11,000 lines). Load no more than **200 lines at a time.**
+
+| What you need | Read this | Lines |
+|---|---|---|
+| Current position | `.planning/STATE.md` | 50 |
+| Project overview | `.planning/PROJECT.md` | 120 |
+| Active requirements | `.planning/REQUIREMENTS.md` | 150 |
+| Phase overview | `docs/roadmap/PHASE_*.md` | 150 |
+| Design detail | `docs/design/02_nssaa_api.md` | 574 |
+| Quick reference | `docs/roadmap/module_index.md` | 50 |
+
+When orchestrating subagents, read only frontmatter/summaries for phases outside the current active work. See `references/universal-anti-patterns.md` for full context budget rules.
+
+## Module to Design Doc Mapping
+
+| Module | Read first | Then read |
+|--------|-----------|-----------|
+| `internal/types/` | `docs/quickref.md` | `docs/design/04_data_model.md` |
+| `internal/api/nssaa/` | `docs/quickref.md` | `docs/design/02_nssaa_api.md` |
+| `internal/api/aiw/` | `docs/quickref.md` | `docs/design/03_aiw_api.md` |
+| `internal/eap/` | `docs/quickref.md` | `docs/design/06_eap_engine.md` |
+| `internal/radius/` | `docs/quickref.md` | `docs/design/07_radius_client.md` |
+| `internal/diameter/` | `docs/quickref.md` | `docs/design/08_diameter_client.md` |
+| `internal/storage/` | `docs/quickref.md` | `docs/design/11_database_ha.md` |
+| `internal/cache/` | `docs/quickref.md` | `docs/design/12_redis_ha.md` |
+| `internal/nrf/` | `docs/quickref.md` | `docs/design/05_nf_profile.md` |
+| `internal/udm/` | `docs/quickref.md` | `docs/design/22_udm_integration.md` |
+| `internal/amf/` | `docs/quickref.md` | `docs/design/21_amf_integration.md` |
+| `internal/ausf/` | `docs/quickref.md` | `docs/design/23_ausf_integration.md` |
+| `internal/resilience/` | `docs/quickref.md` | `docs/design/10_ha_architecture.md` |
+| `internal/metrics/` | `docs/quickref.md` | `docs/design/19_observability.md` |
+| `internal/logging/` | `docs/quickref.md` | `docs/design/19_observability.md` |
+| `internal/tracing/` | `docs/quickref.md` | `docs/design/19_observability.md` |
+
+## GSD Workflow Integration
+
+### Per-Phase Workflow
+
+For every phase, follow the GSD workflow in order:
+
+```
+/gsd-discuss-phase <n>  →  /gsd-plan-phase <n>  →  /gsd-execute-phase <n>  →  /gsd-transition
+```
+
+Do not skip the discuss-phase — it captures decisions in `.planning/phases/<phase>/NN-CONTEXT.md` that inform planning and execution.
+
+### Discuss-Phase Outputs
+
+After `/gsd-discuss-phase`, these files must exist:
+
+| File | Purpose |
+|------|---------|
+| `.planning/phases/NN-Name/NN-CONTEXT.md` | Captured decisions, boundaries, spec references |
+| `.planning/phases/NN-Name/NN-DISCUSSION-LOG.md` | Audit trail of Q&A choices |
+
+### Plan-Phase Outputs
+
+After `/gsd-plan-phase`, these files must exist:
+
+| File | Purpose |
+|------|---------|
+| `.planning/phases/NN-Name/NN-PLAN.md` | Wave-based task breakdown |
+| `.planning/phases/NN-Name/NN-PLAN-CHECK.md` | Blockers and warnings from plan-checker |
+
+If `NN-PLAN-CHECK.md` has BLOCKER items, resolve them before executing.
+
+### Transition Outputs
+
+After `/gsd-transition`, these files must be updated:
+
+| File | Action |
+|------|--------|
+| `.planning/STATE.md` | Refresh project reference, update phase progress |
+| `.planning/PROJECT.md` | Move REQs: Active → Validated or Out of Scope |
+| `docs/roadmap/README.md` | Mark phase status: Pending → Done |
+| `docs/roadmap/module_index.md` | Update module status: TBD → READY |
+
+## Code Template
+
+> **Skill:** See `.cursor/skills/golang-patterns/SKILL.md` for idiomatic Go patterns, error handling, concurrency, interface design, and struct design to apply alongside this template.
+
+### API Handler Template
+
+```go
+// [Package description]
+// Spec: [TS section]
+package [module]
+
+// [Type description]
+// Source: TS XX.XXX §Y.Z
+type [Type] struct {
+    // Field documentation
+}
+
+// Validate checks if the type is valid.
+// Spec: TS XX.XXX §Y.Z
+func (t *[Type]) Validate() error {
+    // Validation logic
+}
+
+// Handler for [operation].
+// Spec: TS 29.526 §7.2.X
+func (h *Handler) [Method](w http.ResponseWriter, r *http.Request) {
+    // 1. Parse request
+    // 2. Validate
+    // 3. [Business logic]
+    // 4. Return response
+}
+```
+
+## Per-Module Validation Checklist
+
+### Types
+- [ ] GPSI regex: `^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$`
+- [ ] SUPI regex: `^imsi-[0-9]{5,15}$`
+- [ ] Snssai SST: 0-255
+- [ ] Snssai SD: 6 hex chars
+
+### API Handlers
+- [ ] Request validation before processing
+- [ ] Error response: ProblemDetails (RFC 7807)
+- [ ] HTTP status: 201, 200, 400, 403, 404, 409, 410, 502, 503, 504
+- [ ] Location header on 201
+- [ ] X-Request-ID correlation
+
+### Storage
+- [ ] GPSI hashed in audit log
+- [ ] Session state encrypted
+- [ ] Monthly partitions
+- [ ] Redis TTL
+
+### Tests
+- [ ] Unit test for each public function
+- [ ] Validate error cases
+- [ ] Mock external dependencies
+
+> **Skill:** See `.cursor/skills/golang-testing/SKILL.md` for table-driven test patterns, interface-based mocking, golden files, benchmarks, and TDD workflow.
+
+## Critical Spec References
+
+| Need | Spec | Section |
+|------|------|---------|
+| API structure | TS 29.526 | §7.2, §7.3 |
+| Procedure flows | TS 23.502 | §4.2.9 |
+| Security | TS 33.501 | §5.13, §16.3-16.5 |
+| RADIUS | TS 29.561 | Ch.16 |
+| Diameter | TS 29.561 | Ch.17 |
+| Data types | TS 29.571 | §5.4.4.60-61 |
+| NF profile | TS 29.510 | §6 |
+| NRM | TS 28.541 | §5.3.145-148 |
+
+## Key Validation Rules
+
+```go
+// GPSI (required for NSSAA)
+// Per TS 29.571 §5.2.2, GPSI has 3 forms:
+// 1. MSISDN-based: msisdn-{5-15 digits}
+// 2. External Identifier: extid-{id}@{realm}
+// 3. Any other string (catch-all)
+gpsiRegex := regexp.MustCompile(`^(msisdn-[0-9]{5,15}|extid-[^@]+@[^@]+|.+)$`)
+
+// SUPI (used in AIW)
+supiRegex := regexp.MustCompile(`^imsi-[0-9]{5,15}$`)
+
+// Snssai
+// SST: 0-255
+// SD: 6 hex chars, optional
+
+// NssaaStatus
+// NOT_EXECUTED → PENDING → EAP_SUCCESS | EAP_FAILURE
+
+// Error codes
+// 400: Bad Request (invalid input)
+// 403: Forbidden (AAA rejects)
+// 404: Not Found (no AAA config)
+// 502: Bad Gateway (AAA unreachable)
+// 503: Service Unavailable (AAA overloaded)
+// 504: Gateway Timeout (AAA timeout)
+```
+
+## Anti-Patterns
+
+1. **Do not hardcode values** — use constants from `internal/types/`
+2. **Do not skip validation** — always validate GPSI, Snssai, etc.
+3. **Do not use magic numbers** — use constants from design docs
+4. **Do not ignore errors** — return proper ProblemDetails
+5. **Do not forget correlation ID** — use X-Request-ID header
+6. **Never invent API fields** not in TS 29.526
+7. **Never skip the NssaaStatus state machine** — PENDING is a required intermediate state
+8. **Never use generic error codes** — always use 3GPP ProblemDetails with `cause`
+
+## Roadmap Status Tracking
+
+After implementing code, **mandatory** — update the roadmap before committing.
+
+### Files to Update
+
+#### 1. `docs/roadmap/module_index.md`
+
+When a module is complete, update the **Status** column: `TBD` → `IN_PROGRESS` → `READY`
+
+```
+| `internal/api/nssaa/` | `docs/design/02_nssaa_api.md` | 1 | READY |
+```
+
+#### 2. `docs/roadmap/README.md`
+
+When a phase is complete, update the phase status icon:
+
+```
+| Phase 4: NF Integration | ✅ DONE | internal/nrf/, internal/udm/, ... |
+```
+
+Status icons:
+- `⏳ PENDING` — Not started
+- `🔄 IN_PROGRESS` — Being implemented
+- `✅ DONE` — Complete
+- `🚫 BLOCKED` — Blocked by dependency
+
+#### 3. Phase detail file (`docs/roadmap/PHASE_*.md`)
+
+Check off validation items:
+
+```markdown
+## Validation Checklist
+
+- [x] `go build ./...` compiles without errors
+- [x] `go test ./...` passes
+- [x] `golangci-lint run ./...` passes
+```
+
+#### 4. GSD State Files
+
+After completing a phase, also update GSD state:
+
+```
+5. Update .planning/STATE.md → Phase progress
+6. Update .planning/PROJECT.md → Move REQs from Active to Validated
+7. Update .planning/REQUIREMENTS.md → Check off completed requirements
+```
+
+### Tracking Checklist
+
+Before committing code, confirm all of the following:
+
+- [ ] `docs/roadmap/module_index.md` — Module Status updated
+- [ ] `docs/roadmap/README.md` — Phase Status updated (if phase complete)
+- [ ] `docs/roadmap/PHASE_*.md` — Deliverable checklist checked off
+- [ ] `.planning/STATE.md` — Phase progress updated
+- [ ] `.planning/PROJECT.md` — REQs moved to Validated (if phase complete)
+- [ ] Commit message uses correct prefix: `feat/`, `fix/`, `refactor/`, `docs/`
+
+### Anti-Patterns
+
+1. **Never leave `TBD`** if module code exists
+2. **Never commit code** without updating the roadmap
+3. **Never mark phase `⏳ PENDING`** if modules inside are `READY`
+4. **Never delete checklist items** — only check `[x]` or `[ ]`
+5. **Never skip lint/test** before marking a module READY
+6. **Never skip the GSD discuss-phase** — decisions must be captured in `NN-CONTEXT.md`
+
+

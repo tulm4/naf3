@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/operator/nssAAF/internal/api/common"
@@ -22,6 +23,7 @@ import (
 	"github.com/operator/nssAAF/internal/eap"
 	"github.com/operator/nssAAF/internal/logging"
 	"github.com/operator/nssAAF/internal/metrics"
+	"github.com/operator/nssAAF/internal/storage"
 	"github.com/operator/nssAAF/internal/udm"
 	nssaanats "github.com/operator/nssAAF/oapi-gen/gen/nssaa"
 	"github.com/operator/nssAAF/oapi-gen/gen/specs"
@@ -56,6 +58,26 @@ type AuthCtxStore interface {
 // ErrNotFound is returned when an authentication context is not found.
 var ErrNotFound = errors.New("auth context not found")
 
+// NssaaStore is the interface for NSSAA session persistence.
+// Aliased from storage.NssaaStore for API convenience.
+type NssaaStore = storage.NssaaStore
+
+// authCtxToNssaaSession converts nssaa.AuthCtx → storage.NssaaSession.
+func authCtxToNssaaSession(a *AuthCtx) *storage.NssaaSession {
+	return &storage.NssaaSession{
+		AuthCtxID:   a.AuthCtxID,
+		GPSI:        a.GPSI,
+		SnssaiSST:   a.SnssaiSST,
+		SnssaiSD:    a.SnssaiSD,
+		AmfInstance: a.AmfInstance,
+		ReauthURI:   a.ReauthURI,
+		RevocURI:    a.RevocURI,
+		EapPayload:  a.EapPayload,
+		Status:      "PENDING",
+		ExpiresAt:   time.Now().Add(5 * time.Minute),
+	}
+}
+
 // Handler implements nssaanats.ServerInterface.
 // It receives HTTP requests validated by the oapi-codegen router and
 // delegates to the business logic layer.
@@ -67,10 +89,10 @@ var ErrNotFound = errors.New("auth context not found")
 //     RL-POLICY-AUTHCTX: Each authentication session is limited independently.
 //   - All Redis errors: fail-open, request proceeds. RL-POLICY-FAIL-OPEN.
 type Handler struct {
-	store         AuthCtxStore
-	aaa           AAARouter
-	apiRoot       string
-	nrfClient     interface {
+	store       NssaaStore
+	aaa         AAARouter
+	apiRoot     string
+	nrfClient   interface {
 		IsRegistered() bool
 	}
 	udmClient *udm.Client
@@ -121,7 +143,7 @@ func WithAMFRateLimiter(rl *redis.RateLimiter) HandlerOption {
 }
 
 // NewHandler creates a new NSSAA handler.
-func NewHandler(store AuthCtxStore, opts ...HandlerOption) *Handler {
+func NewHandler(store NssaaStore, opts ...HandlerOption) *Handler {
 	h := &Handler{store: store}
 	for _, opt := range opts {
 		opt(h)
@@ -241,7 +263,9 @@ func (h *Handler) CreateSliceAuthenticationContext(w http.ResponseWriter, r *htt
 		EapPayload:  []byte(*body.EapIdRsp),
 	}
 
-	if err := h.store.Save(r.Context(), authCtx); err != nil {
+	// Convert API type to domain type before saving.
+	session := authCtxToNssaaSession(authCtx)
+	if err := h.store.Save(r.Context(), session); err != nil {
 		common.WriteProblem(w, common.InternalServerProblem(
 			fmt.Sprintf("failed to create auth context: %s", err)))
 		return
@@ -343,9 +367,9 @@ func (h *Handler) ConfirmSliceAuthentication(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	authCtx, err := h.store.Load(r.Context(), authCtxId)
+	domSession, err := h.store.Load(r.Context(), authCtxId)
 	if err != nil {
-		if errors.Is(err, ErrNotFound) {
+		if errors.Is(err, storage.ErrSessionNotFound) {
 			common.WriteProblem(w, common.NotFoundProblem(
 				fmt.Sprintf("slice authentication context %q not found", authCtxId)))
 			return
@@ -355,7 +379,7 @@ func (h *Handler) ConfirmSliceAuthentication(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if string(body.Gpsi) != authCtx.GPSI {
+	if string(body.Gpsi) != domSession.GPSI {
 		common.WriteProblem(w, common.ValidationProblem("gpsi",
 			"GPSI does not match the authenticated GPSI for this session"))
 		return
@@ -363,7 +387,7 @@ func (h *Handler) ConfirmSliceAuthentication(w http.ResponseWriter, r *http.Requ
 
 	// Validate S-NSSAI matches the original session (TS 29.526 §7.2.3).
 	// The AMF sends the same S-NSSAI used during CreateSession.
-	if authCtx.SnssaiSST != body.Snssai.Sst || authCtx.SnssaiSD != body.Snssai.Sd {
+	if domSession.SnssaiSST != body.Snssai.Sst || domSession.SnssaiSD != body.Snssai.Sd {
 		common.WriteProblem(w, common.ValidationProblem("snssai",
 			"S-NSSAI does not match the original session"))
 		return
@@ -372,8 +396,8 @@ func (h *Handler) ConfirmSliceAuthentication(w http.ResponseWriter, r *http.Requ
 	eapPayload := []byte(*body.EapMessage)
 
 	// Store the Phase 2 EAP payload so it survives across round-trips.
-	authCtx.EapPayload = eapPayload
-	if err := h.store.Save(r.Context(), authCtx); err != nil {
+	domSession.EapPayload = eapPayload
+	if err := h.store.Save(r.Context(), domSession); err != nil {
 		common.WriteProblem(w, common.InternalServerProblem(
 			fmt.Sprintf("failed to update auth context: %s", err)))
 		return
