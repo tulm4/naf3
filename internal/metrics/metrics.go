@@ -189,11 +189,17 @@ var (
 		Help: "Total DLQ re-enqueue failures after internal retries exhausted",
 	})
 
-	// RateLimitRequests tracks rate-limited requests by handler.
+	// RateLimitRequests tracks rate-limited requests by handler for backward compatibility.
 	RateLimitRequests = newCounterVec(prometheus.CounterOpts{
 		Name: "nssAAF_ratelimit_requests_total",
 		Help: "Total requests rejected by rate limiter",
 	}, []string{"handler", "result"})
+
+	// RateLimitDecisionRequests tracks rate-limit decisions by service, scope, and result.
+	RateLimitDecisionRequests = newCounterVec(prometheus.CounterOpts{
+		Name: "nssAAF_ratelimit_decisions_total",
+		Help: "Total rate-limit decisions by service, scope, and result",
+	}, []string{"service", "scope", "result"})
 
 	// HTTPClientRequestDuration tracks internal HTTP client request latency.
 	HTTPClientRequestDuration = newHistogramVec(prometheus.HistogramOpts{
