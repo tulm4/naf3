@@ -20,6 +20,7 @@ import (
 	"github.com/operator/nssAAF/internal/api/common"
 	"github.com/operator/nssAAF/internal/cache/redis"
 	"github.com/operator/nssAAF/internal/eap"
+	"github.com/operator/nssAAF/internal/logging"
 	"github.com/operator/nssAAF/internal/metrics"
 	"github.com/operator/nssAAF/internal/udm"
 	nssaanats "github.com/operator/nssAAF/oapi-gen/gen/nssaa"
@@ -58,14 +59,28 @@ var ErrNotFound = errors.New("auth context not found")
 // Handler implements nssaanats.ServerInterface.
 // It receives HTTP requests validated by the oapi-codegen router and
 // delegates to the business logic layer.
+//
+// Rate-limit policy (Rate limit gaps implementation plan, Task 3):
+//   - Create path: AMF-scoped limiter using PerAmfPerSec (1-second window).
+//     RL-POLICY-AMF: Each AMF instance is limited independently.
+//   - Confirm path: Auth-context-scoped limiter using the per-minute policy.
+//     RL-POLICY-AUTHCTX: Each authentication session is limited independently.
+//   - All Redis errors: fail-open, request proceeds. RL-POLICY-FAIL-OPEN.
 type Handler struct {
-	store       AuthCtxStore
-	aaa         AAARouter
-	apiRoot     string
-	nrfClient   interface {
+	store         AuthCtxStore
+	aaa           AAARouter
+	apiRoot       string
+	nrfClient     interface {
 		IsRegistered() bool
 	}
-	udmClient   *udm.Client
+	udmClient *udm.Client
+
+	// amfRateLimiter enforces PerAmfPerSec with 1-second sliding window.
+	// Nil is safe (no enforcement).
+	amfRateLimiter *redis.RateLimiter
+
+	// rateLimiter enforces the per-minute subscriber policy for confirm path.
+	// Nil is safe (no enforcement).
 	rateLimiter *redis.RateLimiter
 }
 
@@ -94,9 +109,15 @@ func WithUDMClient(udmClient *udm.Client) HandlerOption {
 	return func(h *Handler) { h.udmClient = udmClient }
 }
 
-// WithRateLimiter sets the rate limiter for the NSSAA handler.
+// WithRateLimiter sets the per-minute rate limiter for the NSSAA confirm path.
+// Use amfRateLimiter for AMF-scoped per-second limiting.
 func WithRateLimiter(rl *redis.RateLimiter) HandlerOption {
 	return func(h *Handler) { h.rateLimiter = rl }
+}
+
+// WithAMFRateLimiter sets the per-second AMF rate limiter for the NSSAA create path.
+func WithAMFRateLimiter(rl *redis.RateLimiter) HandlerOption {
+	return func(h *Handler) { h.amfRateLimiter = rl }
 }
 
 // NewHandler creates a new NSSAA handler.
@@ -137,17 +158,27 @@ func (h *Handler) CreateSliceAuthenticationContext(w http.ResponseWriter, r *htt
 	}
 	snssaiPresent := present["snssai"]
 
-	// Rate limit by AMF NF Instance ID (RL-G1).
+	// Rate limit by AMF NF Instance ID (RL-G1, RL-POLICY-AMF).
 	// SliceAuthInfo.AmfInstanceId is a UUID NF instance ID — use it directly.
-	if h.rateLimiter != nil && body.AmfInstanceId != nil {
-		allowed, rlErr := h.rateLimiter.AllowAMF(r.Context(), string(*body.AmfInstanceId))
+	// Policy: PerAmfPerSec with 1-second sliding window.
+	if h.amfRateLimiter != nil && body.AmfInstanceId != nil {
+		allowed, rlErr := h.amfRateLimiter.AllowAMF(r.Context(), string(*body.AmfInstanceId))
 		if rlErr != nil {
-			slog.Warn("ratelimit: allow check failed", "error", rlErr)
-		}
-		if !allowed {
+			slog.Warn("ratelimit: allow check failed",
+				"service", "nssaa",
+				"scope", "amf",
+				"gpsi_hash", logging.HashGPSI(string(body.Gpsi)),
+				"error", rlErr,
+				"request_id", reqID,
+			)
+			metrics.RateLimitDecisionRequests.WithLabelValues("nssaa", "amf", "error").Inc()
+		} else if !allowed {
 			metrics.RateLimitRequests.WithLabelValues("nssaa", "limited").Inc()
+			metrics.RateLimitDecisionRequests.WithLabelValues("nssaa", "amf", "limited").Inc()
 			h.write429(w, r, 60)
 			return
+		} else {
+			metrics.RateLimitDecisionRequests.WithLabelValues("nssaa", "amf", "allowed").Inc()
 		}
 	}
 
@@ -245,16 +276,26 @@ func (h *Handler) CreateSliceAuthenticationContext(w http.ResponseWriter, r *htt
 func (h *Handler) ConfirmSliceAuthentication(w http.ResponseWriter, r *http.Request, authCtxId string) {
 	reqID := common.GetRequestID(r.Context())
 
-	// Rate limit by authCtxId (RL-G1).
+	// Rate limit by authCtxId (RL-G1, RL-POLICY-AUTHCTX).
+	// Policy: per-minute subscriber policy per auth context.
+	// Each authentication session is limited independently.
 	if h.rateLimiter != nil {
 		allowed, rlErr := h.rateLimiter.Allow(r.Context(), "authctx:"+authCtxId)
 		if rlErr != nil {
-			slog.Warn("ratelimit: allow check failed", "error", rlErr)
-		}
-		if !allowed {
+			slog.Warn("ratelimit: allow check failed",
+				"service", "nssaa",
+				"scope", "authctx",
+				"error", rlErr,
+				"request_id", reqID,
+			)
+			metrics.RateLimitDecisionRequests.WithLabelValues("nssaa", "authctx", "error").Inc()
+		} else if !allowed {
 			metrics.RateLimitRequests.WithLabelValues("nssaa", "limited").Inc()
+			metrics.RateLimitDecisionRequests.WithLabelValues("nssaa", "authctx", "limited").Inc()
 			h.write429(w, r, 60)
 			return
+		} else {
+			metrics.RateLimitDecisionRequests.WithLabelValues("nssaa", "authctx", "allowed").Inc()
 		}
 	}
 

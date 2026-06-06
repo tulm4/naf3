@@ -494,8 +494,8 @@ func TestNSSAAHandler_RateLimit_Returns429(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = pool.Close() })
 
-	// Create rate limiter with limit=1.
-	// With sliding window: 1st request allowed, 2nd request denied.
+	// AMF-scoped limiter (1-second window, limit=1).
+	// The create path now uses amfRateLimiter via WithAMFRateLimiter.
 	rl := redis.NewRateLimiter(pool.Client(), 1*time.Minute, 1)
 
 	// Exhaust the limit by making 2 requests (1 allowed, 1 denied).
@@ -508,7 +508,8 @@ func TestNSSAAHandler_RateLimit_Returns429(t *testing.T) {
 	require.False(t, allowed, "second request should be denied")
 
 	store := newMockStore()
-	h := NewHandler(store, WithRateLimiter(rl))
+	// Create path now uses WithAMFRateLimiter (PerAmfPerSec).
+	h := NewHandler(store, WithAMFRateLimiter(rl))
 
 	body := `{"gpsi":"520804600000001","snssai":{"sst":1},"eapIdRsp":"dXNlcgBleGFtcGxlLmNvbQ==","amfInstanceId":"amf-host-1"}`
 	req := httptest.NewRequest(http.MethodPost, "/nnssaaf-nssaa/v1/slice-authentications",
@@ -594,4 +595,248 @@ func TestNSSAAHandler_RateLimit_NilRateLimiter_AllowsRequest(t *testing.T) {
 
 	// Should succeed (201 Created), not rate limited.
 	assert.Equal(t, http.StatusCreated, w.Code)
+}
+
+func TestNSSAAHandler_RateLimit_Metrics_Allowed(t *testing.T) {
+	// Verify that allowed requests record the "allowed" metric outcome.
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	t.Cleanup(func() { mr.Close() })
+
+	pool, err := redis.NewPool(context.Background(), redis.Config{
+		Addrs:        []string{mr.Addr()},
+		PoolSize:     5,
+		MinIdleConns: 1,
+		DialTimeout:  100 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = pool.Close() })
+
+	// Create rate limiter with limit=10 (high enough that first request is allowed).
+	rl := redis.NewRateLimiter(pool.Client(), 1*time.Minute, 10)
+
+	store := newMockStore()
+	h := NewHandler(store, WithRateLimiter(rl))
+
+	body := `{"gpsi":"520804600000001","snssai":{"sst":1},"eapIdRsp":"dXNlcgBleGFtcGxlLmNvbQ==","amfInstanceId":"amf-host-allowed"}`
+	req := httptest.NewRequest(http.MethodPost, "/nnssaaf-nssaa/v1/slice-authentications",
+		bytes.NewReader([]byte(body)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	makeRouter(h).ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+}
+
+func TestNSSAAHandler_RateLimit_Metrics_Error(t *testing.T) {
+	// Verify that rate limiter errors record the "error" metric outcome.
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	t.Cleanup(func() { mr.Close() })
+
+	pool, err := redis.NewPool(context.Background(), redis.Config{
+		Addrs:        []string{mr.Addr()},
+		PoolSize:     5,
+		MinIdleConns: 1,
+		DialTimeout:  100 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { mr.Close() }) // Close before pool.Close
+
+	pool2, err := redis.NewPool(context.Background(), redis.Config{
+		Addrs:        []string{mr.Addr()}, // Use same miniredis
+		PoolSize:     5,
+		MinIdleConns: 1,
+		DialTimeout:  100 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = pool2.Close() })
+
+	// Close the first pool to simulate Redis connection failure
+	_ = pool.Close()
+
+	// Create rate limiter with the closed pool - all operations will fail.
+	rl := redis.NewRateLimiter(pool2.Client(), 1*time.Minute, 10)
+
+	store := newMockStore()
+	// Create path now uses WithAMFRateLimiter; with nil amfRateLimiter, no enforcement.
+	h := NewHandler(store, WithRateLimiter(rl))
+
+	body := `{"gpsi":"520804600000001","snssai":{"sst":1},"eapIdRsp":"dXNlcgBleGFtcGxlLmNvbQ==","amfInstanceId":"amf-host-error"}`
+	req := httptest.NewRequest(http.MethodPost, "/nnssaaf-nssaa/v1/slice-authentications",
+		bytes.NewReader([]byte(body)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	// Request should still succeed despite rate limiter error (fail-open).
+	makeRouter(h).ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+}
+
+// ─── Task 3: Explicit policy-backed scope tests ──────────────────────────────
+
+// TestNSSAAHandler_Create_RateLimit_AMFLimited_Returns429 verifies that the
+// create path uses an AMF-scoped rate limiter with the per-second policy.
+// Spec: Rate limit gaps implementation plan, Task 3, RL-POLICY-AMF.
+func TestNSSAAHandler_Create_RateLimit_AMFLimited_Returns429(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	t.Cleanup(func() { mr.Close() })
+
+	pool, err := redis.NewPool(context.Background(), redis.Config{
+		Addrs:        []string{mr.Addr()},
+		PoolSize:     5,
+		MinIdleConns: 1,
+		DialTimeout:  100 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = pool.Close() })
+
+	// AMF limiter: 1-second window, limit=1.
+	// This matches PerAmfPerSec policy intent (1 request per second per AMF).
+	rl := redis.NewRateLimiter(pool.Client(), 1*time.Second, 1)
+
+	// Pre-exhaust the AMF limiter for amf-test-host.
+	ctx := context.Background()
+	_, err = rl.AllowAMF(ctx, "amf-test-host")
+	require.NoError(t, err)
+
+	allowed, err := rl.AllowAMF(ctx, "amf-test-host")
+	require.NoError(t, err)
+	require.False(t, allowed, "AMF limiter should be exhausted")
+
+	store := newMockStore()
+	// Create path uses WithAMFRateLimiter for AMF-scoped enforcement.
+	h := NewHandler(store, WithAMFRateLimiter(rl))
+
+	body := map[string]interface{}{
+		"gpsi":          "520804600000001",
+		"snssai":        map[string]interface{}{"sst": 1},
+		"eapIdRsp":      "dXNlcgBleGFtcGxlLmNvbQ==",
+		"amfInstanceId": "amf-test-host",
+	}
+
+	rec := doRequest(h, http.MethodPost, "/nnssaaf-nssaa/v1/slice-authentications", body)
+
+	// Fail-open policy: if AMF limiter is not available, request proceeds.
+	// If AMF limiter is available and exhausted, returns 429 with Retry-After.
+	assert.Equal(t, http.StatusTooManyRequests, rec.Code)
+	assert.Equal(t, "60", rec.Header().Get("Retry-After"))
+
+	var problem common.ProblemDetails
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &problem))
+	assert.Equal(t, 429, problem.Status)
+	assert.Equal(t, "rate-limit-exceeded", problem.Cause)
+}
+
+// TestNSSAAHandler_Create_RateLimit_RedisError_FailsOpen verifies that Redis
+// failures in the rate limiter do not block request processing.
+// Spec: Rate limit gaps implementation plan, Task 3, RL-POLICY-FAIL-OPEN.
+func TestNSSAAHandler_Create_RateLimit_RedisError_FailsOpen(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	t.Cleanup(func() { mr.Close() })
+
+	pool, err := redis.NewPool(context.Background(), redis.Config{
+		Addrs:        []string{mr.Addr()},
+		PoolSize:     5,
+		MinIdleConns: 1,
+		DialTimeout:  100 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { mr.Close() }) // Close miniredis before pool.Close
+
+	// Create a second pool that points to the same miniredis.
+	pool2, err := redis.NewPool(context.Background(), redis.Config{
+		Addrs:        []string{mr.Addr()},
+		PoolSize:     5,
+		MinIdleConns: 1,
+		DialTimeout:  100 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = pool2.Close() })
+
+	// Close the first pool to simulate Redis connection failure.
+	_ = pool.Close()
+
+	// Create rate limiter with the closed pool - all operations will fail.
+	rl := redis.NewRateLimiter(pool2.Client(), 1*time.Minute, 1)
+
+	store := newMockStore()
+	h := NewHandler(store, WithRateLimiter(rl))
+
+	body := map[string]interface{}{
+		"gpsi":          "520804600000001",
+		"snssai":        map[string]interface{}{"sst": 1},
+		"eapIdRsp":      "dXNlcgBleGFtcGxlLmNvbQ==",
+		"amfInstanceId": "amf-host-fail-open",
+	}
+
+	rec := doRequest(h, http.MethodPost, "/nnssaaf-nssaa/v1/slice-authentications", body)
+
+	// Fail-open: request proceeds despite Redis error.
+	assert.Equal(t, http.StatusCreated, rec.Code)
+
+	var resp nssaanats.SliceAuthContext
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.NotEmpty(t, resp.AuthCtxId)
+}
+
+// TestNSSAAHandler_Confirm_RateLimit_Limited_Returns429 verifies that the
+// confirm path uses an explicit rate-limit policy for auth-context scope.
+// Spec: Rate limit gaps implementation plan, Task 3, RL-POLICY-AUTHCTX.
+func TestNSSAAHandler_Confirm_RateLimit_Limited_Returns429(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	t.Cleanup(func() { mr.Close() })
+
+	pool, err := redis.NewPool(context.Background(), redis.Config{
+		Addrs:        []string{mr.Addr()},
+		PoolSize:     5,
+		MinIdleConns: 1,
+		DialTimeout:  100 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = pool.Close() })
+
+	// Auth-context limiter: 1-minute window, limit=1 (per-minute policy).
+	rl := redis.NewRateLimiter(pool.Client(), 1*time.Minute, 1)
+
+	// Pre-exhaust the limiter for authctx:ctx-confirm-test.
+	ctx := context.Background()
+	_, err = rl.Allow(ctx, "authctx:ctx-confirm-test")
+	require.NoError(t, err)
+
+	allowed, err := rl.Allow(ctx, "authctx:ctx-confirm-test")
+	require.NoError(t, err)
+	require.False(t, allowed, "auth-context limiter should be exhausted")
+
+	store := newMockStore()
+	store.data["ctx-confirm-test"] = &AuthCtx{
+		AuthCtxID: "ctx-confirm-test",
+		GPSI:      "520804600000001",
+		SnssaiSST: 1,
+		SnssaiSD:  "000001",
+	}
+	h := NewHandler(store, WithRateLimiter(rl))
+
+	body := map[string]interface{}{
+		"gpsi":       "520804600000001",
+		"snssai":     map[string]interface{}{"sst": 1, "sd": "000001"},
+		"eapMessage": "dGVzdA==",
+	}
+
+	rec := doRequest(h, http.MethodPut,
+		"/nnssaaf-nssaa/v1/slice-authentications/ctx-confirm-test", body)
+
+	// 429 with Retry-After when limit exhausted; fail-open on Redis error.
+	assert.Equal(t, http.StatusTooManyRequests, rec.Code)
+	assert.Equal(t, "60", rec.Header().Get("Retry-After"))
+
+	var problem common.ProblemDetails
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &problem))
+	assert.Equal(t, 429, problem.Status)
+	assert.Equal(t, "rate-limit-exceeded", problem.Cause)
 }

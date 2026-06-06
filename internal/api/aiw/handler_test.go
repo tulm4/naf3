@@ -398,3 +398,78 @@ func TestAIWHandler_RateLimit_Returns429(t *testing.T) {
 	assert.Equal(t, http.StatusTooManyRequests, w.Code)
 	assert.Equal(t, "60", w.Header().Get("Retry-After"))
 }
+
+// mockLimiterFailsOnAllow is a test double that always returns an error on Allow.
+type mockLimiterFailsOnAllow struct{}
+
+func (m *mockLimiterFailsOnAllow) Allow(_ context.Context, _ string) (bool, error) {
+	return false, errors.New("redis connection refused")
+}
+
+func TestAIWHandler_Create_RateLimit_RedisError_FailsOpen(t *testing.T) {
+	// Inject a limiter that always errors on Allow.
+	// The handler should fail-open: continue processing and return 201.
+	store := newMockStore()
+	h := NewHandler(store,
+		WithRateLimiter(&mockLimiterFailsOnAllow{}),
+		WithAPIRoot("https://nssAAF.example.com"),
+	)
+
+	body := map[string]interface{}{
+		"supi": "imsi-208046000000001",
+	}
+
+	rec := doRequest(h, http.MethodPost, "/nnssaaf-aiw/v1/authentications", body)
+
+	// Fail-open: Redis error means we allow the request through.
+	assert.Equal(t, http.StatusCreated, rec.Code)
+}
+
+func TestAIWHandler_Confirm_RateLimit_Limited_Returns429(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	pool, err := rediscache.NewPool(context.Background(), rediscache.Config{
+		Addrs:        []string{mr.Addr()},
+		PoolSize:     5,
+		MinIdleConns: 1,
+		DialTimeout:  100 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	defer func() { _ = pool.Close() }()
+
+	rl := rediscache.NewRateLimiter(pool.Client(), 1*time.Minute, 1)
+	ctx := context.Background()
+
+	// Pre-seed the store with an auth context.
+	store := newMockStore()
+	store.data["auth-ctx-100"] = &AuthContext{
+		AuthCtxID: "auth-ctx-100",
+		Supi:      "imsi-208046000000001",
+	}
+
+	h := NewHandler(store,
+		WithRateLimiter(rl),
+		WithAPIRoot("https://nssAAF.example.com"),
+	)
+
+	// Exhaust the limiter for the auth-ctx-100 scope.
+	// Using "aiw:authctx:auth-ctx-100" as the key (same policy as create).
+	authCtxKey := "aiw:authctx:auth-ctx-100"
+	for i := 0; i < 3; i++ {
+		_, err := rl.Allow(ctx, authCtxKey)
+		require.NoError(t, err)
+	}
+
+	body := map[string]interface{}{
+		"supi":       "imsi-208046000000001",
+		"eapMessage": "dGVzdA==",
+	}
+
+	rec := doRequest(h, http.MethodPut,
+		"/nnssaaf-aiw/v1/authentications/auth-ctx-100", body)
+
+	assert.Equal(t, http.StatusTooManyRequests, rec.Code)
+	assert.Equal(t, "60", rec.Header().Get("Retry-After"))
+}

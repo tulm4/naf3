@@ -12,6 +12,8 @@ import (
 	"os"
 	"time"
 
+	goredis "github.com/redis/go-redis/v9"
+
 	"github.com/operator/nssAAF/internal/amf"
 	"github.com/operator/nssAAF/internal/api/aiw"
 	"github.com/operator/nssAAF/internal/api/common"
@@ -86,6 +88,27 @@ func (f *bizPodFactory) newNFRegistry() *resilience.Registry {
 		cfg.SuccessThreshold = 2
 	}
 	return resilience.NewRegistry(cfg.FailureThreshold, cfg.RecoveryTimeout, cfg.SuccessThreshold)
+}
+
+// rateLimiterSet holds the explicit per-scope limiter wiring.
+type rateLimiterSet struct {
+	amfRateLimiter *redis.RateLimiter
+	gpsiRateLimiter *redis.RateLimiter
+}
+
+func (f *bizPodFactory) newRateLimiterSet(client goredis.Cmdable) rateLimiterSet {
+	return rateLimiterSet{
+		amfRateLimiter: redis.NewRateLimiter(
+			client,
+			1*time.Second,
+			f.cfg.RateLimit.PerAmfPerSec,
+		),
+		gpsiRateLimiter: redis.NewRateLimiter(
+			client,
+			1*time.Minute,
+			f.cfg.RateLimit.PerGpsiPerMin,
+		),
+	}
 }
 
 // Build creates a fully initialized BizPod with all dependencies wired.
@@ -238,12 +261,8 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 		},
 	)
 
-	// ─── Rate limiter (RL-G1) ───────────────────────────────────────────
-	ratelimiter := redis.NewRateLimiter(
-		redisPool.Client(),
-		1*time.Minute,
-		f.cfg.RateLimit.PerGpsiPerMin,
-	)
+	// ─── Rate limiters (RL-G1) ───────────────────────────────────────────
+	rateLimiters := f.newRateLimiterSet(redisPool.Client())
 
 	// ─── HTTP AAA client ────────────────────────────────────────────────
 	if f.cfg.Biz.UseMTLS {
@@ -283,7 +302,8 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 		nssaa.WithAAA(aaaClient),
 		nssaa.WithNRFClient(nrfClient),
 		nssaa.WithUDMClient(udmClient),
-		nssaa.WithRateLimiter(ratelimiter),
+		nssaa.WithAMFRateLimiter(rateLimiters.amfRateLimiter), // PerAmfPerSec, 1-second window (RL-POLICY-AMF)
+		nssaa.WithRateLimiter(rateLimiters.gpsiRateLimiter),   // PerGpsiPerMin, 1-minute window (RL-POLICY-AUTHCTX)
 	)
 	nssaaRouter := nssaa.NewRouter(nssaaHandler, apiRoot)
 
@@ -291,7 +311,7 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 	aiwHandler := aiw.NewHandler(aiwStore,
 		aiw.WithAPIRoot(apiRoot),
 		aiw.WithAUSFClient(ausfClient),
-		aiw.WithRateLimiter(ratelimiter),
+		aiw.WithRateLimiter(rateLimiters.gpsiRateLimiter), // PerGpsiPerMin, 1-minute window (RL-POLICY-GPSI)
 	)
 	aiwRouter := aiw.NewRouter(aiwHandler, apiRoot)
 
