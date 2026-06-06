@@ -18,9 +18,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/operator/nssAAF/internal/api/common"
+	ratelimit "github.com/operator/nssAAF/internal/cache/redis"
 	"github.com/operator/nssAAF/internal/eap"
 	"github.com/operator/nssAAF/internal/metrics"
-	ratelimit "github.com/operator/nssAAF/internal/cache/redis"
 	aiwnats "github.com/operator/nssAAF/oapi-gen/gen/aiw"
 	"github.com/operator/nssAAF/oapi-gen/gen/specs"
 )
@@ -121,12 +121,21 @@ func (s *InMemoryStore) Close() error {
 	return nil
 }
 
+// RateLimiter is the interface for rate limiting decisions.
+// Aliased from the concrete redis implementation for ergonomic use.
+// Allows injection of real *ratelimit.RateLimiter or test doubles.
+type RateLimiter interface {
+	Allow(ctx context.Context, key string) (bool, error)
+}
+
+var _ RateLimiter = (*ratelimit.RateLimiter)(nil) // compile-time check
+
 // Handler implements aiwnats.ServerInterface.
 type Handler struct {
 	store       AuthCtxStore
 	aaa         AAARouter
 	apiRoot     string
-	rateLimiter *ratelimit.RateLimiter
+	rateLimiter RateLimiter
 	ausfClient  interface {
 		ForwardMSK(ctx context.Context, authCtxID string, msk []byte) error
 	}
@@ -153,7 +162,7 @@ func WithAUSFClient(ausf interface {
 }
 
 // WithRateLimiter sets the rate limiter for the AIW handler.
-func WithRateLimiter(rl *ratelimit.RateLimiter) HandlerOption {
+func WithRateLimiter(rl RateLimiter) HandlerOption {
 	return func(h *Handler) { h.rateLimiter = rl }
 }
 
@@ -194,12 +203,20 @@ func (h *Handler) CreateAuthenticationContext(w http.ResponseWriter, r *http.Req
 	if h.rateLimiter != nil {
 		allowed, err := h.rateLimiter.Allow(r.Context(), "aiw:supi:"+string(body.Supi))
 		if err != nil {
-			slog.Warn("ratelimit: allow check failed", "error", err)
-		}
-		if !allowed {
+			slog.Warn("ratelimit: allow check failed",
+				"service", "aiw",
+				"scope", "supi",
+				"error", err,
+				"request_id", reqID,
+			)
+			metrics.RateLimitDecisionRequests.WithLabelValues("aiw", "supi", "error").Inc()
+		} else if !allowed {
 			metrics.RateLimitRequests.WithLabelValues("aiw", "limited").Inc()
+			metrics.RateLimitDecisionRequests.WithLabelValues("aiw", "supi", "limited").Inc()
 			h.write429(w, r, 60)
 			return
+		} else {
+			metrics.RateLimitDecisionRequests.WithLabelValues("aiw", "supi", "allowed").Inc()
 		}
 	}
 
@@ -260,6 +277,29 @@ func (h *Handler) ConfirmAuthentication(w http.ResponseWriter, r *http.Request, 
 	if err := common.ValidateAuthCtxID(authCtxId); err != nil {
 		common.WriteProblem(w, common.ValidationProblem("authCtxId", err.Error()))
 		return
+	}
+
+	// Rate limit by auth context (RL-G1 / confirm path).
+	// Scope: "aiw:authctx:{authCtxId}" — per-minute sliding window.
+	// Policy: fail-open (allow request through on Redis error).
+	if h.rateLimiter != nil {
+		allowed, rlErr := h.rateLimiter.Allow(r.Context(), "aiw:authctx:"+authCtxId)
+		if rlErr != nil {
+			slog.Warn("ratelimit: allow check failed",
+				"service", "aiw",
+				"scope", "authctx",
+				"error", rlErr,
+				"request_id", reqID,
+			)
+			metrics.RateLimitDecisionRequests.WithLabelValues("aiw", "authctx", "error").Inc()
+		} else if !allowed {
+			metrics.RateLimitRequests.WithLabelValues("aiw", "limited").Inc()
+			metrics.RateLimitDecisionRequests.WithLabelValues("aiw", "authctx", "limited").Inc()
+			h.write429(w, r, 60)
+			return
+		} else {
+			metrics.RateLimitDecisionRequests.WithLabelValues("aiw", "authctx", "allowed").Inc()
+		}
 	}
 
 	var body aiwnats.AuthConfirmationData
