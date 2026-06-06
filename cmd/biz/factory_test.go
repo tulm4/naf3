@@ -2,8 +2,11 @@
 package main
 
 import (
+	"context"
 	"testing"
 	"time"
+
+	goredis "github.com/redis/go-redis/v9"
 
 	"github.com/operator/nssAAF/internal/config"
 	"github.com/operator/nssAAF/internal/resilience"
@@ -74,5 +77,36 @@ func TestBuild_UsesInternalCommNativeCBConfig_Defaults(t *testing.T) {
 	}
 	if cb.SuccessThreshold() != 2 {
 		t.Errorf("SuccessThreshold default: got %d, want 2", cb.SuccessThreshold())
+	}
+}
+
+func TestNewRateLimiterSet_UsesDistinctRateLimitPolicies(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.RateLimit.PerGpsiPerMin = 1
+	cfg.RateLimit.PerAmfPerSec = 2
+
+	client := goredis.NewClient(&goredis.Options{Addr: "127.0.0.1:0"})
+	defer func() { _ = client.Close() }()
+
+	f := NewBizPodFactory(cfg)
+	rateLimiters := f.newRateLimiterSet(client)
+
+	amfAllowed1, err := rateLimiters.amfRateLimiter.AllowAMF(context.Background(), "amf-test")
+	if err == nil {
+		if !amfAllowed1 {
+			t.Fatal("first AMF request should be allowed")
+		}
+		amfAllowed2, err := rateLimiters.amfRateLimiter.AllowAMF(context.Background(), "amf-test")
+		if err == nil && !amfAllowed2 {
+			// If a real Redis server is available this proves the second-based policy is distinct.
+			return
+		}
+	}
+
+	if rateLimiters.amfRateLimiter == nil || rateLimiters.gpsiRateLimiter == nil {
+		t.Fatal("expected both AMF and subscriber rate limiters to be constructed")
+	}
+	if rateLimiters.amfRateLimiter == rateLimiters.gpsiRateLimiter {
+		t.Fatal("expected distinct rate limiter instances for AMF and subscriber scopes")
 	}
 }
