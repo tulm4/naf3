@@ -192,7 +192,7 @@ The following were invented and do NOT exist in the codebase:
 5. **`StateWriter` with `MarkReauthPending`, `MarkRevoked`, `ApplyCoA`** — do NOT exist as public types
    - Reality: These must be built as new Biz-layer types that adapt `storage.NssaaStore`
 
-6. **`SessionContext` type in Biz package** — does NOT exist
+6. **`NssaaSessionContext` type in Biz package** — does NOT exist as a concrete type (the interface `SessionContextResolver` was invented; Task 1 defines the concrete type)
    - Reality: Must be defined in `internal/biz/` with fields that can be populated from `storage.NssaaSession`
 
 ### Corrected Adapter Shapes for Tasks 6-9
@@ -253,12 +253,16 @@ func (w *ReverseFlowStateWriter) MarkRevoked(ctx context.Context, authCtxID stri
 
 ```go
 // NssaaSessionContext is the Biz-side view of an NSSAA session for reverse flows.
+// Contains both session identity fields and callback ownership metadata needed for
+// server-initiated routing decisions.
 type NssaaSessionContext struct {
     AuthCtxID      string
     GPSI           string
     ReauthNotifURI string
     RevocNotifURI  string
     AmfInstance    string
+    CallbackOwner  string // "amf" or "ausf"; populated by Task 8
+    HasAIWContext  bool   // true when session originated from AIW handler (AUSF ownership)
 }
 
 // NssaaSessionResolver loads and resolves session context for reverse flows.
@@ -281,6 +285,8 @@ func (r *NssaaSessionResolver) Resolve(ctx context.Context, authCtxID string) (*
         ReauthNotifURI: s.ReauthURI,
         RevocNotifURI:  s.RevocURI,
         AmfInstance:    s.AmfInstance,
+        CallbackOwner:  s.CallbackOwner,
+        HasAIWContext: s.HasAIWContext,
     }, nil
 }
 ```
@@ -339,7 +345,7 @@ type NSSAAStatusRepository interface {
 ```go
 // OLD (invented — does NOT exist):
 type PersistentContextLookup interface {
-    LoadAuthContext(ctx context.Context, authCtxID string) (*SessionContext, error)
+    LoadAuthContext(ctx context.Context, authCtxID string) (*NssaaSessionContext, error)
 }
 
 // NEW (grounded in real storage.NssaaStore):
@@ -428,39 +434,65 @@ import (
     "github.com/operator/nssAAF/internal/proto"
 )
 
-type SessionContext struct {
+// NssaaSessionContext is the canonical Biz-side session context for reverse flows.
+// Defined here in Task 1 so all subsequent tasks share the same type.
+// CallbackOwner and HasAIWContext fields are populated by Task 8.
+type NssaaSessionContext struct {
     AuthCtxID      string
     SessionID      string
     ReauthNotifURI string
     RevocNotifURI  string
-    CallbackOwner  string
-    HasAIWContext  bool
+    AmfInstance    string
+    CallbackOwner  string // "amf" or "ausf"; populated by Task 8
+    HasAIWContext  bool   // true when session originated from AIW handler (AUSF ownership)
 }
 
+// PersistentContextLookup resolves auth context from durable storage.
+// Used by CorrelationResolver in Task 2 to enrich Redis correlation data.
+type PersistentContextLookup interface {
+    LoadAuthContext(ctx context.Context, authCtxID string) (*NssaaSessionContext, error)
+}
+
+// SessionContextResolver loads and enriches reverse-path session context.
+// Used by ServerInitiatedCoordinator in Tasks 4 and 5.
+type SessionContextResolver interface {
+    Resolve(ctx context.Context, sessionID string, authCtxID string) (*NssaaSessionContext, error)
+}
+
+// SessionStateWriter persists state transitions for server-initiated flows.
+type SessionStateWriter interface {
+    MarkReauthPending(ctx context.Context, authCtxID string) error
+    MarkRevoked(ctx context.Context, authCtxID string) error
+    ApplyCoA(ctx context.Context, authCtxID string, payload []byte) error
+}
+
+// AMFNotifier sends server-initiated notifications to the AMF.
+type AMFNotifier interface {
+    SendReAuthNotification(ctx context.Context, uri, authCtxID string, payload []byte) error
+    SendRevocationNotification(ctx context.Context, uri, authCtxID string, payload []byte) error
+}
+
+// Completion reports what a server-initiated handler accomplished.
+type Completion string
+
+const (
+    CompletionUpdatedState Completion = "UPDATED_STATE"
+    CompletionNotifiedAMF  Completion = "NOTIFIED_AMF"
+    CompletionAppliedCoA   Completion = "APPLIED_COA"
+)
+
+// ServerInitiatedResult is the result of processing a server-initiated request.
 type ServerInitiatedResult struct {
-    Response proto.AaaServerInitiatedResponse
+    Response   proto.AaaServerInitiatedResponse
+    Completion Completion
 }
 
+// Validate checks that the result carries a response payload.
 func (r ServerInitiatedResult) Validate() error {
     if len(r.Response.Payload) == 0 {
         return fmt.Errorf("response payload is required")
     }
     return nil
-}
-
-type SessionContextResolver interface {
-    Resolve(ctx context.Context, sessionID string, authCtxID string) (*SessionContext, error)
-}
-
-type SessionStateWriter interface {
-    MarkReauthPending(authCtxID string) error
-    MarkRevoked(authCtxID string) error
-    ApplyCoA(authCtxID string, payload []byte) error
-}
-
-type AMFNotifier interface {
-    SendReAuthNotification(ctx context.Context, uri, authCtxID string, payload []byte) error
-    SendRevocationNotification(ctx context.Context, uri, authCtxID string, payload []byte) error
 }
 ```
 
@@ -501,10 +533,10 @@ import (
 )
 
 type stubSessionLookup struct {
-    ctx *SessionContext
+    ctx *NssaaSessionContext
 }
 
-func (s stubSessionLookup) LoadAuthContext(_ context.Context, authCtxID string) (*SessionContext, error) {
+func (s stubSessionLookup) LoadAuthContext(_ context.Context, authCtxID string) (*NssaaSessionContext, error) {
     out := *s.ctx
     out.AuthCtxID = authCtxID
     return &out, nil
@@ -532,7 +564,7 @@ func TestCorrelationResolver_Resolve_UsesRedisThenPersistentContext(t *testing.T
         t.Fatalf("seed redis: %v", err)
     }
 
-    resolver := NewCorrelationResolver(rdb, stubSessionLookup{ctx: &SessionContext{
+    resolver := NewCorrelationResolver(rdb, stubSessionLookup{ctx: &NssaaSessionContext{
         ReauthNotifURI: "http://amf/reauth",
         RevocNotifURI:  "http://amf/revoke",
         CallbackOwner:  "amf",
@@ -570,8 +602,9 @@ import (
     goredis "github.com/redis/go-redis/v9"
 )
 
+// PersistentContextLookup resolves auth context from durable storage.
 type PersistentContextLookup interface {
-    LoadAuthContext(ctx context.Context, authCtxID string) (*SessionContext, error)
+    LoadAuthContext(ctx context.Context, authCtxID string) (*NssaaSessionContext, error)
 }
 
 type CorrelationResolver struct {
@@ -583,7 +616,7 @@ func NewCorrelationResolver(rdb goredis.Cmdable, lookup PersistentContextLookup)
     return &CorrelationResolver{rdb: rdb, lookup: lookup}
 }
 
-func (r *CorrelationResolver) Resolve(ctx context.Context, sessionID string, authCtxID string) (*SessionContext, error) {
+func (r *CorrelationResolver) Resolve(ctx context.Context, sessionID string, authCtxID string) (*NssaaSessionContext, error) {
     resolvedAuthCtxID := authCtxID
     if sessionID != "" {
         raw, err := r.rdb.Get(ctx, proto.SessionCorrKey(sessionID)).Bytes()
@@ -745,10 +778,10 @@ import (
 )
 
 type stubResolver struct {
-    ctx *SessionContext
+    ctx *NssaaSessionContext
 }
 
-func (s stubResolver) Resolve(_ context.Context, sessionID, authCtxID string) (*SessionContext, error) {
+func (s stubResolver) Resolve(_ context.Context, sessionID, authCtxID string) (*NssaaSessionContext, error) {
     out := *s.ctx
     out.SessionID = sessionID
     out.AuthCtxID = authCtxID
@@ -756,18 +789,23 @@ func (s stubResolver) Resolve(_ context.Context, sessionID, authCtxID string) (*
 }
 
 type stubWriter struct {
-    reauthAuthCtxIDs []string
+    reauthAuthCtxIDs  []string
+    revokedAuthCtxIDs []string
 }
 
-func (s *stubWriter) MarkReauthPending(authCtxID string) error {
+func (s *stubWriter) MarkReauthPending(ctx context.Context, authCtxID string) error {
     s.reauthAuthCtxIDs = append(s.reauthAuthCtxIDs, authCtxID)
     return nil
 }
-func (s *stubWriter) MarkRevoked(string) error { return nil }
-func (s *stubWriter) ApplyCoA(string, []byte) error { return nil }
+func (s *stubWriter) MarkRevoked(ctx context.Context, authCtxID string) error {
+    s.revokedAuthCtxIDs = append(s.revokedAuthCtxIDs, authCtxID)
+    return nil
+}
+func (s *stubWriter) ApplyCoA(ctx context.Context, authCtxID string, payload []byte) error { return nil }
 
 type stubNotifier struct {
-    reauthCalls int
+    reauthCalls       int
+    revocationCalls   int
 }
 
 func (s *stubNotifier) SendReAuthNotification(ctx context.Context, uri, authCtxID string, payload []byte) error {
@@ -775,13 +813,14 @@ func (s *stubNotifier) SendReAuthNotification(ctx context.Context, uri, authCtxI
     return nil
 }
 func (s *stubNotifier) SendRevocationNotification(ctx context.Context, uri, authCtxID string, payload []byte) error {
+    s.revocationCalls++
     return nil
 }
 
 func TestServerInitiatedCoordinator_Handle_Reauth_UpdatesStateAndNotifiesAMF(t *testing.T) {
     writer := &stubWriter{}
     notifier := &stubNotifier{}
-    coordinator := NewServerInitiatedCoordinator(stubResolver{ctx: &SessionContext{
+    coordinator := NewServerInitiatedCoordinator(stubResolver{ctx: &NssaaSessionContext{
         CallbackOwner:  "amf",
         ReauthNotifURI: "http://amf/reauth",
     }}, writer, notifier)
@@ -804,6 +843,9 @@ func TestServerInitiatedCoordinator_Handle_Reauth_UpdatesStateAndNotifiesAMF(t *
     }
     if err := result.Validate(); err != nil {
         t.Fatalf("result.Validate() error = %v", err)
+    }
+    if result.Completion != CompletionNotifiedAMF {
+        t.Fatalf("Completion = %q, want %q", result.Completion, CompletionNotifiedAMF)
     }
 }
 ```
@@ -843,20 +885,27 @@ func (c *ServerInitiatedCoordinator) Handle(ctx context.Context, req *proto.AaaS
 
     switch req.MessageType {
     case proto.MessageTypeRAR:
-        if err := c.writer.MarkReauthPending(sessionCtx.AuthCtxID); err != nil {
+        if err := c.writer.MarkReauthPending(ctx, sessionCtx.AuthCtxID); err != nil {
             return nil, fmt.Errorf("mark reauth pending: %w", err)
         }
+        var completion Completion
         if sessionCtx.CallbackOwner == "amf" && sessionCtx.ReauthNotifURI != "" {
             if err := c.notifier.SendReAuthNotification(ctx, sessionCtx.ReauthNotifURI, sessionCtx.AuthCtxID, req.Payload); err != nil {
                 return nil, fmt.Errorf("send reauth notification: %w", err)
             }
+            completion = CompletionNotifiedAMF
+        } else {
+            completion = CompletionUpdatedState
         }
-        result := &ServerInitiatedResult{Response: proto.AaaServerInitiatedResponse{
-            Version:   proto.CurrentVersion,
-            SessionID: req.SessionID,
-            AuthCtxID: sessionCtx.AuthCtxID,
-            Payload:   []byte{2, 0, 0, 12},
-        }}
+        result := &ServerInitiatedResult{
+            Completion: completion,
+            Response: proto.AaaServerInitiatedResponse{
+                Version:   proto.CurrentVersion,
+                SessionID: req.SessionID,
+                AuthCtxID: sessionCtx.AuthCtxID,
+                Payload:   []byte{2, 0, 0, 12},
+            },
+        }
         return result, result.Validate()
     default:
         return nil, fmt.Errorf("unsupported message type: %s", req.MessageType)
@@ -889,7 +938,7 @@ git commit -m "feat: coordinate reverse reauth handling in biz"
 func TestServerInitiatedCoordinator_Handle_Revocation_UpdatesStateAndNotifiesAMF(t *testing.T) {
     writer := &stubWriter{}
     notifier := &stubNotifier{}
-    coordinator := NewServerInitiatedCoordinator(stubResolver{ctx: &SessionContext{
+    coordinator := NewServerInitiatedCoordinator(stubResolver{ctx: &NssaaSessionContext{
         CallbackOwner: "amf",
         RevocNotifURI: "http://amf/revoke",
     }}, writer, notifier)
@@ -922,31 +971,41 @@ Expected: FAIL because `ASR` path is unsupported or state fields are missing
 
 ```go
 case proto.MessageTypeASR:
-    if err := c.writer.MarkRevoked(sessionCtx.AuthCtxID); err != nil {
+    if err := c.writer.MarkRevoked(ctx, sessionCtx.AuthCtxID); err != nil {
         return nil, fmt.Errorf("mark revoked: %w", err)
     }
+    var completion Completion
     if sessionCtx.CallbackOwner == "amf" && sessionCtx.RevocNotifURI != "" {
         if err := c.notifier.SendRevocationNotification(ctx, sessionCtx.RevocNotifURI, sessionCtx.AuthCtxID, req.Payload); err != nil {
             return nil, fmt.Errorf("send revocation notification: %w", err)
         }
+        completion = CompletionNotifiedAMF
+    } else {
+        completion = CompletionUpdatedState
     }
-    result := &ServerInitiatedResult{Response: proto.AaaServerInitiatedResponse{
-        Version:   proto.CurrentVersion,
-        SessionID: req.SessionID,
-        AuthCtxID: sessionCtx.AuthCtxID,
-        Payload:   []byte{1},
-    }}
+    result := &ServerInitiatedResult{
+        Completion: completion,
+        Response: proto.AaaServerInitiatedResponse{
+            Version:   proto.CurrentVersion,
+            SessionID: req.SessionID,
+            AuthCtxID: sessionCtx.AuthCtxID,
+            Payload:   []byte{1},
+        },
+    }
     return result, result.Validate()
 case proto.MessageTypeCoA:
-    if err := c.writer.ApplyCoA(sessionCtx.AuthCtxID, req.Payload); err != nil {
+    if err := c.writer.ApplyCoA(ctx, sessionCtx.AuthCtxID, req.Payload); err != nil {
         return nil, fmt.Errorf("apply coa: %w", err)
     }
-    result := &ServerInitiatedResult{Response: proto.AaaServerInitiatedResponse{
-        Version:   proto.CurrentVersion,
-        SessionID: req.SessionID,
-        AuthCtxID: sessionCtx.AuthCtxID,
-        Payload:   []byte{2, 0, 0, 12},
-    }}
+    result := &ServerInitiatedResult{
+        Completion: CompletionAppliedCoA,
+        Response: proto.AaaServerInitiatedResponse{
+            Version:   proto.CurrentVersion,
+            SessionID: req.SessionID,
+            AuthCtxID: sessionCtx.AuthCtxID,
+            Payload:   []byte{2, 0, 0, 12},
+        },
+    }
     return result, result.Validate()
 ```
 
@@ -962,12 +1021,14 @@ git add internal/biz/server_initiated.go internal/biz/server_initiated_test.go
  git commit -m "feat: complete reverse revocation and coa flows"
 ```
 
-## Task 7: Wire Biz main HTTP handler to injected coordinator
+## Task 6: Wire Biz main HTTP handler to injected coordinator
 
 **Files:**
 - Modify: `cmd/biz/main.go`
 - Modify: `cmd/biz/factory.go`
 - Test: `cmd/biz/main_test.go`
+
+> **Prerequisite:** Task 7 (adapters) must be completed before this task. The `NewNssaaSessionResolver`, `NewReverseFlowStateWriter`, and `NewServerInitiatedCoordinator` functions are defined by Task 7.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1001,12 +1062,15 @@ func TestHandleServerInitiated_UsesCoordinatorResponse(t *testing.T) {
     old := serverInitiatedHandler
     defer func() { serverInitiatedHandler = old }()
     serverInitiatedHandler = func(ctx context.Context, req *proto.AaaServerInitiatedRequest) (*biz.ServerInitiatedResult, error) {
-        return &biz.ServerInitiatedResult{Response: proto.AaaServerInitiatedResponse{
-            Version:   proto.CurrentVersion,
-            SessionID: req.SessionID,
-            AuthCtxID: req.AuthCtxID,
-            Payload:   []byte{2, 0, 0, 12},
-        }}, nil
+        return &biz.ServerInitiatedResult{
+            Completion: biz.CompletionNotifiedAMF,
+            Response: proto.AaaServerInitiatedResponse{
+                Version:   proto.CurrentVersion,
+                SessionID: req.SessionID,
+                AuthCtxID: req.AuthCtxID,
+                Payload:   []byte{2, 0, 0, 12},
+            },
+        }, nil
     }
 
     handleServerInitiated(recorder, req)
@@ -1054,7 +1118,7 @@ In `cmd/biz/factory.go`, wire the concrete adapter during `Build()`:
 
 ```go
 // Reverse flow adapters: wrap existing storage stores
-nssaaAdapter := &biz.NssaaSessionAdapter{Store: nssaaStore}
+nssaaAdapter := &biz.NssaaSessionAdapter{store: nssaaStore}
 resolver := biz.NewNssaaSessionResolver(nssaaStore)
 stateWriter := biz.NewReverseFlowStateWriter(nssaaStore)
 coordinator := biz.NewServerInitiatedCoordinator(resolver, stateWriter, amfNotifier)
@@ -1075,7 +1139,7 @@ git add cmd/biz/main.go cmd/biz/factory.go cmd/biz/main_test.go
  git commit -m "feat: wire biz server-initiated coordinator"
 ```
 
-## Task 6: Add persistent lookup and state-writer adapters over existing stores
+## Task 7: Add persistent lookup and state-writer adapters over existing stores
 
 **Files:**
 - Modify: `cmd/biz/factory.go`
@@ -1084,6 +1148,8 @@ git add cmd/biz/main.go cmd/biz/factory.go cmd/biz/main_test.go
 - Test: `internal/biz/adapters_test.go`
 
 > **Adapter Shape Correction (Task 1a):** The original plan invented `NSSAAStatusRepository` with `UpdateStatus`. The real pattern is `Load → mutate → Save` on `storage.NssaaStore`. See Task 1a discovery findings for corrected shapes.
+>
+> **Prerequisite:** Task 1 must be completed before this task (defines `NssaaSessionContext`).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1093,6 +1159,8 @@ package biz
 import (
     "context"
     "testing"
+
+    "github.com/operator/nssAAF/internal/storage"
 )
 
 func TestReverseFlowStateWriter_MarkReauthPending_DelegatesToRepository(t *testing.T) {
@@ -1146,11 +1214,14 @@ Expected: FAIL with `undefined: NewReverseFlowStateWriter`
 
 - [ ] **Step 3: Write minimal implementation**
 
+> **Note:** `NssaaSessionContext` and `SessionContextResolver` are already defined in `internal/biz/types.go` by Task 1. This task implements the concrete adapters that satisfy those interfaces.
+
 ```go
 package biz
 
 import (
     "context"
+    "fmt"
 
     "github.com/operator/nssAAF/internal/storage"
     "github.com/operator/nssAAF/internal/types"
@@ -1173,6 +1244,7 @@ func (a *NssaaSessionAdapter) SaveSession(ctx context.Context, s *storage.NssaaS
 }
 
 // ReverseFlowStateWriter handles state transitions for server-initiated flows.
+// Satisfies the biz.SessionStateWriter interface.
 type ReverseFlowStateWriter struct {
     adapter *NssaaSessionAdapter
 }
@@ -1212,16 +1284,8 @@ func (w *ReverseFlowStateWriter) ApplyCoA(ctx context.Context, authCtxID string,
     return w.adapter.SaveSession(ctx, s)
 }
 
-// NssaaSessionContext is the Biz-side view of an NSSAA session for reverse flows.
-type NssaaSessionContext struct {
-    AuthCtxID      string
-    GPSI           string
-    ReauthNotifURI string
-    RevocNotifURI  string
-    AmfInstance    string
-}
-
 // NssaaSessionResolver loads and resolves session context for reverse flows.
+// Satisfies the biz.SessionContextResolver interface.
 type NssaaSessionResolver struct {
     store storage.NssaaStore
 }
@@ -1231,8 +1295,31 @@ func NewNssaaSessionResolver(store storage.NssaaStore) *NssaaSessionResolver {
     return &NssaaSessionResolver{store: store}
 }
 
-// Resolve loads session context by authCtxID.
-func (r *NssaaSessionResolver) Resolve(ctx context.Context, authCtxID string) (*NssaaSessionContext, error) {
+// Resolve loads session context by authCtxID and enriches it with storage-backed fields.
+// Satisfies biz.SessionContextResolver.Resolve — also satisfies biz.PersistentContextLookup.
+func (r *NssaaSessionResolver) Resolve(ctx context.Context, sessionID string, authCtxID string) (*NssaaSessionContext, error) {
+    resolvedAuthCtxID := authCtxID
+    if resolvedAuthCtxID == "" {
+        return nil, fmt.Errorf("authCtxID is required for Resolve")
+    }
+    s, err := r.store.Load(ctx, resolvedAuthCtxID)
+    if err != nil {
+        return nil, err
+    }
+    return &NssaaSessionContext{
+        AuthCtxID:      s.AuthCtxID,
+        SessionID:     sessionID,
+        GPSI:          s.GPSI,
+        ReauthNotifURI: s.ReauthURI,
+        RevocNotifURI:  s.RevocURI,
+        AmfInstance:    s.AmfInstance,
+        CallbackOwner:  s.CallbackOwner,
+        HasAIWContext:  s.HasAIWContext,
+    }, nil
+}
+
+// LoadAuthContext satisfies biz.PersistentContextLookup (used by Task 2 CorrelationResolver).
+func (r *NssaaSessionResolver) LoadAuthContext(ctx context.Context, authCtxID string) (*NssaaSessionContext, error) {
     s, err := r.store.Load(ctx, authCtxID)
     if err != nil {
         return nil, err
@@ -1243,9 +1330,13 @@ func (r *NssaaSessionResolver) Resolve(ctx context.Context, authCtxID string) (*
         ReauthNotifURI: s.ReauthURI,
         RevocNotifURI:  s.RevocURI,
         AmfInstance:    s.AmfInstance,
+        CallbackOwner:  s.CallbackOwner,
+        HasAIWContext: s.HasAIWContext,
     }, nil
 }
 ```
+
+Note: `NssaaSessionResolver.Resolve` satisfies `SessionContextResolver` (takes `sessionID` and `authCtxID`), while `LoadAuthContext` satisfies `PersistentContextLookup` (takes only `authCtxID`). Both delegate to the same underlying `store.Load`.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -1394,7 +1485,7 @@ Expected: FAIL because the full reverse flow is not wired through real dependenc
 // 1. create a miniredis-backed `goredis.Client`
 // 2. write `proto.SessionCorrEntry` under `proto.SessionCorrKey("sess-it-1")`
 // 3. seed a concrete fake/stub persistent context lookup returning:
-//    SessionContext{AuthCtxID: "auth-it-1", ReauthNotifURI: amfServer.URL, CallbackOwner: "amf"}
+//    NssaaSessionContext{AuthCtxID: "auth-it-1", ReauthNotifURI: amfServer.URL, CallbackOwner: "amf"}
 // 4. use an `httptest.Server` as the AMF callback receiver and assert it sees one POST
 // 5. install the real `serverInitiatedHandler = coordinator.Handle` before serving the request
 ```
@@ -1437,7 +1528,7 @@ git add test/integration/server_initiated_flow_test.go cmd/biz/main.go cmd/biz/f
 func TestServerInitiatedCoordinator_Handle_LogsAndReturnsCompletionMetadata(t *testing.T) {
     writer := &stubWriter{}
     notifier := &stubNotifier{}
-    coordinator := NewServerInitiatedCoordinator(stubResolver{ctx: &SessionContext{
+    coordinator := NewServerInitiatedCoordinator(stubResolver{ctx: &NssaaSessionContext{
         CallbackOwner:  "amf",
         ReauthNotifURI: "http://amf/reauth",
     }}, writer, notifier)
@@ -1458,6 +1549,8 @@ func TestServerInitiatedCoordinator_Handle_LogsAndReturnsCompletionMetadata(t *t
 }
 ```
 
+> **Note:** `Completion`, `CompletionNotifiedAMF`, `ServerInitiatedResult`, and the `ServerInitiatedCoordinator` type are all defined in `internal/biz/types.go` by Task 1. This task only adds structured logging around completion semantics.
+
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/biz -run TestServerInitiatedCoordinator_Handle_LogsAndReturnsCompletionMetadata -count=1`
@@ -1465,22 +1558,7 @@ Expected: FAIL because completion semantics are not explicit yet
 
 - [ ] **Step 3: Write minimal implementation**
 
-```go
-type Completion string
-
-const (
-    CompletionUpdatedState Completion = "UPDATED_STATE"
-    CompletionNotifiedAMF  Completion = "NOTIFIED_AMF"
-    CompletionAppliedCoA   Completion = "APPLIED_COA"
-)
-
-type ServerInitiatedResult struct {
-    Response   proto.AaaServerInitiatedResponse
-    Completion Completion
-}
-```
-
-Set completion values in each branch and log them with existing structured logger fields:
+Add structured logging to each handler branch in `internal/biz/server_initiated.go`:
 
 ```go
 slog.Info("server_initiated_completed",
@@ -1491,6 +1569,8 @@ slog.Info("server_initiated_completed",
     "callback_owner", sessionCtx.CallbackOwner,
 )
 ```
+
+> **Note:** `Completion`, `CompletionNotifiedAMF`, `ServerInitiatedResult`, and `ServerInitiatedCoordinator` are defined in `internal/biz/types.go` by Task 1. This task only adds structured logging around completion semantics.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -1518,7 +1598,7 @@ git add internal/biz/server_initiated.go internal/biz/server_initiated_test.go t
 func TestServerInitiatedCoordinator_Handle_RejectsAMFNotificationWhenOwnerMissing(t *testing.T) {
     writer := &stubWriter{}
     notifier := &stubNotifier{}
-    coordinator := NewServerInitiatedCoordinator(stubResolver{ctx: &SessionContext{
+    coordinator := NewServerInitiatedCoordinator(stubResolver{ctx: &NssaaSessionContext{
         CallbackOwner: "",
     }}, writer, notifier)
 
@@ -1654,7 +1734,7 @@ git commit -m "docs: update roadmap after internal communication gaps"
 
 ### Type consistency
 
-- `ServerInitiatedCoordinator`, `ServerInitiatedResult`, `SessionContext`, `SessionContextResolver`, and `SessionStateWriter` are introduced before later tasks depend on them.
+- `ServerInitiatedCoordinator`, `ServerInitiatedResult`, `NssaaSessionContext`, `SessionContextResolver`, `SessionStateWriter`, `PersistentContextLookup`, `Completion`, and `AMFNotifier` are introduced in Task 1 before later tasks depend on them.
 - Reverse-path request/response types consistently use `proto.AaaServerInitiatedRequest` and `proto.AaaServerInitiatedResponse`.
 - Completion constants are defined in the same package that returns them.
 
