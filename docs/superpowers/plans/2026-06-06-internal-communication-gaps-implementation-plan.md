@@ -86,6 +86,46 @@ Do **not** split this into separate plans unless implementation reveals that rev
 - If `cmd/biz/main_test.go` does not exist, create it in the task that introduces the first Biz main handler test.
 - Follow TDD for each task.
 
+## `HasAIWContext` Semantics — NSSAA vs AIW Stores
+
+This plan introduces `HasAIWContext` as a field on `NssaaSession` to track whether a given NSSAA session originated from or is linked to an AIW flow (via AUSF). The semantics differ between the two stores:
+
+| Store | Session Type | `HasAIWContext` | `CallbackOwner` | `ReauthURI` / `RevocURI` |
+|-------|-------------|-----------------|----------------|--------------------------|
+| NSSAA (`storage.NssaaSession`) | NSSAA (direct) | `false` | `"amf"` | From request body |
+| NSSAA (`storage.NssaaSession`) | AIW-linked (via AUSF) | `true` | `"ausf"` | `""` |
+| AIW (`storage.AiwSession`) | AIW | N/A (not stored here) | `"ausf"` (logical) | N/A |
+
+**Key implications for the reverse-flow plan:**
+- When `biz.NssaaSessionContext.HasAIWContext == true`, the session belongs to the AIW/AUSF ownership path — AMF notifications should NOT be sent (no `ReauthURI`/`RevocURI`).
+- When `biz.NssaaSessionContext.HasAIWContext == false` and `CallbackOwner == "amf"`, the session belongs to the direct NSSAA path — AMF notifications are valid.
+- The reverse flow in Tasks 4–5 checks `CallbackOwner` (not `HasAIWContext`) to decide whether to call `AMFNotifier`. `HasAIWContext` is available for downstream routing if needed.
+- `HasAIWContext` is persisted in `storage.NssaaSession` (Task 8) but is NOT stored in `storage.AiwSession` — the AIW session itself does not track this flag; the flag exists on the NSSAA side to enable the reverse link.
+
+## Task Dependency Table
+
+| Task | Name | Depends On | Provides | Prerequisite For |
+|------|------|-----------|----------|-----------------|
+| 1a | Discover storage interfaces | — | Grounded adapter shapes in this plan | All tasks |
+| 1 | Biz reverse-path domain types | 1a | `biz.NssaaSessionContext`, `biz.PersistentContextLookup`, `biz.SessionContextResolver`, `biz.SessionStateWriter`, `biz.AMFNotifier`, `biz.Completion` | Tasks 2, 4, 5, 6, 7 |
+| 2 | Correlation resolver from Redis + PG | 1 | `biz.CorrelationResolver` | Tasks 4, 5, 6 |
+| 3 | Redis session correlation helper | — | `redis.SessionCorrelationStore` with TTL behavior | Tasks 2, 6 |
+| 4 | Biz reauth coordinator | 1, 2 | `biz.ServerInitiatedCoordinator` (RAR path) | Tasks 6, 9 |
+| 5 | Biz revocation + CoA semantics | 1, 4 | `biz.ServerInitiatedCoordinator` (ASR/CoA paths) | Tasks 6, 9 |
+| 6 | Wire Biz main HTTP handler | 7 | Injected `serverInitiatedHandler` in `cmd/biz` | Task 9 |
+| 7 | Persistent lookup + state-writer adapters | 1 | `biz.NssaaSessionAdapter`, `biz.ReverseFlowStateWriter`, `biz.NssaaSessionResolver` | Tasks 4, 5, 6, 8 |
+| 8 | Persist callback ownership in API flows | 7 | `NssaaSession.CallbackOwner`, `NssaaSession.HasAIWContext`; DB migration; updated AIW handler | Tasks 4, 5, 6, 9, 10, 11 |
+| 9 | Integration test for server-initiated Biz path | 4, 5, 6, 8 | `test/integration/server_initiated_flow_test.go` | Task 12 |
+| 10 | Observability + completion semantics | 4, 5, 9 | Structured `slog` around `completion` field | Task 12 |
+| 11 | Trust-boundary assertions | 8, 9 | Ownership enforcement for `CallbackOwner == ""` | Task 12 |
+| 12 | Verification + roadmap update | 9, 10, 11 | Updated `module_index.md`, `README.md`, `STATE.md` | — |
+
+**Execution notes:**
+- Tasks 1–3 can proceed in parallel once Task 1a is done.
+- Task 6 has an explicit prerequisite note: Task 7 must complete first.
+- Task 8 adds new DB schema fields; ensure the migration is applied before running tests that reference `CallbackOwner` / `HasAIWContext` in `storage.NssaaSession`.
+- Task 12 is the final gate; Tasks 9–11 must all pass before Task 12 runs.
+
 ## Task 1a: Discover existing storage and session interfaces before adapter design
 
 **Files:**
@@ -274,24 +314,30 @@ func NewNssaaSessionResolver(store storage.NssaaStore) *NssaaSessionResolver {
     return &NssaaSessionResolver{store: store}
 }
 
+// Note: this Resolve signature is an illustrative placeholder. The concrete
+// NssaaSessionResolver in Task 7 takes (ctx, sessionID, authCtxID) and satisfies
+// both biz.SessionContextResolver and biz.PersistentContextLookup.
 func (r *NssaaSessionResolver) Resolve(ctx context.Context, authCtxID string) (*NssaaSessionContext, error) {
     s, err := r.store.Load(ctx, authCtxID)
     if err != nil {
         return nil, err
     }
+    // CallbackOwner and HasAIWContext are NOT in storage.NssaaSession — they are
+    // added as new columns/fields in Task 8. Until then, these resolve to zero values.
+    // Task 7's concrete adapter uses the same pattern after the fields exist.
     return &NssaaSessionContext{
         AuthCtxID:      s.AuthCtxID,
         GPSI:           s.GPSI,
         ReauthNotifURI: s.ReauthURI,
         RevocNotifURI:  s.RevocURI,
         AmfInstance:    s.AmfInstance,
-        CallbackOwner:  s.CallbackOwner,
-        HasAIWContext: s.HasAIWContext,
+        CallbackOwner:  "",
+        HasAIWContext:  false,
     }, nil
 }
 ```
 
-**Callback Ownership Note:**
+**Relationship to concrete adapter (Task 7):**
 The existing `NssaaSession` does NOT have a `CallbackOwner` field. The ownership model (`amf` vs `ausf`) must be tracked either by:
 - (a) Adding a `CallbackOwner string` field to `NssaaSession` and the DB schema (preferred, explicit)
 - (b) Inferring ownership from which handler created the session (fragile, implicit)
@@ -756,6 +802,8 @@ Expected: PASS
 git add internal/cache/redis/session_correlation.go internal/cache/redis/session_correlation_test.go internal/proto/biz_callback.go
 git commit -m "feat: add redis session correlation store"
 ```
+
+> **Constant verification:** `proto.DefaultPayloadTTL` is confirmed real — defined in `internal/proto/aaa_transport.go:85` as `10 * time.Minute`. The test uses it directly rather than hardcoding, so if the constant ever changes the test will follow.
 
 ## Task 4: Implement Biz-side server-initiated coordinator for re-auth
 
@@ -1313,6 +1361,8 @@ func (r *NssaaSessionResolver) Resolve(ctx context.Context, sessionID string, au
         ReauthNotifURI: s.ReauthURI,
         RevocNotifURI:  s.RevocURI,
         AmfInstance:    s.AmfInstance,
+        // CallbackOwner and HasAIWContext are populated from storage.NssaaSession
+        // fields that are added in Task 8. Before Task 8 lands, these are empty/zero.
         CallbackOwner:  s.CallbackOwner,
         HasAIWContext:  s.HasAIWContext,
     }, nil
@@ -1330,6 +1380,8 @@ func (r *NssaaSessionResolver) LoadAuthContext(ctx context.Context, authCtxID st
         ReauthNotifURI: s.ReauthURI,
         RevocNotifURI:  s.RevocURI,
         AmfInstance:    s.AmfInstance,
+        // CallbackOwner and HasAIWContext come from storage.NssaaSession fields
+        // added in Task 8. Code here is correct after Task 8 lands.
         CallbackOwner:  s.CallbackOwner,
         HasAIWContext: s.HasAIWContext,
     }, nil
@@ -1392,17 +1444,69 @@ func TestCreateSliceAuthentication_PersistsCallbackOwnershipMetadata(t *testing.
 }
 ```
 
-> **Note:** The `CallbackOwner` field does not yet exist in `storage.NssaaSession`. This task must add it to both the Go struct and the DB schema before the test can pass.
+> **Note:** The `CallbackOwner` and `HasAIWContext` fields do not yet exist in `storage.NssaaSession`. Step 2 of this task adds both fields to the Go struct and the DB schema before the test can pass.
 
-- [ ] **Step 2: Run test to verify it fails**
+> **⚠ DB Schema Migration Required:** This task introduces two new columns to `slice_auth_sessions`:
+> - `callback_owner TEXT` — "amf" or "ausf"; nullable; indexed for reverse-flow lookups
+> - `has_aiw_context BOOLEAN` — true when session originated from AIW/AUSF path; defaults false
+>
+> Both columns are nullable during migration and backfilled from existing rows (default: `callback_owner = ''`, `has_aiw_context = false`).
+
+- [ ] **Step 2: Add DB schema migration for new NssaaSession fields**
+
+Before modifying the Go code, add the two columns so the struct change and the persistence layer change are co-deployed:
+
+```sql
+-- migrations/YYYYMMDDHHMMSS_add_callback_owner_to_slice_auth_sessions.sql
+
+-- Step 1: Add nullable columns (zero-values match the default semantics)
+ALTER TABLE slice_auth_sessions
+  ADD COLUMN IF NOT EXISTS callback_owner TEXT NOT NULL DEFAULT '';
+ALTER TABLE slice_auth_sessions
+  ADD COLUMN IF NOT EXISTS has_aiw_context BOOLEAN NOT NULL DEFAULT false;
+
+-- Step 2: Backfill — infer ownership from which notif URI is non-empty
+UPDATE slice_auth_sessions
+   SET callback_owner = 'amf'
+ WHERE callback_owner = ''
+     AND (reauth_notif_uri != '' OR revoc_notif_uri != '');
+
+-- Step 3: Add index for reverse-flow lookups by ownership
+CREATE INDEX IF NOT EXISTS idx_slice_auth_sessions_callback_owner
+  ON slice_auth_sessions(callback_owner)
+  WHERE callback_owner != '';
+
+-- Step 4: Add Go struct fields to internal/storage/types.go
+--    (done in Step 3 implementation below)
+
+-- Step 5: Update scanRow/saveRow in internal/storage/postgres/nssaa_repo.go
+--    (done in Step 3 implementation below)
+```
+
+**Files to modify for Go struct persistence:**
+
+- `internal/storage/types.go` — add `CallbackOwner string` and `HasAIWContext bool` to `NssaaSession`
+- `internal/storage/postgres/nssaa_repo.go` — add the two new fields to `scanRow`, `rowToSession`, `sessionToRow`, `createRow`, `updateRow`
+- `internal/storage/postgres/nssaa_repo_test.go` — add test cases for the new fields
+
+After the migration and struct changes, verify:
+
+```bash
+go test ./internal/storage/postgres -run 'Nssaa' -count=1
+```
+
+Expected: PASS (repository correctly handles new fields).
+
+- [ ] **Step 3: Run test to verify it fails**
 
 Run: `go test ./internal/api/nssaa -run TestCreateSliceAuthentication_PersistsCallbackOwnershipMetadata -count=1`
 Expected: FAIL because callback ownership metadata is not persisted yet
 
-- [ ] **Step 3: Write minimal implementation**
+- [ ] **Step 4: Write minimal implementation**
 
 ```go
 ctx.CallbackOwner = "amf"
+ctx.HasAIWContext = false
 ctx.ReauthNotifURI = body.ReauthNotifUri
 ctx.RevocNotifURI = body.RevocNotifUri
 ```
@@ -1411,22 +1515,77 @@ And for AIW completion metadata in `internal/api/aiw/handler.go`:
 
 ```go
 ctx.CallbackOwner = "ausf"
+ctx.HasAIWContext = true
 ctx.ReauthNotifURI = ""
 ctx.RevocNotifURI = ""
-ctx.HasAIWContext = true
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Step 5: Add concrete AIW handler test for ownership metadata**
 
-Run: `go test ./internal/api/nssaa -run TestCreateSliceAuthentication_PersistsCallbackOwnershipMetadata -count=1 && go test ./internal/api/aiw -run TestAIWHandler_.* -count=1`
+> **Note:** `CallbackOwner` and `HasAIWContext` are stored in `storage.NssaaSession`, not `storage.AiwSession`. The AIW handler creates the AIW session, but the AIW-initiated NSSAA session (linked via `AuthCtxID`) carries the ownership metadata. The test below validates that when the AIW flow triggers NSSAA session creation, the linked `NssaaSession` has the correct ownership values.
+
+Add to `internal/api/aiw/handler_test.go`:
+
+```go
+// TestCreateAiwAuthentication_LinksNssaaSessionWithOwnershipMetadata verifies that
+// when an AIW flow creates or links an NssaaSession, that session carries the
+// correct CallbackOwner="ausf" and HasAIWContext=true metadata.
+func TestCreateAiwAuthentication_LinksNssaaSessionWithOwnershipMetadata(t *testing.T) {
+    aiwStore := newMockAiwStore()
+    nssaaStore := newMockNssaaStore()
+    h := NewHandler(aiwStore, nssaaStore,
+        WithAPIRoot("http://test"), WithAUSF(&mockAUSF{}))
+
+    req := httptest.NewRequest(http.MethodPost, "/nnssaaf-aiw/v1/authentications", bytes.NewBufferString(`{
+        "supi":"imsi-12345",
+        "ausfId":"ausf-001",
+        "supportedFeatures":"0"
+    }`))
+
+    rr := httptest.NewRecorder()
+    h.CreateAuthentication(rr, req)
+
+    // The linked NssaaSession (created or updated during AIW flow) must have
+    // CallbackOwner="ausf" and HasAIWContext=true so the reverse flow can
+    // route back to the correct owner without consulting the AIW store.
+    require.NotEmpty(t, nssaaStore.lastSaved, "NssaaSession should be created/linked by AIW handler")
+    if nssaaStore.lastSaved.CallbackOwner != "ausf" {
+        t.Fatalf("NssaaSession.CallbackOwner = %q, want ausf", nssaaStore.lastSaved.CallbackOwner)
+    }
+    if !nssaaStore.lastSaved.HasAIWContext {
+        t.Fatalf("NssaaSession.HasAIWContext = false, want true")
+    }
+    // ReauthURI/RevocURI are always empty for AIW-linked NSSAA sessions
+    if nssaaStore.lastSaved.ReauthURI != "" {
+        t.Fatalf("NssaaSession.ReauthURI = %q, want empty", nssaaStore.lastSaved.ReauthURI)
+    }
+    if nssaaStore.lastSaved.RevocURI != "" {
+        t.Fatalf("NssaaSession.RevocURI = %q, want empty", nssaaStore.lastSaved.RevocURI)
+    }
+}
+```
+
+The mock helper for `nssaaStore` should include `CallbackOwner` and `HasAIWContext` fields so the assertions are compileable:
+
+```go
+type mockNssaaStore struct {
+    data      map[string]*storage.NssaaSession
+    lastSaved *storage.NssaaSession
+}
+```
+
+> The `CallbackOwner`/`HasAIWContext` fields on the mock struct are valid because the mock mirrors `storage.NssaaSession`, which receives these new fields in Step 2.
+
+- [ ] **Step 6: Run tests to verify they pass**
+
+Run: `go test ./internal/api/nssaa -run TestCreateSliceAuthentication_PersistsCallbackOwnershipMetadata -count=1 && go test ./internal/api/aiw -run TestCreateAiwAuthentication_LinksNssaaSessionWithOwnershipMetadata -count=1`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add internal/api/nssaa/handler.go internal/api/aiw/handler.go internal/api/nssaa/handler_test.go internal/api/aiw/handler_test.go internal/biz/adapters.go
+git add internal/api/nssaa/handler.go internal/api/aiw/handler.go internal/api/nssaa/handler_test.go internal/api/aiw/handler_test.go internal/biz/adapters.go internal/storage/types.go internal/storage/postgres/nssaa_repo.go migrations/
  git commit -m "feat: persist callback ownership metadata"
-```
 
 ## Task 9: Cover integration path for server-initiated Biz processing
 
