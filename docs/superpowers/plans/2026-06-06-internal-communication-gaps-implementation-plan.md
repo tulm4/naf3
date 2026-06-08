@@ -1459,11 +1459,30 @@ Before modifying the Go code, add the two columns so the struct change and the p
 ```sql
 -- migrations/YYYYMMDDHHMMSS_add_callback_owner_to_slice_auth_sessions.sql
 
--- Step 1: Add nullable columns (zero-values match the default semantics)
-ALTER TABLE slice_auth_sessions
-  ADD COLUMN IF NOT EXISTS callback_owner TEXT NOT NULL DEFAULT '';
-ALTER TABLE slice_auth_sessions
-  ADD COLUMN IF NOT EXISTS has_aiw_context BOOLEAN NOT NULL DEFAULT false;
+-- Step 1: Add nullable columns using PostgreSQL-compatible conditional syntax
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'slice_auth_sessions'
+      AND column_name = 'callback_owner'
+  ) THEN
+    ALTER TABLE slice_auth_sessions ADD COLUMN callback_owner TEXT NOT NULL DEFAULT '';
+  END IF;
+END
+$$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'slice_auth_sessions'
+      AND column_name = 'has_aiw_context'
+  ) THEN
+    ALTER TABLE slice_auth_sessions ADD COLUMN has_aiw_context BOOLEAN NOT NULL DEFAULT false;
+  END IF;
+END
+$$;
 
 -- Step 2: Backfill — infer ownership from which notif URI is non-empty
 UPDATE slice_auth_sessions
