@@ -272,6 +272,7 @@ func (h *Handler) CreateAuthenticationContext(w http.ResponseWriter, r *http.Req
 	}
 
 	session := authContextToAiwSession(authCtx)
+	session.Status = "PENDING"
 	if err := h.store.Save(r.Context(), session); err != nil {
 		common.WriteProblem(w, common.InternalServerProblem(
 			fmt.Sprintf("failed to create auth context: %s", err)))

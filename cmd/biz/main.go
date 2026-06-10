@@ -26,9 +26,10 @@ var configPath = flag.String("config", "configs/biz.yaml", "path to YAML configu
 
 // Health check closure variables (set during initialization)
 var (
-	pgHealth    func(ctx context.Context) error
-	redisHealth func(ctx context.Context) error
-	nrfHealth   interface{ IsRegistered() bool }
+	pgHealth                func(ctx context.Context) error
+	redisHealth             func(ctx context.Context) error
+	nrfHealth               interface{ IsRegistered() bool }
+	serverInitiatedHandler  func(context.Context, *proto.AaaServerInitiatedRequest) (*proto.AaaServerInitiatedResponse, error)
 )
 
 func main() {
@@ -124,32 +125,26 @@ func handleServerInitiated(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var respPayload []byte
-	switch req.MessageType {
-	case proto.MessageTypeRAR:
-		respPayload = handleReAuth(r.Context(), &req)
-	case proto.MessageTypeASR:
-		respPayload = handleRevocation(r.Context(), &req)
-	case proto.MessageTypeCoA:
-		respPayload = handleCoA(r.Context(), &req)
-	default:
-		slog.Warn("handle_server_initiated: unknown message type",
+	if serverInitiatedHandler == nil {
+		http.Error(w, "server initiated handler not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	resp, err := serverInitiatedHandler(r.Context(), &req)
+	if err != nil {
+		slog.Warn("handle_server_initiated: handler failed",
 			"message_type", req.MessageType,
 			"session_id", req.SessionID,
 			"auth_ctx_id", req.AuthCtxID,
+			"error", err,
 		)
-		http.Error(w, "unknown message type", http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(proto.AaaServerInitiatedResponse{
-		Version:   proto.CurrentVersion,
-		SessionID: req.SessionID,
-		AuthCtxID: req.AuthCtxID,
-		Payload:   respPayload,
-	})
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func handleReAuth(_ context.Context, req *proto.AaaServerInitiatedRequest) []byte {

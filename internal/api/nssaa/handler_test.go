@@ -26,6 +26,7 @@ type mockStore struct {
 	loadErr   error
 	saveErr   error
 	deleteErr error
+	lastSaved *storage.NssaaSession
 }
 
 func newMockStore() *mockStore {
@@ -46,7 +47,9 @@ func (m *mockStore) Save(_ context.Context, ctx *storage.NssaaSession) error {
 	if m.saveErr != nil {
 		return m.saveErr
 	}
-	m.data[ctx.AuthCtxID] = ctx
+	copyCtx := *ctx
+	m.data[ctx.AuthCtxID] = &copyCtx
+	m.lastSaved = &copyCtx
 	return nil
 }
 
@@ -154,6 +157,8 @@ func TestCreateSliceAuthenticationContext_OK(t *testing.T) {
 		assert.Equal(t, uint8(1), session.SnssaiSST)
 		assert.Equal(t, "000001", session.SnssaiSD)
 		assert.Equal(t, "PENDING", session.Status)
+		assert.Equal(t, "amf", session.CallbackOwner)
+		assert.False(t, session.HasAIWContext)
 	}
 }
 

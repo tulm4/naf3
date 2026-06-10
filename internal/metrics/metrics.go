@@ -201,6 +201,12 @@ var (
 		Help: "Total rate-limit decisions by service, scope, and result",
 	}, []string{"service", "scope", "result"})
 
+	// ServerInitiatedCompletions tracks reverse-flow completion outcomes by message type.
+	ServerInitiatedCompletions = newCounterVec(prometheus.CounterOpts{
+		Name: "nssAAF_server_initiated_completions_total",
+		Help: "Total server-initiated reverse-flow completions by message type and completion state",
+	}, []string{"message_type", "completion"})
+
 	// HTTPClientRequestDuration tracks internal HTTP client request latency.
 	HTTPClientRequestDuration = newHistogramVec(prometheus.HistogramOpts{
 		Name:    "nssAAF_httpclient_request_duration_seconds",

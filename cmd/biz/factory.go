@@ -19,12 +19,14 @@ import (
 	"github.com/operator/nssAAF/internal/api/common"
 	"github.com/operator/nssAAF/internal/api/nssaa"
 	"github.com/operator/nssAAF/internal/ausf"
+	"github.com/operator/nssAAF/internal/biz"
 	"github.com/operator/nssAAF/internal/cache/redis"
 	"github.com/operator/nssAAF/internal/config"
 	"github.com/operator/nssAAF/internal/crypto"
 	"github.com/operator/nssAAF/internal/metrics"
 	"github.com/operator/nssAAF/internal/nfclient"
 	"github.com/operator/nssAAF/internal/nrf"
+	"github.com/operator/nssAAF/internal/proto"
 	"github.com/operator/nssAAF/internal/resilience"
 	"github.com/operator/nssAAF/internal/storage"
 	"github.com/operator/nssAAF/internal/storage/postgres"
@@ -250,7 +252,7 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 
 	// ─── AMF notifier with circuit breaker (CB-G3) ────────────────────
 	amfFactory := nfclient.NewFactory(amfRegistry)
-	_ = amf.NewClient(
+	amfNotifier := amf.NewClient(
 		amfFactory,
 		amfRegistry,
 		dlq,
@@ -296,6 +298,19 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 
 	// Start VIP health check for circuit breaker reset on failover
 	go aaaClient.StartVIPHealthCheck(context.Background())
+
+	// ─── Reverse-path coordinator for AAA server-initiated flows ─────────
+	resolver := biz.NewCorrelationResolver(redisPool.Client(), biz.NewNssaaSessionResolver(nssaaStore))
+	stateWriter := biz.NewReverseFlowStateWriter(nssaaStore)
+	aiwLinker := biz.NewAIWCompletionLinker(aiwStore)
+	coordinator := biz.NewServerInitiatedCoordinator(resolver, stateWriter, amfNotifier, aiwLinker)
+	serverInitiatedHandler = func(ctx context.Context, req *proto.AaaServerInitiatedRequest) (*proto.AaaServerInitiatedResponse, error) {
+		result, err := coordinator.Handle(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		return &result.Response, nil
+	}
 
 	// ─── N58: Nnssaaf_NSSAA ─────────────────────────────────────────────
 	nssaaHandler := nssaa.NewHandler(nssaaStore,
