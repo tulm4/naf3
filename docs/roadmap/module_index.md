@@ -10,6 +10,7 @@
 | `cmd/aaa-gateway/` | `docs/design/01_service_model.md` §5.4.5 | R | READY |
 | `internal/proto/` | `docs/design/01_service_model.md` §5.4.6 | R | READY |
 | `internal/aaa/gateway/` | `docs/design/01_service_model.md` §5.4.5 | R | READY |
+| `internal/biz/` | `docs/design/01_service_model.md` §5.4 | R / 4 | READY |
 | `internal/api/common/` | `docs/design/02_nssaa_api.md` §Common | 1 | READY |
 | `internal/types/` | `docs/design/04_data_model.md` | 1 | READY |
 | `internal/api/nssaa/` | `docs/design/02_nssaa_api.md` | 1 | READY |

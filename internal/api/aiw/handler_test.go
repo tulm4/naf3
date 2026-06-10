@@ -21,12 +21,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type mockStore struct {
-	data      map[string]*storage.AiwSession
-	loadErr   error
-	saveErr   error
-	deleteErr error
-}
+	type mockStore struct {
+		data      map[string]*storage.AiwSession
+		loadErr   error
+		saveErr   error
+		deleteErr error
+		lastSaved *storage.AiwSession
+	}
 
 func newMockStore() *mockStore {
 	return &mockStore{data: make(map[string]*storage.AiwSession)}
@@ -46,7 +47,9 @@ func (m *mockStore) Save(_ context.Context, ctx *storage.AiwSession) error {
 	if m.saveErr != nil {
 		return m.saveErr
 	}
-	m.data[ctx.AuthCtxID] = ctx
+	copyCtx := *ctx
+	m.data[ctx.AuthCtxID] = &copyCtx
+	m.lastSaved = &copyCtx
 	return nil
 }
 
@@ -128,6 +131,21 @@ func TestCreateAuthenticationContext_WithOptionalFields(t *testing.T) {
 	err := json.Unmarshal(rec.Body.Bytes(), &resp)
 	require.NoError(t, err)
 	assert.NotNil(t, resp.EapMessage)
+}
+
+func TestCreateAuthenticationContext_PersistsPendingStatus(t *testing.T) {
+	store := newMockStore()
+	h := NewHandler(store, WithAPIRoot("https://nssAAF.example.com"))
+
+	body := map[string]interface{}{
+		"supi":     "imsi-208046000000001",
+		"eapIdRsp": "dXNlckBleGFtcGxlLmNvbQ==",
+	}
+
+	rec := doRequest(h, http.MethodPost, "/nnssaaf-aiw/v1/authentications", body)
+	require.Equal(t, http.StatusCreated, rec.Code)
+	require.NotNil(t, store.lastSaved)
+	assert.Equal(t, "PENDING", store.lastSaved.Status)
 }
 
 func TestCreateAuthenticationContext_InvalidSupi(t *testing.T) {

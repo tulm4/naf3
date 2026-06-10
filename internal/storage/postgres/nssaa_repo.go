@@ -38,6 +38,8 @@ type nssaaRow struct {
 	FailureCause    string
 	ReauthNotifURI  string
 	RevocNotifURI   string
+	CallbackOwner   string
+	HasAIWContext   bool
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	ExpiresAt       time.Time
@@ -101,6 +103,7 @@ func (r *NssaaRepository) loadRow(ctx context.Context, authCtxID string) (*nssaa
 			auth_ctx_id, gpsi, gpsi_hash, supi, snssai_sst, snssai_sd,
 			amf_instance_id, amf_ip, amf_region,
 			reauth_notif_uri, revoc_notif_uri,
+			callback_owner, has_aiw_context,
 			aaa_config_id, eap_session_state,
 			eap_rounds, max_eap_rounds, eap_last_nonce,
 			nssaa_status, auth_result,
@@ -137,12 +140,13 @@ func (r *NssaaRepository) createRow(ctx context.Context, s *nssaaRow) error {
 			auth_ctx_id, gpsi, gpsi_hash, supi, snssai_sst, snssai_sd,
 			amf_instance_id, amf_ip, amf_region,
 			reauth_notif_uri, revoc_notif_uri,
+			callback_owner, has_aiw_context,
 			aaa_config_id, eap_session_state,
 			eap_rounds, max_eap_rounds, eap_last_nonce,
 			nssaa_status, auth_result,
 			failure_reason, failure_cause,
 			created_at, updated_at, expires_at
-		) VALUES ($1, $2, $3, '', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)`
+		) VALUES ($1, $2, $3, '', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)`
 
 	var amfIP interface{}
 	if s.AMFIP != nil {
@@ -158,6 +162,7 @@ func (r *NssaaRepository) createRow(ctx context.Context, s *nssaaRow) error {
 		s.SnssaiSST, s.SnssaiSD,
 		s.AMFInstanceID, amfIP, s.AMFRegion,
 		s.ReauthNotifURI, s.RevocNotifURI,
+		s.CallbackOwner, s.HasAIWContext,
 		aaaConfigID, stateCiphertext,
 		s.EAPRounds, s.MaxEAPRounds, s.EAPLastNonce,
 		s.NssaaStatus, s.AuthResult,
@@ -189,8 +194,10 @@ func (r *NssaaRepository) updateRow(ctx context.Context, s *nssaaRow) error {
 			eap_rounds = $7, eap_last_nonce = $8,
 			nssaa_status = $9, auth_result = $10,
 			failure_reason = $11, failure_cause = $12,
-			updated_at = $13, expires_at = $14,
-			completed_at = $15, terminated_at = $16
+			reauth_notif_uri = $13, revoc_notif_uri = $14,
+			callback_owner = $15, has_aiw_context = $16,
+			updated_at = $17, expires_at = $18,
+			completed_at = $19, terminated_at = $20
 		WHERE auth_ctx_id = $1`
 
 	rowsAffected, err := r.pool.ExecResult(ctx, sql,
@@ -200,6 +207,8 @@ func (r *NssaaRepository) updateRow(ctx context.Context, s *nssaaRow) error {
 		s.EAPRounds, s.EAPLastNonce,
 		s.NssaaStatus, s.AuthResult,
 		s.FailureReason, s.FailureCause,
+		s.ReauthNotifURI, s.RevocNotifURI,
+		s.CallbackOwner, s.HasAIWContext,
 		s.UpdatedAt, s.ExpiresAt,
 		s.CompletedAt, s.TerminatedAt,
 	)
@@ -225,6 +234,7 @@ func (r *NssaaRepository) scanRow(row pgx.Row) (*nssaaRow, error) {
 		&s.AuthCtxID, &rawGPSI, new(string), new(string), &s.SnssaiSST, &s.SnssaiSD,
 		&s.AMFInstanceID, &amfIP, &s.AMFRegion,
 		&s.ReauthNotifURI, &s.RevocNotifURI,
+		&s.CallbackOwner, &s.HasAIWContext,
 		&aaaConfigID, &stateBytes,
 		&s.EAPRounds, &s.MaxEAPRounds, &s.EAPLastNonce,
 		&s.NssaaStatus, &s.AuthResult,
@@ -260,18 +270,20 @@ func (r *NssaaRepository) scanRow(row pgx.Row) (*nssaaRow, error) {
 // rowToSession converts a DB row to a domain session.
 func (r *NssaaRepository) rowToSession(s *nssaaRow) *storage.NssaaSession {
 	return &storage.NssaaSession{
-		AuthCtxID:   s.AuthCtxID,
-		GPSI:        s.GPSI,
-		SnssaiSST:   s.SnssaiSST,
-		SnssaiSD:    s.SnssaiSD,
-		AmfInstance: s.AMFInstanceID,
-		ReauthURI:   s.ReauthNotifURI,
-		RevocURI:    s.RevocNotifURI,
-		EapPayload:  s.EAPSessionState,
-		Status:      string(s.NssaaStatus),
-		CreatedAt:   s.CreatedAt,
-		UpdatedAt:   s.UpdatedAt,
-		ExpiresAt:   s.ExpiresAt,
+		AuthCtxID:      s.AuthCtxID,
+		GPSI:           s.GPSI,
+		SnssaiSST:      s.SnssaiSST,
+		SnssaiSD:       s.SnssaiSD,
+		AmfInstance:    s.AMFInstanceID,
+		ReauthURI:      s.ReauthNotifURI,
+		RevocURI:       s.RevocNotifURI,
+		EapPayload:     s.EAPSessionState,
+		Status:         string(s.NssaaStatus),
+		CallbackOwner:  s.CallbackOwner,
+		HasAIWContext:  s.HasAIWContext,
+		CreatedAt:      s.CreatedAt,
+		UpdatedAt:      s.UpdatedAt,
+		ExpiresAt:      s.ExpiresAt,
 	}
 }
 
@@ -301,6 +313,8 @@ func (r *NssaaRepository) sessionToRow(s *storage.NssaaSession) *nssaaRow {
 		RevocNotifURI:   s.RevocURI,
 		EAPSessionState: s.EapPayload,
 		NssaaStatus:     types.NssaaStatus(s.Status),
+		CallbackOwner:   s.CallbackOwner,
+		HasAIWContext:   s.HasAIWContext,
 		CreatedAt:       createdAt,
 		UpdatedAt:       updatedAt,
 		ExpiresAt:       expiresAt,

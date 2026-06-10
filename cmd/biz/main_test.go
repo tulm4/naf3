@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -87,9 +89,53 @@ func TestServer_AaaForwardEndpoint_NotImplemented(t *testing.T) {
 	assert.Equal(t, http.StatusNotImplemented, resp.StatusCode)
 }
 
+func TestHandleServerInitiated_UsesCoordinatorResponse(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/aaa/server-initiated", bytes.NewReader([]byte(`{
+		"v":"1.0",
+		"sessionId":"sess-1",
+		"authCtxId":"auth-1",
+		"transportType":"RADIUS",
+		"messageType":"RAR",
+		"payload":"AQID"
+	}`)))
+	req.Header.Set("Content-Type", "application/json")
+
+	old := serverInitiatedHandler
+	defer func() { serverInitiatedHandler = old }()
+	serverInitiatedHandler = func(ctx context.Context, req *proto.AaaServerInitiatedRequest) (*proto.AaaServerInitiatedResponse, error) {
+		return &proto.AaaServerInitiatedResponse{
+			Version:   proto.CurrentVersion,
+			SessionID: req.SessionID,
+			AuthCtxID: req.AuthCtxID,
+			Payload:   []byte{2, 0, 0, 12},
+		}, nil
+	}
+
+	handleServerInitiated(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), "auth-1") {
+		t.Fatalf("body = %s, expected auth-1", recorder.Body.String())
+	}
+}
+
 // TestServer_ServerInitiated_RAR verifies that POST /aaa/server-initiated
 // with messageType=RAR returns 200 and processes the request.
 func TestServer_ServerInitiated_RAR(t *testing.T) {
+	old := serverInitiatedHandler
+	defer func() { serverInitiatedHandler = old }()
+	serverInitiatedHandler = func(ctx context.Context, req *proto.AaaServerInitiatedRequest) (*proto.AaaServerInitiatedResponse, error) {
+		return &proto.AaaServerInitiatedResponse{
+			Version:   proto.CurrentVersion,
+			SessionID: req.SessionID,
+			AuthCtxID: req.AuthCtxID,
+			Payload:   []byte{2, 0, 0, 12},
+		}, nil
+	}
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/aaa/server-initiated" {
 			handleServerInitiated(w, r)
@@ -126,6 +172,15 @@ func TestServer_ServerInitiated_RAR(t *testing.T) {
 // TestServer_ServerInitiated_InvalidMessageType verifies that POST /aaa/server-initiated
 // with an unknown messageType returns 400.
 func TestServer_ServerInitiated_InvalidMessageType(t *testing.T) {
+	old := serverInitiatedHandler
+	defer func() { serverInitiatedHandler = old }()
+	serverInitiatedHandler = func(ctx context.Context, req *proto.AaaServerInitiatedRequest) (*proto.AaaServerInitiatedResponse, error) {
+		if req.MessageType != proto.MessageTypeRAR && req.MessageType != proto.MessageTypeASR && req.MessageType != proto.MessageTypeCoA {
+			return nil, errors.New("unknown message type")
+		}
+		return &proto.AaaServerInitiatedResponse{Version: proto.CurrentVersion, SessionID: req.SessionID, AuthCtxID: req.AuthCtxID, Payload: []byte{1}}, nil
+	}
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/aaa/server-initiated" {
 			handleServerInitiated(w, r)
@@ -153,7 +208,7 @@ func TestServer_ServerInitiated_InvalidMessageType(t *testing.T) {
 
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
-	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	assert.Equal(t, http.StatusBadGateway, resp.StatusCode)
 }
 
 // TestServer_ServerInitiated_WrongMethod verifies that GET /aaa/server-initiated

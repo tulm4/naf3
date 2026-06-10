@@ -65,16 +65,18 @@ type NssaaStore = storage.NssaaStore
 // authCtxToNssaaSession converts nssaa.AuthCtx → storage.NssaaSession.
 func authCtxToNssaaSession(a *AuthCtx) *storage.NssaaSession {
 	return &storage.NssaaSession{
-		AuthCtxID:   a.AuthCtxID,
-		GPSI:        a.GPSI,
-		SnssaiSST:   a.SnssaiSST,
-		SnssaiSD:    a.SnssaiSD,
-		AmfInstance: a.AmfInstance,
-		ReauthURI:   a.ReauthURI,
-		RevocURI:    a.RevocURI,
-		EapPayload:  a.EapPayload,
-		Status:      "PENDING",
-		ExpiresAt:   time.Now().Add(5 * time.Minute),
+		AuthCtxID:      a.AuthCtxID,
+		GPSI:           a.GPSI,
+		SnssaiSST:      a.SnssaiSST,
+		SnssaiSD:       a.SnssaiSD,
+		AmfInstance:    a.AmfInstance,
+		ReauthURI:      a.ReauthURI,
+		RevocURI:       a.RevocURI,
+		EapPayload:     a.EapPayload,
+		Status:         "PENDING",
+		CallbackOwner:  "amf",
+		HasAIWContext:  false,
+		ExpiresAt:      time.Now().Add(5 * time.Minute),
 	}
 }
 

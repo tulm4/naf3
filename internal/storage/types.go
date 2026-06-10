@@ -8,18 +8,20 @@ import "time"
 // Domain model owned by the storage layer.
 // Corresponds to the slice_auth_sessions table.
 type NssaaSession struct {
-	AuthCtxID   string
-	GPSI        string
-	SnssaiSST   uint8
-	SnssaiSD    string
-	AmfInstance string
-	ReauthURI   string
-	RevocURI    string
-	EapPayload  []byte
-	Status      string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	ExpiresAt   time.Time
+	AuthCtxID      string
+	GPSI           string
+	SnssaiSST      uint8
+	SnssaiSD       string
+	AmfInstance    string
+	ReauthURI      string
+	RevocURI       string
+	EapPayload     []byte
+	Status         string
+	CallbackOwner  string
+	HasAIWContext  bool
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	ExpiresAt      time.Time
 }
 
 // AiwSession represents an AIW authentication session.
