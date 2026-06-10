@@ -182,3 +182,144 @@ func TestCircuitBreaker_ServerIdentification(t *testing.T) {
 	assert.Equal(t, StateClosed, cb3.State(),
 		"failure on one server must not affect circuit breaker for another server")
 }
+
+// TestCircuitBreaker_NoSpuriousTransitions is a regression test for the circuit
+// breaker state-transition bug at the primitive layer.
+//
+// BUG: Higher-level callers (AMF notifier, etc.) may emit spurious transition
+// metrics when no real state change occurred (e.g., CLOSED → CLOSED). This test
+// verifies the primitive state machine is correct so callers can reliably detect
+// genuine transitions.
+//
+// RESPONSIBILITY BOUNDARY:
+//   - CircuitBreaker primitive: tracks state, performs transitions; does NOT
+//     emit metrics.
+//   - Caller responsibility: MUST only emit transition metrics when State()
+//     actually changes. The caller must snapshot state before an operation,
+//     compare with state after, and only emit if they differ.
+//
+// Example caller pattern (PSEUDOCODE):
+//
+//	before := cb.State()
+//	_ = cb.Allow()
+//	cb.RecordSuccess() // or RecordFailure()
+//	after := cb.State()
+//	if before != after {
+//	    emitMetric("circuit_transition", before, after)
+//	}
+//
+// This test exercises the full transition cycle to give callers a reliable
+// ground truth for verifying their metric emission logic.
+func TestCircuitBreaker_NoSpuriousTransitions(t *testing.T) {
+	cb := NewCircuitBreaker(5, 10*time.Millisecond, 3)
+
+	// --- CLOSED phase: no transitions expected ---
+
+	// Allow() when CLOSED → remains CLOSED, no transition
+	assert.Equal(t, StateClosed, cb.State())
+	_ = cb.Allow()
+	assert.Equal(t, StateClosed, cb.State(),
+		"Allow() on CLOSED must not change state")
+
+	// RecordSuccess() when CLOSED → remains CLOSED, no transition
+	assert.Equal(t, StateClosed, cb.State())
+	cb.RecordSuccess()
+	assert.Equal(t, StateClosed, cb.State(),
+		"RecordSuccess() on CLOSED must not change state")
+
+	// RecordFailure() 4 times below threshold → remains CLOSED
+	for i := 0; i < 4; i++ {
+		assert.Equal(t, StateClosed, cb.State())
+		cb.RecordFailure()
+		assert.Equal(t, StateClosed, cb.State(),
+			"RecordFailure() below threshold must not change state")
+	}
+
+	// --- CLOSED → OPEN transition ---
+
+	// 5th RecordFailure() → transitions CLOSED → OPEN
+	assert.Equal(t, StateClosed, cb.State())
+	cb.RecordFailure()
+	assert.Equal(t, StateOpen, cb.State(),
+		"5th RecordFailure() must transition CLOSED → OPEN")
+
+	// RecordFailure() when OPEN → remains OPEN (no transition)
+	// In OPEN state, failures are ignored — circuit stays open.
+	assert.Equal(t, StateOpen, cb.State())
+	cb.RecordFailure()
+	assert.Equal(t, StateOpen, cb.State(),
+		"RecordFailure() on OPEN must not change state (failure is already open)")
+
+	// Allow() when OPEN before timeout → remains OPEN, no transition
+	assert.Equal(t, StateOpen, cb.State())
+	_ = cb.Allow()
+	assert.Equal(t, StateOpen, cb.State(),
+		"Allow() on OPEN before timeout must not change state")
+
+	// --- OPEN → HALF_OPEN transition ---
+
+	// Wait for recovery timeout
+	time.Sleep(15 * time.Millisecond)
+
+	// Allow() after timeout → transitions OPEN → HALF_OPEN
+	assert.Equal(t, StateOpen, cb.State())
+	_ = cb.Allow()
+	assert.Equal(t, StateHalfOpen, cb.State(),
+		"Allow() after timeout must transition OPEN → HALF_OPEN")
+
+	// Allow() when HALF_OPEN → remains HALF_OPEN, no transition
+	assert.Equal(t, StateHalfOpen, cb.State())
+	_ = cb.Allow()
+	assert.Equal(t, StateHalfOpen, cb.State(),
+		"Allow() on HALF_OPEN must not change state")
+
+	// RecordFailure() when HALF_OPEN → transitions HALF_OPEN → OPEN
+	assert.Equal(t, StateHalfOpen, cb.State())
+	cb.RecordFailure()
+	assert.Equal(t, StateOpen, cb.State(),
+		"RecordFailure() on HALF_OPEN must transition HALF_OPEN → OPEN")
+
+	// Re-enter HALF_OPEN to test success path
+	time.Sleep(15 * time.Millisecond)
+	_ = cb.Allow()
+	assert.Equal(t, StateHalfOpen, cb.State())
+
+	// --- HALF_OPEN → CLOSED transition ---
+
+	// RecordSuccess() below threshold → remains HALF_OPEN
+	assert.Equal(t, StateHalfOpen, cb.State())
+	cb.RecordSuccess()
+	assert.Equal(t, StateHalfOpen, cb.State(),
+		"RecordSuccess() below threshold must not change state")
+
+	// RecordSuccess() at threshold → transitions HALF_OPEN → CLOSED
+	for i := 0; i < 3; i++ {
+		before := cb.State()
+		cb.RecordSuccess()
+		after := cb.State()
+		if before != after {
+			break // transition happened
+		}
+	}
+	assert.Equal(t, StateClosed, cb.State(),
+		"RecordSuccess() at threshold must transition HALF_OPEN → CLOSED")
+
+	// --- Back to CLOSED: confirm no spurious transitions ---
+
+	// RecordSuccess() when CLOSED → remains CLOSED, no transition
+	assert.Equal(t, StateClosed, cb.State())
+	cb.RecordSuccess()
+	assert.Equal(t, StateClosed, cb.State(),
+		"RecordSuccess() on CLOSED must not change state")
+
+	// RecordFailure() below threshold → remains CLOSED
+	for i := 0; i < 4; i++ {
+		assert.Equal(t, StateClosed, cb.State())
+		cb.RecordFailure()
+		assert.Equal(t, StateClosed, cb.State(),
+			"RecordFailure() below threshold must not change state")
+	}
+
+	// Confirm closed state after all operations
+	assert.Equal(t, StateClosed, cb.State())
+}

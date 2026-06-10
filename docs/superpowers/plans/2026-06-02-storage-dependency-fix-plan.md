@@ -20,7 +20,7 @@
 **Files:**
 - Create: `internal/storage/types.go`
 - Create: `internal/storage/store.go`
-- Modify: `internal/storage/bridge.go` (remove duplicate `ErrSessionNotFound` — use from errors.go)
+- Note: `bridge.go` already owns `ErrSessionNotFound` — no changes needed there.
 
 - [ ] **Step 1: Create `internal/storage/types.go`**
 
@@ -94,26 +94,19 @@ type AiwStore interface {
 }
 ```
 
-- [ ] **Step 3: Remove duplicate `ErrSessionNotFound` from `internal/storage/bridge.go`**
+- [ ] **Step 3: Verify bridge.go already has ErrSessionNotFound**
 
-Open `internal/storage/bridge.go`. Remove line 18:
-```go
-// ErrSessionNotFound is returned when a session is not found.
-var ErrSessionNotFound = errors.New("session not found")
-```
+`internal/storage/bridge.go` already defines `ErrSessionNotFound` (line 18). No changes needed — it serves as the canonical definition for the `storage` package. No Step 4 (errors.go) needed.
 
-This error is now defined in `errors.go` (Step 4). Keep `bridge.go`'s other content (types, interfaces, functions).
-
-- [ ] **Step 4: Verify `go build ./internal/storage/...` compiles**
+- [ ] **Step 3: Verify `go build ./internal/storage/...` compiles**
 
 Run: `go build ./internal/storage/...`
 Expected: No output (success)
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add internal/storage/types.go internal/storage/store.go internal/storage/errors.go
-git add internal/storage/bridge.go  # ErrSessionNotFound removed
+git add internal/storage/types.go internal/storage/store.go
 git commit -m "feat: add domain types and interfaces to storage package
 
 Defines NssaaSession/AiwSession domain types and NssaaStore/AiwStore

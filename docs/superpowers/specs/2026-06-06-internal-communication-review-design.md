@@ -52,6 +52,18 @@ For each communication path, the analysis should capture:
 5. timeout, retry, circuit breaker, or fallback behavior
 6. tracing, metrics, and logging coverage
 7. current completion status: implemented, partial, stubbed, or missing
+8. trust boundary and internal hop security expectations
+9. correlation model and keys used across the hop
+10. completion semantics for the hop
+11. ownership boundary: which component is the source of truth for the relevant responsibility
+
+The review must explicitly identify ownership for at least these responsibilities:
+
+- session state
+- auth context lifecycle
+- AAA routing decision
+- AMF notification responsibility
+- reverse-path response or callback correlation
 
 The review should then group findings into end-to-end flows.
 
@@ -59,9 +71,9 @@ The review should then group findings into end-to-end flows.
 
 ### Flow A: northbound client-initiated NSSAA path
 
-Expected shape:
+Target architectural path to validate:
 
-`AMF -> HTTP Gateway -> Biz Pod -> AAA Gateway -> AAA-S -> AAA Gateway -> Biz Pod -> AMF`
+`AMF -> HTTP Gateway -> Biz Pod -> AAA Gateway -> AAA-S -> return path via correlation, callback, or synchronous response back toward Biz Pod and AMF`
 
 Review focus:
 
@@ -73,9 +85,9 @@ Review focus:
 
 ### Flow B: northbound client-initiated AIW path
 
-Expected shape:
+Target architectural path to validate:
 
-`AUSF or client -> HTTP Gateway -> Biz Pod -> AAA Gateway -> AAA-S -> Biz Pod -> AUSF/client`
+`AUSF-triggered AIW or equivalent client-initiated request -> HTTP Gateway -> Biz Pod -> AAA Gateway -> AAA-S -> return path toward Biz Pod and initiating consumer`
 
 Review focus:
 
@@ -86,9 +98,9 @@ Review focus:
 
 ### Flow C: AAA server-initiated downstream-to-upstream path
 
-Expected shape:
+Target architectural path to validate:
 
-`AAA-S -> AAA Gateway -> Biz Pod -> AMF`
+`AAA-S -> AAA Gateway -> Biz Pod -> AMF or other affected state owner`
 
 Relevant cases:
 
@@ -137,6 +149,10 @@ For every important hop, capture:
 - persistence effects
 - resilience behavior
 - observability behavior
+- trust boundary and security expectation
+- correlation keys and correlation mechanism
+- completion semantics
+- source-of-truth owner for the affected state or decision
 
 ### 4. Gap catalog
 

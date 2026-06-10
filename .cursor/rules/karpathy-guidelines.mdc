@@ -16,6 +16,36 @@ Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-s
 - **`.cursor/skills/golang-patterns/SKILL.md`** — idiomatic Go patterns, error handling, concurrency, struct design, interface patterns, package organization, and tooling. Read the "Core Principles", "Error Handling Patterns", "Concurrency Patterns", "Interface Design", "Struct Design", and "Anti-Patterns to Avoid" sections before writing Go code.
 - **`.cursor/skills/golang-testing/SKILL.md`** — table-driven tests, subtests, TDD workflow, mocking with interfaces, golden files, benchmarks, fuzzing, and test coverage. Read the "Table-Driven Tests", "Test Helpers", "Mocking with Interfaces", and "Best Practices" sections before writing Go tests or reviewing test code.
 
+**IMPORTANT — Code Analysis:** Use **code-review-graph MCP** exclusively for codebase exploration. See `.cursor/rules/mcp-master-rules.mdc` for tool documentation. **Never use grep, Grep, Glob, or manual file reading for navigation** — the graph tools provide structural context that manual search cannot.
+
+## 0. Code Analysis (Mandatory)
+
+**Before touching any code, build a clear picture using MCP tools:**
+
+| Situation | Tool | Why |
+|-----------|------|-----|
+| Find function/type by name | `semantic_search_nodes_tool` | Fast semantic search with relationships |
+| Find callers/callees | `query_graph_tool` (callers_of/callees_of) | Trace execution flow |
+| Find tests for a function | `query_graph_tool` (tests_for) | Know existing coverage before modifying |
+| Find what a file imports | `query_graph_tool` (imports_of) | Understand dependencies |
+| Find files using a file | `query_graph_tool` (importers_of) | Find coupling |
+| Get all nodes in a file | `query_graph_tool` (file_summary) | Complete picture of a file |
+| Analyze changed files | `detect_changes_tool` | Risk scores + test gaps automatically |
+
+**Workflow Pattern:**
+
+```json
+// 1. Find what you're looking for
+{ "toolName": "semantic_search_nodes_tool", "arguments": { "query": "FunctionName", "repo_root": "/home/tulm/naf3" } }
+// 2. Check callers (impact analysis)
+{ "toolName": "query_graph_tool", "arguments": { "pattern": "callers_of", "target": "full/path::Type.Method", "repo_root": "/home/tulm/naf3" } }
+// 3. Check existing tests
+{ "toolName": "query_graph_tool", "arguments": { "pattern": "tests_for", "target": "full/path::Type.Method", "repo_root": "/home/tulm/naf3" } }
+// 4. Read only the specific code you need, not the whole file
+```
+
+**When to fallback to Grep/Read:** Only use manual tools when MCP returns 0 results (graph not yet updated for new files).
+
 ## 1. Think Before Coding
 
 **Don't assume. Don't hide confusion. Surface tradeoffs.**
