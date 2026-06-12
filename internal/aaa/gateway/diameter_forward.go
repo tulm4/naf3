@@ -27,6 +27,18 @@ const (
 	AppIDAAP = 5
 )
 
+// ConnectionStats tracks connection health metrics for observability.
+// Spec: GAP-DIA-06, GAP-DIA-07
+type ConnectionStats struct {
+	ConnectedAt   time.Time `json:"connected_at"`
+	LastDWA       time.Time `json:"last_dwa"`
+	LastDWR       time.Time `json:"last_dwr"`
+	MessagesSent  uint64    `json:"messages_sent"`
+	MessagesRecv  uint64    `json:"messages_recv"`
+	HandshakeAt   time.Time `json:"handshake_at"`
+	Errors        uint64    `json:"errors"`
+}
+
 // diamForwarderConfig holds configuration for the Diameter forwarder.
 // Spec: RFC 6733, RFC 4072, TS 29.561 Ch.17
 type diamForwarderConfig struct {
@@ -73,6 +85,9 @@ type diamForwarder struct {
 
 	// Atomic counter for generating unique hop-by-hop IDs.
 	hopByHopSeq uint64
+
+	// Connection statistics (GAP-DIA-06, GAP-DIA-07)
+	connStats ConnectionStats
 }
 
 // newDiamForwarder creates a new Diameter forwarder.
@@ -128,6 +143,10 @@ func newDiamForwarder(addr, network, originHost, originRealm, destHost, destReal
 	df.machine.Handle("DEA", df.handleDEA())
 	df.machine.Handle("STA", df.handleDEA())
 
+	// Register DWR/DWA handlers for connection stats (GAP-DIA-06, GAP-DIA-07)
+	df.machine.Handle("DWR", df.handleDWR())
+	df.machine.Handle("DWA", df.handleDWA())
+
 	return df
 }
 
@@ -143,6 +162,8 @@ func (df *diamForwarder) Connect(ctx context.Context) error {
 	df.mu.Lock()
 	df.conn = conn
 	df.connected = true
+	df.connStats.ConnectedAt = time.Now()
+	df.connStats.HandshakeAt = time.Now()
 	df.mu.Unlock()
 
 	// Increment Origin-State-Id on each new connection (GAP-DIA-02).
@@ -325,6 +346,8 @@ func (df *diamForwarder) Forward(ctx context.Context, eapPayload []byte, session
 		return nil, fmt.Errorf("diameter_forward: failed to send DER: %w", err)
 	}
 
+	df.incrementMessagesSent()
+
 	df.logger.Debug("diameter_forward_der_sent",
 		"session_id", sessionID,
 		"hop_by_hop", hopByHop,
@@ -350,6 +373,7 @@ func (df *diamForwarder) Forward(ctx context.Context, eapPayload []byte, session
 // handleDEA dispatches DEA (and STA) responses to pending channels by hop-by-hop ID.
 func (df *diamForwarder) handleDEA() diam.HandlerFunc {
 	return func(conn diam.Conn, m *diam.Message) {
+		df.incrementMessagesRecv()
 		hopByHop := m.Header.HopByHopID
 		df.pendingMu.RLock()
 		ch, ok := df.pending[hopByHop]
@@ -438,6 +462,64 @@ func (df *diamForwarder) removePending(hopByHop uint32) {
 	df.pendingMu.Lock()
 	delete(df.pending, hopByHop)
 	df.pendingMu.Unlock()
+}
+
+// GetConnectionStats returns a snapshot of the current connection statistics.
+// Spec: GAP-DIA-06, GAP-DIA-07
+func (df *diamForwarder) GetConnectionStats() ConnectionStats {
+	df.mu.RLock()
+	defer df.mu.RUnlock()
+	return df.connStats
+}
+
+// recordDWR records that a Device-Watchdog-Request was sent.
+// Spec: GAP-DIA-06
+func (df *diamForwarder) recordDWR() {
+	df.mu.Lock()
+	defer df.mu.Unlock()
+	now := time.Now()
+	df.connStats.LastDWR = now
+}
+
+// recordDWA records that a Device-Watchdog-Answer was received.
+// Spec: GAP-DIA-07
+func (df *diamForwarder) recordDWA() {
+	df.mu.Lock()
+	defer df.mu.Unlock()
+	now := time.Now()
+	df.connStats.LastDWA = now
+}
+
+// incrementMessagesSent increments the sent message counter.
+// Spec: GAP-DIA-06
+func (df *diamForwarder) incrementMessagesSent() {
+	df.mu.Lock()
+	defer df.mu.Unlock()
+	df.connStats.MessagesSent++
+}
+
+// incrementMessagesRecv increments the received message counter.
+// Spec: GAP-DIA-07
+func (df *diamForwarder) incrementMessagesRecv() {
+	df.mu.Lock()
+	defer df.mu.Unlock()
+	df.connStats.MessagesRecv++
+}
+
+// handleDWR handles incoming Device-Watchdog-Request messages.
+// Spec: GAP-DIA-06
+func (df *diamForwarder) handleDWR() diam.HandlerFunc {
+	return func(conn diam.Conn, m *diam.Message) {
+		df.recordDWR()
+	}
+}
+
+// handleDWA handles incoming Device-Watchdog-Answer messages.
+// Spec: GAP-DIA-07
+func (df *diamForwarder) handleDWA() diam.HandlerFunc {
+	return func(conn diam.Conn, m *diam.Message) {
+		df.recordDWA()
+	}
 }
 
 // encodeSnssaiAVP encodes S-NSSAI as a grouped AVP (code 310, 3GPP vendor).

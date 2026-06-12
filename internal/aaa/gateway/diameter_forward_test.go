@@ -5,6 +5,7 @@ package gateway
 import (
 	"log/slog"
 	"testing"
+	"time"
 )
 
 // DefaultConfig returns a default diamForwarderConfig with spec-compliant values.
@@ -219,5 +220,159 @@ func TestDiamForwarder_ZeroAuthApplicationId_DefaultsToDiameterEAP(t *testing.T)
 	// Zero should default to AppIDAAP (5 - Diameter EAP)
 	if df.cfg.AuthApplicationID != AppIDAAP {
 		t.Errorf("expected default AuthApplicationID=%d for zero input, got %d", AppIDAAP, df.cfg.AuthApplicationID)
+	}
+}
+
+func TestDiamForwarder_GetConnectionStats(t *testing.T) {
+	df := newDiamForwarder(
+		"localhost:3868",
+		"tcp",
+		"aaa-gateway.example.com",
+		"example.com",
+		"aaa-server.example.com",
+		"example.com",
+		DefaultConfig(),
+		slog.Default(),
+	)
+
+	stats := df.GetConnectionStats()
+
+	if !stats.ConnectedAt.IsZero() {
+		t.Error("ConnectedAt should be zero before Connect() is called")
+	}
+	if stats.MessagesSent != 0 {
+		t.Errorf("expected 0 MessagesSent, got %d", stats.MessagesSent)
+	}
+	if stats.MessagesRecv != 0 {
+		t.Errorf("expected 0 MessagesRecv, got %d", stats.MessagesRecv)
+	}
+}
+
+func TestDiamForwarder_recordDWA(t *testing.T) {
+	df := newDiamForwarder(
+		"localhost:3868",
+		"tcp",
+		"aaa-gateway.example.com",
+		"example.com",
+		"aaa-server.example.com",
+		"example.com",
+		DefaultConfig(),
+		slog.Default(),
+	)
+
+	time.Sleep(10 * time.Millisecond)
+	df.recordDWA()
+
+	stats := df.GetConnectionStats()
+	if stats.LastDWA.IsZero() {
+		t.Error("LastDWA should be set after recordDWA()")
+	}
+}
+
+func TestDiamForwarder_recordDWR(t *testing.T) {
+	df := newDiamForwarder(
+		"localhost:3868",
+		"tcp",
+		"aaa-gateway.example.com",
+		"example.com",
+		"aaa-server.example.com",
+		"example.com",
+		DefaultConfig(),
+		slog.Default(),
+	)
+
+	df.recordDWR()
+
+	stats := df.GetConnectionStats()
+	if stats.LastDWR.IsZero() {
+		t.Error("LastDWR should be set after recordDWR()")
+	}
+}
+
+func TestDiamForwarder_incrementMessagesSent(t *testing.T) {
+	df := newDiamForwarder(
+		"localhost:3868",
+		"tcp",
+		"aaa-gateway.example.com",
+		"example.com",
+		"aaa-server.example.com",
+		"example.com",
+		DefaultConfig(),
+		slog.Default(),
+	)
+
+	df.incrementMessagesSent()
+	df.incrementMessagesSent()
+
+	stats := df.GetConnectionStats()
+	if stats.MessagesSent != 2 {
+		t.Errorf("expected 2 messages sent, got %d", stats.MessagesSent)
+	}
+}
+
+func TestDiamForwarder_incrementMessagesRecv(t *testing.T) {
+	df := newDiamForwarder(
+		"localhost:3868",
+		"tcp",
+		"aaa-gateway.example.com",
+		"example.com",
+		"aaa-server.example.com",
+		"example.com",
+		DefaultConfig(),
+		slog.Default(),
+	)
+
+	df.incrementMessagesRecv()
+	df.incrementMessagesRecv()
+	df.incrementMessagesRecv()
+
+	stats := df.GetConnectionStats()
+	if stats.MessagesRecv != 3 {
+		t.Errorf("expected 3 messages received, got %d", stats.MessagesRecv)
+	}
+}
+
+func TestDiamForwarder_ConnectionStats_ConcurrentAccess(t *testing.T) {
+	df := newDiamForwarder(
+		"localhost:3868",
+		"tcp",
+		"aaa-gateway.example.com",
+		"example.com",
+		"aaa-server.example.com",
+		"example.com",
+		DefaultConfig(),
+		slog.Default(),
+	)
+
+	done := make(chan struct{})
+	iterations := 100
+
+	go func() {
+		for i := 0; i < iterations; i++ {
+			df.incrementMessagesSent()
+			df.recordDWR()
+		}
+		close(done)
+	}()
+
+	for i := 0; i < iterations; i++ {
+		df.incrementMessagesRecv()
+		df.recordDWA()
+	}
+
+	<-done
+
+	stats := df.GetConnectionStats()
+	if stats.MessagesSent != uint64(iterations) {
+		t.Errorf("expected MessagesSent=%d, got %d", iterations, stats.MessagesSent)
+	}
+	if stats.MessagesRecv != uint64(iterations) {
+		t.Errorf("expected MessagesRecv=%d, got %d", iterations, stats.MessagesRecv)
+	}
+	if stats.LastDWR.IsZero() {
+		t.Error("LastDWR should be set after concurrent recordDWR() calls")
+	}
+	if stats.LastDWA.IsZero() {
+		t.Error("LastDWA should be set after concurrent recordDWA() calls")
 	}
 }
