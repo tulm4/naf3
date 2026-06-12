@@ -23,8 +23,9 @@ type BizServiceClient interface {
 // a server-initiated message (RAR/ASR/CoA).
 // The response bytes are forwarded by AAA Gateway to AAA-S.
 type AaaServerInitiatedResponse struct {
-	Version   string `json:"v"`
-	SessionID string `json:"sessionId"`
-	AuthCtxID string `json:"authCtxId"`
-	Payload   []byte `json:"payload"` // Raw response bytes (RAR-Nak, ASA, etc.)
+	Version    string `json:"v"`
+	SessionID  string `json:"sessionId"`
+	AuthCtxID  string `json:"authCtxId"`
+	ResultCode uint32 `json:"resultCode"` // 0=success, 2001=DIAMETER_SUCCESS, 5002=UNKNOWN_SESSION_ID, etc.
+	Payload    []byte `json:"payload,omitempty"`
 }

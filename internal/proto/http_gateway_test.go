@@ -109,3 +109,35 @@ func TestAaaServerInitiatedResponse_JSONRoundtrip(t *testing.T) {
 		t.Errorf("Payload: got %v, want %v", got.Payload, resp.Payload)
 	}
 }
+
+func TestAaaServerInitiatedResponse_WithResultCode(t *testing.T) {
+	resp := &AaaServerInitiatedResponse{
+		Version:    "1.0",
+		SessionID:  "session-1",
+		AuthCtxID:  "auth-1",
+		ResultCode: 2001,
+	}
+	data, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("json.Marshal error: %v", err)
+	}
+	var got AaaServerInitiatedResponse
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("json.Unmarshal error: %v", err)
+	}
+	if got.ResultCode != 2001 {
+		t.Errorf("expected ResultCode 2001, got %d", got.ResultCode)
+	}
+}
+
+func TestAaaServerInitiatedResponse_DefaultZero(t *testing.T) {
+	// Old messages without ResultCode should default to 0 (success)
+	data := []byte(`{"v":"1.0","sessionId":"s1","authCtxId":"a1"}`)
+	var got AaaServerInitiatedResponse
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("json.Unmarshal error: %v", err)
+	}
+	if got.ResultCode != 0 {
+		t.Errorf("expected default ResultCode 0, got %d", got.ResultCode)
+	}
+}
