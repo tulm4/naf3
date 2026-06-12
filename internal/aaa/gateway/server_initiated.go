@@ -1,6 +1,6 @@
 // Package gateway provides the AAA Gateway component for the NSSAAF 3-component architecture.
 // It handles both client-initiated (Biz Pod → AAA-S) and server-initiated (AAA-S → Biz Pod) flows.
-// Spec: PHASE §2.3
+// Task 1.1
 package gateway
 
 import (
@@ -15,7 +15,7 @@ const (
 )
 
 // ServerInitiatedResponse holds the result of a server-initiated message processing.
-// Spec: PHASE §2.3
+// Task 1.1
 type ServerInitiatedResponse struct {
 	AuthCtxID  string
 	ResultCode uint32 // 2001=SUCCESS, 5xxx=ERROR
@@ -24,7 +24,7 @@ type ServerInitiatedResponse struct {
 }
 
 // ResponseChannel represents a pending server-initiated request waiting for a response.
-// Spec: PHASE §2.3
+// Task 1.1
 type ResponseChannel struct {
 	AuthCtxID   string
 	SessionID   string
@@ -32,15 +32,21 @@ type ResponseChannel struct {
 	Response    chan *ServerInitiatedResponse
 	CreatedAt   time.Time
 	ExpiresAt   time.Time
+	registry    *ServerInitiatedRegistry // back-reference for cleanup on timeout
 }
 
 // Wait blocks until a response is received or the timeout expires.
 // Returns a timeout response (ResultCode=3002 UNABLE_TO_DELIVER) if expired.
+// Task 1.1
 func (rc *ResponseChannel) Wait() *ServerInitiatedResponse {
 	select {
 	case resp := <-rc.Response:
 		return resp
 	case <-time.After(time.Until(rc.ExpiresAt)):
+		// Clean up registry entry to prevent memory leak
+		if rc.registry != nil {
+			rc.registry.Expire(rc.SessionID, rc.MessageType)
+		}
 		return &ServerInitiatedResponse{
 			ResultCode: ResultCodeUnableToDeliver,
 			ErrorCause: "timeout",
@@ -49,8 +55,7 @@ func (rc *ResponseChannel) Wait() *ServerInitiatedResponse {
 }
 
 // ServerInitiatedRegistry manages pending server-initiated requests.
-// It maps "sessionID:messageType" to ResponseChannel for coordinated response handling.
-// Spec: PHASE §2.3
+// Task 1.1
 type ServerInitiatedRegistry struct {
 	pending map[string]*ResponseChannel
 	mu      sync.RWMutex
@@ -71,7 +76,7 @@ func registryKey(sessionID, messageType string) string {
 }
 
 // Register creates a new pending request and returns its ResponseChannel.
-// Returns error (UNABLE_TO_DELIVER) if a request for the same sessionID:messageType already exists.
+// Task 1.1
 func (r *ServerInitiatedRegistry) Register(sessionID, authCtxID, messageType string, timeout time.Duration) (*ResponseChannel, error) {
 	key := registryKey(sessionID, messageType)
 
@@ -86,6 +91,7 @@ func (r *ServerInitiatedRegistry) Register(sessionID, authCtxID, messageType str
 		Response:    make(chan *ServerInitiatedResponse, 1),
 		CreatedAt:   time.Now(),
 		ExpiresAt:   time.Now().Add(timeout),
+		registry:    r, // back-reference for cleanup on timeout
 	}
 
 	r.mu.Lock()
@@ -107,6 +113,7 @@ func (r *ServerInitiatedRegistry) Register(sessionID, authCtxID, messageType str
 }
 
 // Complete delivers a response to the pending request and removes it from the registry.
+// Task 1.1
 func (r *ServerInitiatedRegistry) Complete(sessionID, messageType string, resp *ServerInitiatedResponse) {
 	key := registryKey(sessionID, messageType)
 
@@ -125,4 +132,16 @@ func (r *ServerInitiatedRegistry) Complete(sessionID, messageType string, resp *
 	default:
 		// Channel already had a value (timeout already returned), ignore
 	}
+}
+
+// Expire removes a pending request from the registry without delivering a response.
+// Called when Wait() times out to prevent memory leaks.
+// Task 1.1
+func (r *ServerInitiatedRegistry) Expire(sessionID, messageType string) {
+	key := registryKey(sessionID, messageType)
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	delete(r.pending, key)
 }
