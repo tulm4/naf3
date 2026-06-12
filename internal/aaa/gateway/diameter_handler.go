@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/operator/nssAAF/internal/diameter"
 	"github.com/fiorix/go-diameter/v4/diam"
 	"github.com/fiorix/go-diameter/v4/diam/avp"
 	"github.com/fiorix/go-diameter/v4/diam/datatype"
@@ -196,6 +197,8 @@ func (h *DiameterHandler) HandleConnection(conn net.Conn) {
 // This handler only fires after CER/CEA handshake succeeds.
 // It registers the pending ASR with the registry, forwards to Biz Pod,
 // waits for Biz Pod response, and sends ASA with the result code.
+//
+// Spec: RFC 6733 §5.3, ASR/ASA as per TS 29.561 Ch.17
 func (h *DiameterHandler) handleASR() diam.HandlerFunc {
 	return func(conn diam.Conn, m *diam.Message) {
 		sessionID := extractSessionIDFromMsg(m)
@@ -211,7 +214,6 @@ func (h *DiameterHandler) handleASR() diam.HandlerFunc {
 			"end_to_end", m.Header.EndToEndID,
 		)
 
-		// Serialize the raw ASR message for forwarding to Biz Pod.
 		raw, err := m.Serialize()
 		if err != nil {
 			h.logger.Error("failed to serialize ASR", "error", err)
@@ -219,8 +221,6 @@ func (h *DiameterHandler) handleASR() diam.HandlerFunc {
 			return
 		}
 
-		// Register the pending ASR request with the registry.
-		// This allows Biz Pod to correlate its response.
 		respCh, err := h.registry.Register(sessionID, authCtxID, "ASR", 10*time.Second)
 		if err != nil {
 			h.logger.Error("failed to register ASR", "error", err)
@@ -228,20 +228,17 @@ func (h *DiameterHandler) handleASR() diam.HandlerFunc {
 			return
 		}
 
-		// Forward to Biz Pod asynchronously (non-blocking).
+		// Detach entire flow into background goroutine to avoid blocking the
+		// handler goroutine. Under high load, blocking would exhaust the pool.
 		go func() {
-			h.forwardToBiz(conn.Context(), sessionID, "DIAMETER", "ASR", raw)
+			h.forwardToBiz(context.Background(), sessionID, "DIAMETER", "ASR", raw)
+			resp := respCh.Wait()
+			h.logger.Info("ASR: received response from registry",
+				"session_id", sessionID,
+				"result_code", resp.ResultCode,
+			)
+			h.sendASAWithResult(conn, m, resp)
 		}()
-
-		// Wait for Biz Pod response via the registry.
-		resp := respCh.Wait()
-		h.logger.Info("ASR: received response from registry",
-			"session_id", sessionID,
-			"result_code", resp.ResultCode,
-		)
-
-		// Send ASA with the result code from Biz Pod.
-		h.sendASAWithResult(conn, m, resp)
 	}
 }
 
@@ -270,7 +267,11 @@ func (h *DiameterHandler) handleASA() diam.HandlerFunc {
 	}
 }
 
-// handleRAR handles Re-Auth-Request from AAA-S (server-initiated reauth).
+// handleRAR handles Re-Auth-Request from AAA-S (server-initiated).
+// Follows the same register → forward → wait → sendRAA pattern as handleASR
+// to ensure Biz Pod response is processed before sending RAA.
+//
+// Spec: RFC 6733 §5.3, RAR/RAA as per TS 29.561 Ch.17
 func (h *DiameterHandler) handleRAR() diam.HandlerFunc {
 	return func(conn diam.Conn, m *diam.Message) {
 		sessionID := extractSessionIDFromMsg(m)
@@ -278,16 +279,49 @@ func (h *DiameterHandler) handleRAR() diam.HandlerFunc {
 			sessionID = "unknown"
 		}
 
+		authCtxID := h.extractAuthCtxID(m)
+
 		h.logger.Info("Diameter RAR received", "session_id", sessionID)
 
-		// Send RAA back.
-		h.sendRAA(conn, m)
+		raw, err := m.Serialize()
+		if err != nil {
+			h.logger.Error("failed to serialize RAR", "error", err)
+			h.sendRAAWithResult(conn, m, &ServerInitiatedResponse{ResultCode: 3002, ErrorCause: "serialize_failed"})
+			return
+		}
 
-		raw, _ := m.Serialize()
-		// Extract context from the connection for distributed tracing continuity.
-		// This ensures RAR server-initiated re-auth is traced as a child of the
-		// AAA-S initiation span (TS 23.502 §4.2.9.3).
-		h.forwardToBiz(conn.Context(), sessionID, "DIAMETER", "RAR", raw)
+		respCh, err := h.registry.Register(sessionID, authCtxID, "RAR", 10*time.Second)
+		if err != nil {
+			h.logger.Error("failed to register RAR", "error", err)
+			h.sendRAAWithResult(conn, m, &ServerInitiatedResponse{ResultCode: 3002, ErrorCause: "register_failed"})
+			return
+		}
+
+		go func() {
+			h.forwardToBiz(context.Background(), sessionID, "DIAMETER", "RAR", raw)
+			resp := respCh.Wait()
+			h.logger.Info("RAR: received response from registry",
+				"session_id", sessionID,
+				"result_code", resp.ResultCode,
+			)
+			h.sendRAAWithResult(conn, m, resp)
+		}()
+	}
+}
+
+// sendRAAWithResult sends Re-Auth-Answer with the specified result code.
+// Used when waiting for Biz Pod response before sending RAA.
+func (h *DiameterHandler) sendRAAWithResult(conn diam.Conn, req *diam.Message, resp *ServerInitiatedResponse) {
+	ans := req.Answer(resp.ResultCode)
+	ans.Header.HopByHopID = req.Header.HopByHopID
+	ans.Header.EndToEndID = req.Header.EndToEndID
+	_, _ = ans.NewAVP(avp.OriginHost, avp.Mbit, 0, h.sm.Settings().OriginHost)
+	_, _ = ans.NewAVP(avp.OriginRealm, avp.Mbit, 0, h.sm.Settings().OriginRealm)
+	if resp.Payload != nil {
+		_, _ = ans.NewAVP(diameter.AVPCodeEAPPayload, avp.Mbit, 0, datatype.OctetString(resp.Payload))
+	}
+	if _, err := ans.WriteTo(conn); err != nil {
+		h.logger.Error("failed to send RAA", "error", err)
 	}
 }
 

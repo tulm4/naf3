@@ -98,7 +98,9 @@ func (r *ServerInitiatedRegistry) Register(sessionID, authCtxID, messageType str
 	defer r.mu.Unlock()
 
 	if _, exists := r.pending[key]; exists {
-		// Return error response for duplicate registration
+		// Delete the ORIGINAL entry to prevent leak.
+		// Return the new channel with duplicate error to the caller.
+		delete(r.pending, key)
 		go func() {
 			rc.Response <- &ServerInitiatedResponse{
 				ResultCode: ResultCodeUnableToDeliver,
