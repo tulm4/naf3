@@ -333,14 +333,48 @@ func (h *DiameterHandler) handleRAA() diam.HandlerFunc {
 	}
 }
 
-// handleSTR handles Session-Termination-Request from AAA-S.
+// handleSTR handles Session-Termination-Request from AAA-S (server-initiated).
+// This handler only fires after CER/CEA handshake succeeds.
+// It registers the pending STR with the registry, forwards to Biz Pod,
+// waits for Biz Pod response, and sends STA with the result code.
+//
+// Spec: RFC 6733 §5.3, STR/STA as per TS 29.561 Ch.17
 func (h *DiameterHandler) handleSTR() diam.HandlerFunc {
 	return func(conn diam.Conn, m *diam.Message) {
 		sessionID := extractSessionIDFromMsg(m)
+		if sessionID == "" {
+			sessionID = "unknown"
+		}
+
+		authCtxID := h.extractAuthCtxID(m)
+
 		h.logger.Info("Diameter STR received", "session_id", sessionID)
 
-		// Send STA back.
-		h.sendSTA(conn, m)
+		raw, err := m.Serialize()
+		if err != nil {
+			h.logger.Error("failed to serialize STR", "error", err)
+			h.sendSTAWithResult(conn, m, &ServerInitiatedResponse{ResultCode: 3002, ErrorCause: "serialize_failed"})
+			return
+		}
+
+		respCh, err := h.registry.Register(sessionID, authCtxID, "STR", 10*time.Second)
+		if err != nil {
+			h.logger.Error("failed to register STR", "error", err)
+			h.sendSTAWithResult(conn, m, &ServerInitiatedResponse{ResultCode: 3002, ErrorCause: "register_failed"})
+			return
+		}
+
+		// Detach entire flow into background goroutine to avoid blocking the
+		// handler goroutine. Under high load, blocking would exhaust the pool.
+		go func() {
+			h.forwardToBiz(context.Background(), sessionID, "DIAMETER", "STR", raw)
+			resp := respCh.Wait()
+			h.logger.Info("STR: received response from registry",
+				"session_id", sessionID,
+				"result_code", resp.ResultCode,
+			)
+			h.sendSTAWithResult(conn, m, resp)
+		}()
 	}
 }
 
@@ -349,6 +383,23 @@ func (h *DiameterHandler) handleSTA() diam.HandlerFunc {
 	return func(conn diam.Conn, m *diam.Message) {
 		sessionID := extractSessionIDFromMsg(m)
 		h.logger.Debug("diameter_sta_received", "session_id", sessionID)
+	}
+}
+
+// sendSTAWithResult sends Session-Termination-Answer with the given result code.
+// Used when waiting for Biz Pod response before sending STA.
+// Spec: TS 29.561 §17.3 (STA)
+func (h *DiameterHandler) sendSTAWithResult(conn diam.Conn, req *diam.Message, resp *ServerInitiatedResponse) {
+	ans := req.Answer(resp.ResultCode)
+	ans.Header.HopByHopID = req.Header.HopByHopID
+	ans.Header.EndToEndID = req.Header.EndToEndID
+	_, _ = ans.NewAVP(avp.OriginHost, avp.Mbit, 0, h.sm.Settings().OriginHost)
+	_, _ = ans.NewAVP(avp.OriginRealm, avp.Mbit, 0, h.sm.Settings().OriginRealm)
+	if resp.Payload != nil {
+		_, _ = ans.NewAVP(diameter.AVPCodeEAPPayload, avp.Mbit, 0, datatype.OctetString(resp.Payload))
+	}
+	if _, err := ans.WriteTo(conn); err != nil {
+		h.logger.Error("failed to send STA", "error", err)
 	}
 }
 
