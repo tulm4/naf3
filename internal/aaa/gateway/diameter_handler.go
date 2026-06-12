@@ -32,15 +32,13 @@ import (
 // CER/CEA internally. Registered handlers only fire after the handshake succeeds.
 type DiameterHandler struct {
 	logger        *slog.Logger
-	forwardToBiz func(ctx context.Context, sessionID string, transportType string, messageType string, raw []byte)
-	version      string
-	bizURL       string
-	httpClient   *http.Client
-	diamForwarder *diamForwarder // client-initiated forwarder
-
-	// sm is the state machine for server-side CER/CEA handling.
-	// Created in NewDiameterHandler with the AAA Gateway's identity.
-	sm *sm.StateMachine
+	forwardToBiz  func(ctx context.Context, sessionID string, transportType string, messageType string, raw []byte)
+	version       string
+	bizURL        string
+	httpClient    *http.Client
+	diamForwarder *diamForwarder
+	registry      *ServerInitiatedRegistry // tracks pending server-initiated requests
+	sm            *sm.StateMachine
 }
 
 // NewDiameterHandler creates a DiameterHandler with a go-diameter/v4 state machine.
@@ -50,6 +48,7 @@ func NewDiameterHandler(
 	version, bizURL string,
 	httpClient *http.Client,
 	diamForwarder *diamForwarder,
+	registry *ServerInitiatedRegistry,
 	originHost, originRealm string,
 ) *DiameterHandler {
 	settings := &sm.Settings{
@@ -68,6 +67,7 @@ func NewDiameterHandler(
 		bizURL:        bizURL,
 		httpClient:    httpClient,
 		diamForwarder: diamForwarder,
+		registry:      registry,
 		sm:            machine,
 	}
 
@@ -194,6 +194,8 @@ func (h *DiameterHandler) HandleConnection(conn net.Conn) {
 
 // handleASR handles Abort-Session-Request from AAA-S (server-initiated).
 // This handler only fires after CER/CEA handshake succeeds.
+// It registers the pending ASR with the registry, forwards to Biz Pod,
+// waits for Biz Pod response, and sends ASA with the result code.
 func (h *DiameterHandler) handleASR() diam.HandlerFunc {
 	return func(conn diam.Conn, m *diam.Message) {
 		sessionID := extractSessionIDFromMsg(m)
@@ -201,25 +203,62 @@ func (h *DiameterHandler) handleASR() diam.HandlerFunc {
 			sessionID = "unknown"
 		}
 
+		authCtxID := h.extractAuthCtxID(m)
+
 		h.logger.Info("Diameter ASR received",
 			"session_id", sessionID,
 			"hop_by_hop", m.Header.HopByHopID,
 			"end_to_end", m.Header.EndToEndID,
 		)
 
-		// Send ASA back to AAA-S.
-		h.sendASA(conn, m)
-
-		// Serialize the raw ASR message and forward to Biz Pod.
+		// Serialize the raw ASR message for forwarding to Biz Pod.
 		raw, err := m.Serialize()
 		if err != nil {
 			h.logger.Error("failed to serialize ASR", "error", err)
+			h.sendASAWithResult(conn, m, &ServerInitiatedResponse{ResultCode: 3002, ErrorCause: "serialize_failed"})
 			return
 		}
-		// Extract context from the connection for distributed tracing continuity.
-		// This ensures ASR/RAR server-initiated messages are traced as children
-		// of the AAA-S initiation span (TS 23.502 §4.2.9.3).
-		h.forwardToBiz(conn.Context(), sessionID, "DIAMETER", "ASR", raw)
+
+		// Register the pending ASR request with the registry.
+		// This allows Biz Pod to correlate its response.
+		respCh, err := h.registry.Register(sessionID, authCtxID, "ASR", 10*time.Second)
+		if err != nil {
+			h.logger.Error("failed to register ASR", "error", err)
+			h.sendASAWithResult(conn, m, &ServerInitiatedResponse{ResultCode: 3002, ErrorCause: "register_failed"})
+			return
+		}
+
+		// Forward to Biz Pod asynchronously (non-blocking).
+		go func() {
+			h.forwardToBiz(conn.Context(), sessionID, "DIAMETER", "ASR", raw)
+		}()
+
+		// Wait for Biz Pod response via the registry.
+		resp := respCh.Wait()
+		h.logger.Info("ASR: received response from registry",
+			"session_id", sessionID,
+			"result_code", resp.ResultCode,
+		)
+
+		// Send ASA with the result code from Biz Pod.
+		h.sendASAWithResult(conn, m, resp)
+	}
+}
+
+// sendASAWithResult sends Abort-Session-Answer with the specified result code.
+// This is used when waiting for Biz Pod response before sending ASA.
+func (h *DiameterHandler) sendASAWithResult(conn diam.Conn, req *diam.Message, resp *ServerInitiatedResponse) {
+	ans := req.Answer(resp.ResultCode)
+	ans.Header.HopByHopID = req.Header.HopByHopID
+	ans.Header.EndToEndID = req.Header.EndToEndID
+	_, _ = ans.NewAVP(avp.OriginHost, avp.Mbit, 0, h.sm.Settings().OriginHost)
+	_, _ = ans.NewAVP(avp.OriginRealm, avp.Mbit, 0, h.sm.Settings().OriginRealm)
+	if resp.Payload != nil {
+		// Use AVP code 1269 (Experimental-Result-Code) for extended result codes
+		_, _ = ans.NewAVP(avp.ExperimentalResult, avp.Mbit, 0, datatype.OctetString(resp.Payload))
+	}
+	if _, err := ans.WriteTo(conn); err != nil {
+		h.logger.Error("failed to send ASA", "error", err)
 	}
 }
 
@@ -335,6 +374,22 @@ func extractSessionIDFromMsg(m *diam.Message) string {
 				return string(os)
 			}
 			if os, ok := avp.Data.(datatype.OctetString); ok {
+				return string(os)
+			}
+		}
+	}
+	return ""
+}
+
+// extractAuthCtxID extracts the Auth-Application-Id AVP from a decoded diam.Message.
+// This AVP identifies the authentication context/session.
+func (h *DiameterHandler) extractAuthCtxID(m *diam.Message) string {
+	for _, avp := range m.AVP {
+		if avp.Code == 258 { // Auth-Application-Id AVP code
+			if ui32, ok := avp.Data.(datatype.Unsigned32); ok {
+				return fmt.Sprintf("%d", ui32)
+			}
+			if os, ok := avp.Data.(datatype.UTF8String); ok {
 				return string(os)
 			}
 		}

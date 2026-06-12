@@ -60,6 +60,7 @@ type Gateway struct {
 	version       string
 	logger        *slog.Logger
 
+	registry       *ServerInitiatedRegistry // tracks pending server-initiated requests
 	radiusHandler   *RadiusHandler
 	diameterHandler *DiameterHandler
 	radiusForwarder *radiusForwarder // RADIUS client (client-initiated path)
@@ -80,6 +81,10 @@ func New(cfg Config) *Gateway {
 
 	g.redis = newRedisClient(cfg.RedisAddr, cfg.RedisMode)
 	g.bizHTTPClient = &http.Client{Timeout: 30 * time.Second}
+
+	// Create registry for server-initiated request tracking.
+	// Biz Pods will call Complete() to deliver responses asynchronously.
+	g.registry = NewServerInitiatedRegistry(30 * time.Second)
 
 	g.radiusHandler = &RadiusHandler{
 		logger:       cfg.Logger,
@@ -119,6 +124,7 @@ func New(cfg Config) *Gateway {
 		cfg.BizServiceURL,
 		g.bizHTTPClient,
 		g.diamForwarder,
+		g.registry,
 		cfg.DiameterHost,
 		cfg.DiameterRealm,
 	)
@@ -300,6 +306,36 @@ func (g *Gateway) HandleForward(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// HandleServerInitiatedResponse handles POST /aaa/server-initiated/response from Biz Pod.
+// Biz Pod calls this after processing an ASR/RAR/CoA to deliver the result back to AAA Gateway.
+func (g *Gateway) HandleServerInitiatedResponse(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var resp proto.AaaServerInitiatedResponse
+	if err := json.NewDecoder(r.Body).Decode(&resp); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	g.logger.Info("HandleServerInitiatedResponse",
+		"session_id", resp.SessionID,
+		"auth_ctx_id", resp.AuthCtxID,
+		"result_code", resp.ResultCode,
+	)
+
+	// Deliver response to the pending request via registry.
+	g.registry.Complete(resp.SessionID, "ASR", &ServerInitiatedResponse{
+		AuthCtxID:  resp.AuthCtxID,
+		ResultCode: resp.ResultCode,
+		Payload:    resp.Payload,
+	})
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // writeSessionCorr writes SessionCorrEntry to Redis with TTL = DefaultPayloadTTL.
