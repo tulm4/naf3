@@ -55,13 +55,17 @@ type Config struct {
 
 	BizPodEntryTTL time.Duration // TTL for BizPodEntry keys (default 60s)
 
-	// Diameter protocol configuration (GAP-AAA-04, GAP-DIA-02, GAP-DIA-03):
+	// Diameter protocol configuration (GAP-AAA-04, GAP-DIA-02, GAP-DIA-03, GAP-DIA-04):
 	// Auth-Request-Type (AVP 406): 1=LOGIN, 2=AUTHORIZE_AUTHENTICATE, 3=PAY, 4=AUTHORIZE_ONLY
 	// Default: 2 (AUTHORIZE_AUTHENTICATE)
 	DiameterAuthRequestType uint32
 	// Auth-Application-Id (AVP 258): 5=Diameter EAP, 6=IMS, etc.
 	// Default: 5 (Diameter EAP)
 	DiameterAuthApplicationID uint32
+
+	// Peer validation (GAP-DIA-04): restrict incoming Diameter connections by Origin-Host/Realm
+	DiameterAllowedHosts  []string // Allowed Origin-Host values (empty = allow all)
+	DiameterAllowedRealms []string // Allowed Origin-Realm values (empty = allow all)
 }
 
 // Gateway is the AAA Gateway component. It runs in a separate process from Biz Pods.
@@ -147,9 +151,11 @@ func New(cfg Config) *Gateway {
 		cfg.DiameterHost,
 		cfg.DiameterRealm,
 		&DiameterHandlerConfig{
-			TLSCert:    cfg.TLSCert,
-			TLSKey:     cfg.TLSKey,
-			TLSCACert:  cfg.TLSCACert,
+			AllowedHosts:  cfg.DiameterAllowedHosts,
+			AllowedRealms: cfg.DiameterAllowedRealms,
+			TLSCert:       cfg.TLSCert,
+			TLSKey:        cfg.TLSKey,
+			TLSCACert:     cfg.TLSCACert,
 		},
 	)
 

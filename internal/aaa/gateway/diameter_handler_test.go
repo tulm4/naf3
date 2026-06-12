@@ -15,6 +15,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/fiorix/go-diameter/v4/diam/sm/smpeer"
 )
 
 func TestDiameterHandler_ASR_WaitsForBizPodResponse(t *testing.T) {
@@ -179,5 +181,79 @@ func generateTestCerts(t *testing.T, tmpDir string) (certFile, keyFile string) {
 	_ = keyOut.Close()
 
 	return certFile, keyFile
+}
+
+// Tests for peer validation (GAP-DIA-04).
+
+func TestDiameterHandler_validatePeer_Allowed(t *testing.T) {
+	cfg := &DiameterHandlerConfig{
+		AllowedHosts:  []string{"aaa-s.example.com"},
+		AllowedRealms: []string{"example.com"},
+	}
+	h := &DiameterHandler{logger: slog.Default(), cfg: cfg}
+
+	meta := &smpeer.Metadata{
+		OriginHost:  "aaa-s.example.com",
+		OriginRealm: "example.com",
+	}
+
+	err := h.validatePeer(meta)
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+}
+
+func TestDiameterHandler_validatePeer_HostRejected(t *testing.T) {
+	cfg := &DiameterHandlerConfig{
+		AllowedHosts:  []string{"aaa-s.example.com"},
+		AllowedRealms: []string{"example.com"},
+	}
+	h := &DiameterHandler{logger: slog.Default(), cfg: cfg}
+
+	meta := &smpeer.Metadata{
+		OriginHost:  "evil.example.com", // Not in allowed list
+		OriginRealm: "example.com",
+	}
+
+	err := h.validatePeer(meta)
+	if err == nil {
+		t.Error("expected error for rejected host")
+	}
+}
+
+func TestDiameterHandler_validatePeer_RealmRejected(t *testing.T) {
+	cfg := &DiameterHandlerConfig{
+		AllowedHosts:  []string{"aaa-s.example.com"},
+		AllowedRealms: []string{"example.com"},
+	}
+	h := &DiameterHandler{logger: slog.Default(), cfg: cfg}
+
+	meta := &smpeer.Metadata{
+		OriginHost:  "aaa-s.example.com",
+		OriginRealm: "evil.com", // Not in allowed list
+	}
+
+	err := h.validatePeer(meta)
+	if err == nil {
+		t.Error("expected error for rejected realm")
+	}
+}
+
+func TestDiameterHandler_validatePeer_EmptyListsAllowsAll(t *testing.T) {
+	cfg := &DiameterHandlerConfig{
+		AllowedHosts:  nil, // Empty = allow all
+		AllowedRealms: nil,
+	}
+	h := &DiameterHandler{logger: slog.Default(), cfg: cfg}
+
+	meta := &smpeer.Metadata{
+		OriginHost:  "any-host.example.com",
+		OriginRealm: "any-realm.example.com",
+	}
+
+	err := h.validatePeer(meta)
+	if err != nil {
+		t.Errorf("expected no error with empty lists, got %v", err)
+	}
 }
 

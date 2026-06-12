@@ -23,11 +23,13 @@ import (
 	"github.com/fiorix/go-diameter/v4/diam/sm/smpeer"
 )
 
-// DiameterHandlerConfig holds TLS configuration for the Diameter server.
+// DiameterHandlerConfig holds TLS configuration and peer allowlist for the Diameter server.
 type DiameterHandlerConfig struct {
-	TLSCert  string // Path to TLS certificate file
-	TLSKey   string // Path to TLS private key file
-	TLSCACert string // Path to CA certificate for client auth (optional)
+	AllowedHosts  []string // Allowed Origin-Host values (empty = allow all)
+	AllowedRealms []string // Allowed Origin-Realm values (empty = allow all)
+	TLSCert       string   // Path to TLS certificate file
+	TLSKey        string   // Path to TLS private key file
+	TLSCACert     string   // Path to CA certificate for client auth (optional)
 }
 
 // DiameterHandler handles Diameter protocol traffic on the SERVER-INITIATED path
@@ -244,9 +246,14 @@ func (h *DiameterHandler) HandleConnection(conn net.Conn) {
 	// HandshakeNotify() sends the diam.Conn after CER/CEA succeeds.
 	select {
 	case peerConn := <-h.sm.HandshakeNotify():
-		// Handshake succeeded. Log peer metadata.
+		// Handshake succeeded. Validate peer identity before accepting.
 		if meta, ok := smpeer.FromContext(peerConn.Context()); ok {
-			h.logger.Info("Diameter handshake completed",
+			if err := h.validatePeer(meta); err != nil {
+				h.logger.Error("peer_validation_failed", "error", err)
+				peerConn.Close()
+				return
+			}
+			h.logger.Info("Diameter peer handshake completed",
 				"peer_host", meta.OriginHost,
 				"peer_realm", meta.OriginRealm,
 				"peer_apps", meta.Applications,
@@ -532,6 +539,45 @@ func extractSessionIDFromMsg(m *diam.Message) string {
 		}
 	}
 	return ""
+}
+
+// validatePeer checks if the peer host/realm is in the allowed list.
+// If either list is empty (default), all peers are allowed.
+// Spec: TS 29.561 §6.1 (peer validation)
+func (h *DiameterHandler) validatePeer(meta *smpeer.Metadata) error {
+	if len(h.cfg.AllowedHosts) > 0 {
+		allowed := false
+		for _, host := range h.cfg.AllowedHosts {
+			if string(meta.OriginHost) == host {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			h.logger.Warn("peer_host_rejected",
+				"peer_host", meta.OriginHost,
+				"allowed_hosts", h.cfg.AllowedHosts)
+			return fmt.Errorf("peer host %s not in allowed list", meta.OriginHost)
+		}
+	}
+
+	if len(h.cfg.AllowedRealms) > 0 {
+		allowed := false
+		for _, realm := range h.cfg.AllowedRealms {
+			if string(meta.OriginRealm) == realm {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			h.logger.Warn("peer_realm_rejected",
+				"peer_realm", meta.OriginRealm,
+				"allowed_realms", h.cfg.AllowedRealms)
+			return fmt.Errorf("peer realm %s not in allowed list", meta.OriginRealm)
+		}
+	}
+
+	return nil
 }
 
 // extractAuthCtxID extracts the Auth-Application-Id AVP from a decoded diam.Message.
