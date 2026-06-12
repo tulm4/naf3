@@ -90,6 +90,7 @@ func New(cfg Config) *Gateway {
 		logger:       cfg.Logger,
 		tracer:      otel.Tracer("aaa-gateway/radius"),
 		forwardToBiz: g.forwardToBiz,
+		registry:     g.registry,
 	}
 
 	// Create the RADIUS forwarder for client-initiated path.

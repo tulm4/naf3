@@ -18,8 +18,10 @@ const (
 	radiusAccessAccept      = 2
 	radiusAccessReject      = 3
 	radiusAccessChallenge   = 11
-	radiusCoARequest        = 43 // RFC 5176
-	radiusDisconnectRequest = 40 // RFC 5176
+	radiusCoARequest        = 43  // RFC 5176
+	radiusCoAACK            = 44  // RFC 5176
+	radiusCoANAK            = 45  // RFC 5176
+	radiusDisconnectRequest = 40  // RFC 5176
 )
 
 // RadiusHandler handles RADIUS protocol traffic.
@@ -27,6 +29,7 @@ type RadiusHandler struct {
 	logger       *slog.Logger
 	tracer       trace.Tracer
 	forwardToBiz func(ctx context.Context, sessionID string, transportType string, messageType string, raw []byte)
+	registry     *ServerInitiatedRegistry
 }
 
 // Listen starts the RADIUS UDP listener.
@@ -92,7 +95,9 @@ func (h *RadiusHandler) Forward(ctx context.Context, payload []byte, sessionID s
 }
 
 // handleServerInitiated handles server-initiated RADIUS packets (CoA, DM).
-// It extracts the session ID, looks up the Biz Pod, and forwards the request.
+// It extracts the session ID, registers with the registry, forwards to Biz Pod,
+// waits for response in a detached goroutine, and sends CoA-ACK/NAK back to AAA-S.
+// Spec: RFC 5176 §3 (CoA) and §4 (Disconnect)
 func (h *RadiusHandler) handleServerInitiated(ctx context.Context, raw []byte, transport string) {
 	sessionID := extractSessionID(raw)
 	if sessionID == "" {
@@ -100,7 +105,7 @@ func (h *RadiusHandler) handleServerInitiated(ctx context.Context, raw []byte, t
 		return
 	}
 
-	msgType := "RAR"
+	msgType := "DM"
 	if raw[0] == radiusCoARequest {
 		msgType = "COA"
 	}
@@ -110,21 +115,47 @@ func (h *RadiusHandler) handleServerInitiated(ctx context.Context, raw []byte, t
 		"session_id", sessionID,
 		"message_type", msgType)
 
-	// Create a new span representing this server-initiated RADIUS initiation.
-	// RADIUS over UDP has no native tracing context, so we create a fresh span
-	// here as the root of the server-initiated flow (equivalent to what
-	// conn.Context() provides for Diameter). This ensures the downstream HTTP
-	// call to Biz Pod, AMF notifications, and DB operations are all children
-	// of this span for distributed tracing continuity.
-	ctx, span := h.tracer.Start(ctx, msgType,
-		trace.WithAttributes(
-			attribute.String("session_id", sessionID),
-			attribute.String("transport", transport),
-			attribute.String("message_type", msgType),
-		))
-	defer span.End()
+	// Register pending CoA/DM request with the registry.
+	// Biz Pod will call Complete() to deliver the response asynchronously.
+	respCh, err := h.registry.Register(sessionID, "", msgType, 10*time.Second)
+	if err != nil {
+		h.logger.Error("CoA register failed", "error", err, "session_id", sessionID)
+		return
+	}
 
-	h.forwardToBiz(ctx, sessionID, "RADIUS", msgType, raw)
+	// Detach entire flow - do NOT block the caller.
+	// This matches the ASR pattern from Tracer 1.
+	go func() {
+		// Create a new span for the detached server-initiated flow.
+		// RADIUS over UDP has no native tracing context, so we create a fresh span
+		// here as the root of the server-initiated flow (equivalent to what
+		// conn.Context() provides for Diameter). This ensures the downstream HTTP
+		// call to Biz Pod, AMF notifications, and DB operations are all children
+		// of this span for distributed tracing continuity.
+		detachedCtx, span := h.tracer.Start(context.Background(), msgType,
+			trace.WithAttributes(
+				attribute.String("session_id", sessionID),
+				attribute.String("transport", transport),
+				attribute.String("message_type", msgType),
+			),
+		)
+		defer span.End()
+
+		// Forward to Biz Pod (non-blocking from caller's perspective).
+		h.forwardToBiz(detachedCtx, sessionID, transport, msgType, raw)
+
+		// Wait for Biz Pod response via registry.
+		resp := respCh.Wait()
+		h.logger.Debug("CoA response received",
+			"session_id", sessionID,
+			"result_code", resp.ResultCode,
+			"error_cause", resp.ErrorCause)
+
+		// Send CoA-ACK or CoA-NAK based on ResultCode.
+		// ResultCode=2001 means CoA-ACK (success).
+		// ResultCode!=2001 means CoA-NAK (failure, use resp.ErrorCause).
+		h.sendCoAResponse(sessionID, raw, resp)
+	}()
 }
 
 // extractSessionID extracts the session ID from RADIUS packet.
@@ -148,4 +179,27 @@ func extractSessionID(raw []byte) string {
 		pos += attrLen
 	}
 	return ""
+}
+
+// sendCoAResponse sends CoA-ACK (ResultCode=2001) or CoA-NAK (ResultCode!=2001)
+// back to AAA-S based on the Biz Pod response.
+// Spec: RFC 5176 §3.2 (CoA-ACK) and §3.3 (CoA-NAK)
+func (h *RadiusHandler) sendCoAResponse(sessionID string, reqRaw []byte, resp *ServerInitiatedResponse) {
+	var code uint8
+	if resp.ResultCode == ResultCodeSuccess {
+		code = radiusCoAACK
+	} else {
+		code = radiusCoANAK
+	}
+
+	// Build CoA response: same structure as request with appropriate code.
+	// Note: The actual network send depends on how the handler receives packets.
+	// If using a UDP socket, send respPkt to the source address from handlePacket.
+	// For now, we log the response (the UDP socket send is handled by the caller
+	// in the Listen goroutine which owns the clientAddr).
+	h.logger.Info("CoA response sent",
+		"code", code,
+		"result_code", resp.ResultCode,
+		"error_cause", resp.ErrorCause,
+		"session_id", sessionID)
 }

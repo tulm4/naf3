@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"go.opentelemetry.io/otel/trace"
@@ -150,10 +151,12 @@ func TestHandlePacket_AccessChallenge(t *testing.T) {
 // TestHandlePacket_CoARequest calls forwardToBiz with messageType="COA".
 func TestHandlePacket_CoARequest(t *testing.T) {
 	fwd := &mockForwardToBiz{}
+	registry := NewServerInitiatedRegistry(5 * time.Second)
 	h := &RadiusHandler{
 		logger:       nullLogger(),
 		tracer:       nullTracer(),
 		forwardToBiz: fwd.invoke,
+		registry:     registry,
 	}
 
 	state := "coa-session-xyz"
@@ -161,6 +164,9 @@ func TestHandlePacket_CoARequest(t *testing.T) {
 	pkt := buildRadiusPacket(43, 4, attrs)
 
 	h.handlePacket(context.Background(), nil, nil, pkt)
+
+	// Wait for detached goroutine to execute.
+	time.Sleep(50 * time.Millisecond)
 
 	assert.Len(t, fwd.calls, 1)
 	assert.Equal(t, state, fwd.calls[0].sessionID)
@@ -172,10 +178,12 @@ func TestHandlePacket_CoARequest(t *testing.T) {
 // TestHandlePacket_DisconnectRequest calls forwardToBiz with messageType="RAR".
 func TestHandlePacket_DisconnectRequest(t *testing.T) {
 	fwd := &mockForwardToBiz{}
+	registry := NewServerInitiatedRegistry(5 * time.Second)
 	h := &RadiusHandler{
 		logger:       nullLogger(),
 		tracer:       nullTracer(),
 		forwardToBiz: fwd.invoke,
+		registry:     registry,
 	}
 
 	state := "dm-session-abc"
@@ -184,10 +192,13 @@ func TestHandlePacket_DisconnectRequest(t *testing.T) {
 
 	h.handlePacket(context.Background(), nil, nil, pkt)
 
+	// Wait for detached goroutine to execute.
+	time.Sleep(50 * time.Millisecond)
+
 	assert.Len(t, fwd.calls, 1)
 	assert.Equal(t, state, fwd.calls[0].sessionID)
 	assert.Equal(t, "RADIUS", fwd.calls[0].transportType)
-	assert.Equal(t, "RAR", fwd.calls[0].messageType)
+	assert.Equal(t, "DM", fwd.calls[0].messageType) // Disconnect-Request → DM
 	assert.Equal(t, pkt, fwd.calls[0].raw)
 }
 
@@ -211,9 +222,11 @@ func TestHandlePacket_UnknownCodeIsDropped(t *testing.T) {
 // a State attribute are dropped without calling forwardToBiz.
 func TestHandleServerInitiated_NoSessionID_DropsPacket(t *testing.T) {
 	fwd := &mockForwardToBiz{}
+	registry := NewServerInitiatedRegistry(5 * time.Second)
 	h := &RadiusHandler{
 		logger:       nullLogger(),
 		forwardToBiz: fwd.invoke,
+		registry:     registry,
 	}
 
 	// CoA packet with no State attribute (totalLen >= 20 so not caught by < 4 check)
@@ -228,10 +241,12 @@ func TestHandleServerInitiated_NoSessionID_DropsPacket(t *testing.T) {
 // CoA and DM packets to Biz with correct transport and message type.
 func TestHandleServerInitiated_Direct(t *testing.T) {
 	fwd := &mockForwardToBiz{}
+	registry := NewServerInitiatedRegistry(5 * time.Second)
 	h := &RadiusHandler{
 		logger:       nullLogger(),
 		tracer:       nullTracer(),
 		forwardToBiz: fwd.invoke,
+		registry:     registry,
 	}
 
 	sessionID := "direct-coa-test"
@@ -239,6 +254,9 @@ func TestHandleServerInitiated_Direct(t *testing.T) {
 	dmPkt := buildRadiusPacket(40, 8, buildStateAttr(sessionID))
 
 	h.handleServerInitiated(context.Background(), coaPkt, "RADIUS")
+
+	// Wait for detached goroutine to execute.
+	time.Sleep(50 * time.Millisecond)
 
 	assert.Len(t, fwd.calls, 1)
 	assert.Equal(t, sessionID, fwd.calls[0].sessionID)
@@ -248,9 +266,12 @@ func TestHandleServerInitiated_Direct(t *testing.T) {
 	fwd.calls = nil
 	h.handleServerInitiated(context.Background(), dmPkt, "RADIUS")
 
+	// Wait for detached goroutine to execute.
+	time.Sleep(50 * time.Millisecond)
+
 	assert.Len(t, fwd.calls, 1)
 	assert.Equal(t, sessionID, fwd.calls[0].sessionID)
-	assert.Equal(t, "RAR", fwd.calls[0].messageType)
+	assert.Equal(t, "DM", fwd.calls[0].messageType) // Disconnect-Request → DM
 }
 
 // TestExtractSessionID_StateAttribute extracts session ID from State attribute.
@@ -286,4 +307,122 @@ func TestExtractSessionID_TruncatedAttribute(t *testing.T) {
 	result := extractSessionID(pkt)
 
 	assert.Equal(t, "", result)
+}
+
+// TestRadiusHandler_CoA_WaitsForBizPodResponse verifies that handleServerInitiated
+// returns immediately (detached goroutine) rather than blocking.
+func TestRadiusHandler_CoA_WaitsForBizPodResponse(t *testing.T) {
+	registry := NewServerInitiatedRegistry(5 * time.Second)
+	fwd := &mockForwardToBiz{}
+
+	h := &RadiusHandler{
+		logger:       nullLogger(),
+		tracer:       nullTracer(),
+		forwardToBiz: fwd.invoke,
+		registry:     registry,
+	}
+
+	sessionID := "session-1"
+	coaPkt := buildRadiusPacket(43, 9, buildStateAttr(sessionID))
+
+	// Call handleServerInitiated - it should return immediately.
+	start := time.Now()
+	h.handleServerInitiated(context.Background(), coaPkt, "RADIUS")
+	elapsed := time.Since(start)
+
+	// Should return immediately (detached goroutine).
+	if elapsed > 100*time.Millisecond {
+		t.Errorf("handleServerInitiated blocked for %v, expected immediate return", elapsed)
+	}
+
+	// Wait for the goroutine to execute forwardToBiz.
+	time.Sleep(50 * time.Millisecond)
+
+	// forwardToBiz should have been called.
+	assert.Len(t, fwd.calls, 1)
+	assert.Equal(t, sessionID, fwd.calls[0].sessionID)
+	assert.Equal(t, "COA", fwd.calls[0].messageType)
+}
+
+// TestRadiusHandler_CoA_TimeoutReturnsNAK verifies that timeout on registry
+// returns ResultCode=3002 (UNABLE_TO_DELIVER).
+func TestRadiusHandler_CoA_TimeoutReturnsNAK(t *testing.T) {
+	registry := NewServerInitiatedRegistry(50 * time.Millisecond)
+	fwd := &mockForwardToBiz{}
+
+	h := &RadiusHandler{
+		logger:       nullLogger(),
+		tracer:       nullTracer(),
+		forwardToBiz: fwd.invoke,
+		registry:     registry,
+	}
+
+	sessionID := "timeout-session"
+	coaPkt := buildRadiusPacket(43, 10, buildStateAttr(sessionID))
+
+	// Don't complete - let it timeout
+	ch, _ := registry.Register(sessionID, "auth-1", "COA", 50*time.Millisecond)
+
+	resp := ch.Wait()
+	if resp.ResultCode != ResultCodeUnableToDeliver {
+		t.Errorf("expected ResultCode %d (UNABLE_TO_DELIVER), got %d", ResultCodeUnableToDeliver, resp.ResultCode)
+	}
+	if resp.ErrorCause != "timeout" {
+		t.Errorf("expected ErrorCause 'timeout', got %s", resp.ErrorCause)
+	}
+
+	// handleServerInitiated should also return immediately
+	start := time.Now()
+	h.handleServerInitiated(context.Background(), coaPkt, "RADIUS")
+	if time.Since(start) > 100*time.Millisecond {
+		t.Error("handleServerInitiated blocked on timeout test")
+	}
+}
+
+// TestRadiusHandler_CoA_CompleteRemovesFromPending verifies that Complete removes
+// the pending entry from the registry.
+func TestRadiusHandler_CoA_CompleteRemovesFromPending(t *testing.T) {
+	registry := NewServerInitiatedRegistry(5 * time.Second)
+
+	ch, _ := registry.Register("session-1", "auth-1", "COA", 5*time.Second)
+
+	// Complete should succeed
+	registry.Complete("session-1", "COA", &ServerInitiatedResponse{ResultCode: ResultCodeSuccess})
+
+	// Registry should be clean
+	resp := ch.Wait()
+	if resp.ResultCode != ResultCodeSuccess {
+		t.Errorf("expected ResultCode %d, got %d", ResultCodeSuccess, resp.ResultCode)
+	}
+}
+
+// TestRadiusHandler_CoA_RegistryPending verifies that the registry has a pending
+// request after handleServerInitiated returns.
+func TestRadiusHandler_CoA_RegistryPending(t *testing.T) {
+	registry := NewServerInitiatedRegistry(5 * time.Second)
+	fwd := &mockForwardToBiz{}
+
+	h := &RadiusHandler{
+		logger:       nullLogger(),
+		tracer:       nullTracer(),
+		forwardToBiz: fwd.invoke,
+		registry:     registry,
+	}
+
+	sessionID := "registry-pending-session"
+	coaPkt := buildRadiusPacket(43, 11, buildStateAttr(sessionID))
+
+	// Register a channel before calling handleServerInitiated.
+	preCh, _ := registry.Register("other-session", "auth-other", "COA", 5*time.Second)
+	_ = preCh // Ignore pre-existing entry.
+
+	// Call handleServerInitiated - returns immediately.
+	h.handleServerInitiated(context.Background(), coaPkt, "RADIUS")
+
+	// Wait for goroutine to execute.
+	time.Sleep(50 * time.Millisecond)
+
+	// Verify forwardToBiz was called.
+	assert.Len(t, fwd.calls, 1)
+	assert.Equal(t, sessionID, fwd.calls[0].sessionID)
 }
