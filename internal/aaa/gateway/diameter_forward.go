@@ -27,6 +27,19 @@ const (
 	AppIDAAP = 5
 )
 
+// diamForwarderConfig holds configuration for the Diameter forwarder.
+// Spec: RFC 6733, RFC 4072, TS 29.561 Ch.17
+type diamForwarderConfig struct {
+	// AuthRequestType is the AVP 406 value for DER messages.
+	// Default: 2 (AUTHORIZE_AUTHENTICATE)
+	// Spec: RFC 4072 §3.1
+	AuthRequestType uint32
+	// AuthApplicationID is the AVP 258 value for CER and DER.
+	// Default: 5 (Diameter EAP)
+	// Spec: RFC 4072
+	AuthApplicationID uint32
+}
+
 // diamForwarder manages a persistent TCP/SCTP connection to AAA-S for the
 // client-initiated path (DER/DEA). It uses go-diameter/v4/sm for CER/CEA
 // handshake, DWR/DWA watchdog, and DER encoding.
@@ -46,6 +59,14 @@ type diamForwarder struct {
 	logger      *slog.Logger
 	connected   bool
 
+	// Protocol configuration (GAP-AAA-04, GAP-DIA-02, GAP-DIA-03)
+	cfg *diamForwarderConfig
+
+	// Origin-State-Id tracking (GAP-DIA-02): increments on each connection establishment.
+	// Spec: RFC 6733 §8.8
+	originStateID uint64
+	stateMu       sync.Mutex
+
 	// Pending requests: hop-by-hop ID → result channel.
 	pending   map[uint32]chan *diam.Message
 	pendingMu sync.RWMutex
@@ -59,7 +80,17 @@ type diamForwarder struct {
 // network is "tcp" or "sctp".
 // originHost/originRealm are the AAA Gateway's identity (Origin-Host in CER).
 // destHost/destRealm are the AAA-S identity (Destination-Host in DER).
-func newDiamForwarder(addr, network, originHost, originRealm, destHost, destRealm string, logger *slog.Logger) *diamForwarder {
+// cfg contains protocol configuration parameters.
+// Spec: RFC 6733 §5.3 (CER/CEA), RFC 4072 (DER/DEA)
+func newDiamForwarder(addr, network, originHost, originRealm, destHost, destRealm string, cfg *diamForwarderConfig, logger *slog.Logger) *diamForwarder {
+	// Apply defaults for optional config fields (GAP-AAA-04, GAP-DIA-02, GAP-DIA-03)
+	if cfg.AuthRequestType == 0 {
+		cfg.AuthRequestType = 2 // AUTHORIZE_AUTHENTICATE
+	}
+	if cfg.AuthApplicationID == 0 {
+		cfg.AuthApplicationID = AppIDAAP // 5 (Diameter EAP)
+	}
+
 	df := &diamForwarder{
 		addr:        addr,
 		network:     network,
@@ -68,6 +99,7 @@ func newDiamForwarder(addr, network, originHost, originRealm, destHost, destReal
 		destHost:    destHost,
 		destRealm:   destRealm,
 		logger:      logger,
+		cfg:         cfg,
 		pending:     make(map[uint32]chan *diam.Message),
 	}
 
@@ -88,7 +120,7 @@ func newDiamForwarder(addr, network, originHost, originRealm, destHost, destReal
 		EnableWatchdog:     true, // DWR/DWA per RFC 6733 §5.5
 		WatchdogInterval:   30 * time.Second,
 		AuthApplicationID: []*diam.AVP{
-			diam.NewAVP(avp.AuthApplicationID, avp.Mbit, 0, datatype.Unsigned32(AppIDAAP)),
+			diam.NewAVP(avp.AuthApplicationID, avp.Mbit, 0, datatype.Unsigned32(cfg.AuthApplicationID)),
 		},
 	}
 
@@ -113,10 +145,15 @@ func (df *diamForwarder) Connect(ctx context.Context) error {
 	df.connected = true
 	df.mu.Unlock()
 
+	// Increment Origin-State-Id on each new connection (GAP-DIA-02).
+	// Spec: RFC 6733 §8.8
+	osi := df.incrementOriginStateID()
+
 	df.logger.Info("diameter_forward_connected",
 		"server", df.addr,
 		"network", df.network,
 		"origin_host", df.originHost,
+		"origin_state_id", osi,
 	)
 
 	// Monitor connection in background
@@ -202,7 +239,7 @@ func (df *diamForwarder) Close() error {
 // buildDERMessage constructs a Diameter-EAP-Request message with all required AVPs.
 // Spec: RFC 4072, RFC 6733 §8.8, TS 29.561 §17
 func (df *diamForwarder) buildDERMessage(conn diam.Conn, hopByHop uint32, sessionID string, eapPayload []byte, sst uint8, sd string) (*diam.Message, error) {
-	m := diam.NewRequest(268, AppIDAAP, conn.Dictionary())
+	m := diam.NewRequest(268, df.cfg.AuthApplicationID, conn.Dictionary())
 	m.Header.HopByHopID = hopByHop
 
 	addAVP := func(code interface{}, flags uint8, _ uint32, data datatype.Type) error {
@@ -213,10 +250,10 @@ func (df *diamForwarder) buildDERMessage(conn diam.Conn, hopByHop uint32, sessio
 	if avpErr := addAVP(avp.SessionID, avp.Mbit, 0, datatype.UTF8String(sessionID)); avpErr != nil {
 		return nil, avpErr
 	}
-	if avpErr := addAVP(avp.AuthApplicationID, avp.Mbit, 0, datatype.Unsigned32(AppIDAAP)); avpErr != nil {
+	if avpErr := addAVP(avp.AuthApplicationID, avp.Mbit, 0, datatype.Unsigned32(df.cfg.AuthApplicationID)); avpErr != nil {
 		return nil, avpErr
 	}
-	if avpErr := addAVP(avp.AuthRequestType, avp.Mbit, 0, datatype.Unsigned32(1)); avpErr != nil {
+	if avpErr := addAVP(avp.AuthRequestType, avp.Mbit, 0, datatype.Unsigned32(df.cfg.AuthRequestType)); avpErr != nil { // GAP-AAA-04: configurable
 		return nil, avpErr
 	}
 	if avpErr := addAVP(avp.AuthSessionState, avp.Mbit, 0, datatype.Unsigned32(1)); avpErr != nil {
@@ -228,7 +265,7 @@ func (df *diamForwarder) buildDERMessage(conn diam.Conn, hopByHop uint32, sessio
 	if avpErr := addAVP(avp.OriginRealm, avp.Mbit, 0, df.settings.OriginRealm); avpErr != nil {
 		return nil, avpErr
 	}
-	if avpErr := addAVP(avp.OriginStateID, avp.Mbit, 0, datatype.Unsigned32(1)); avpErr != nil {
+	if avpErr := addAVP(avp.OriginStateID, avp.Mbit, 0, datatype.Unsigned32(df.getOriginStateID())); avpErr != nil { // GAP-DIA-02: tracked state ID
 		return nil, avpErr
 	}
 	if avpErr := addAVP(avp.DestinationHost, avp.Mbit, 0, datatype.DiameterIdentity(df.destHost)); avpErr != nil {
@@ -371,6 +408,24 @@ func (df *diamForwarder) PeerMetadata() (*smpeer.Metadata, error) {
 
 func (df *diamForwarder) nextHopByHopID() uint32 {
 	return uint32(atomic.AddUint64(&df.hopByHopSeq, 1))
+}
+
+// getOriginStateID returns the current Origin-State-Id value.
+// Spec: RFC 6733 §8.8 (GAP-DIA-02)
+func (df *diamForwarder) getOriginStateID() uint64 {
+	df.stateMu.Lock()
+	defer df.stateMu.Unlock()
+	return df.originStateID
+}
+
+// incrementOriginStateID increments and returns the new Origin-State-Id value.
+// Called on each connection establishment.
+// Spec: RFC 6733 §8.8 (GAP-DIA-02)
+func (df *diamForwarder) incrementOriginStateID() uint64 {
+	df.stateMu.Lock()
+	defer df.stateMu.Unlock()
+	df.originStateID++
+	return df.originStateID
 }
 
 func (df *diamForwarder) addPending(hopByHop uint32, ch chan *diam.Message) {
