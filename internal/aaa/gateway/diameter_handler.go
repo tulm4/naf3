@@ -5,10 +5,13 @@ package gateway
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/operator/nssAAF/internal/diameter"
@@ -19,6 +22,13 @@ import (
 	"github.com/fiorix/go-diameter/v4/diam/sm"
 	"github.com/fiorix/go-diameter/v4/diam/sm/smpeer"
 )
+
+// DiameterHandlerConfig holds TLS configuration for the Diameter server.
+type DiameterHandlerConfig struct {
+	TLSCert  string // Path to TLS certificate file
+	TLSKey   string // Path to TLS private key file
+	TLSCACert string // Path to CA certificate for client auth (optional)
+}
 
 // DiameterHandler handles Diameter protocol traffic on the SERVER-INITIATED path
 // (AAA-S → NSSAAF). The client-initiated path (NSSAAF → AAA-S) is handled by
@@ -33,6 +43,7 @@ import (
 // CER/CEA internally. Registered handlers only fire after the handshake succeeds.
 type DiameterHandler struct {
 	logger        *slog.Logger
+	cfg           *DiameterHandlerConfig
 	forwardToBiz  func(ctx context.Context, sessionID string, transportType string, messageType string, raw []byte)
 	version       string
 	bizURL        string
@@ -51,6 +62,7 @@ func NewDiameterHandler(
 	diamForwarder *diamForwarder,
 	registry *ServerInitiatedRegistry,
 	originHost, originRealm string,
+	cfg *DiameterHandlerConfig,
 ) *DiameterHandler {
 	settings := &sm.Settings{
 		OriginHost:  datatype.DiameterIdentity(originHost),
@@ -63,6 +75,7 @@ func NewDiameterHandler(
 
 	h := &DiameterHandler{
 		logger:        logger,
+		cfg:           cfg,
 		forwardToBiz:  forwardToBiz,
 		version:       version,
 		bizURL:        bizURL,
@@ -84,7 +97,7 @@ func NewDiameterHandler(
 	return h
 }
 
-// Listen starts the Diameter server on the configured protocol (TCP or SCTP).
+// Listen starts the Diameter server on the configured protocol (TCP, SCTP, or TCP+TLS).
 // Each incoming connection is wrapped with diam.NewConn() and handed to the
 // sm.StateMachine for CER/CEA handling. After handshake, the StateMachine
 // dispatches ASR/ASA/RAR/RAA/STR/STA to registered handlers.
@@ -92,30 +105,85 @@ func NewDiameterHandler(
 func (h *DiameterHandler) Listen(ctx context.Context, addr, protocol string) error {
 	switch protocol {
 	case "tcp":
-		listener, err := net.Listen("tcp", addr)
+		return h.listenTCP(ctx, addr)
+	case "tcp+tls":
+		return h.listenTLS(ctx, addr)
+	case "sctp":
+		return h.listenSCTP(ctx, addr)
+	default:
+		return fmt.Errorf("unsupported diameter protocol: %s (expected tcp, tcp+tls, or sctp)", protocol)
+	}
+}
+
+// listenTCP starts a plain TCP listener.
+func (h *DiameterHandler) listenTCP(_ context.Context, addr string) error {
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("diameter tcp listen: %w", err)
+	}
+	//nolint:contextcheck
+	go h.serveTCP(listener)
+	return nil
+}
+
+// listenTLS starts a TLS listener for Diameter over TCP+TLS.
+// Spec: GAP-DIA-01
+func (h *DiameterHandler) listenTLS(_ context.Context, addr string) error {
+	if h.cfg == nil || h.cfg.TLSCert == "" || h.cfg.TLSKey == "" {
+		return fmt.Errorf("TLS cert and key required for tcp+tls protocol")
+	}
+
+	cert, err := tls.LoadX509KeyPair(h.cfg.TLSCert, h.cfg.TLSKey)
+	if err != nil {
+		return fmt.Errorf("load TLS cert/key: %w", err)
+	}
+
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS13,
+	}
+
+	if h.cfg.TLSCACert != "" {
+		caCertPEM, err := os.ReadFile(h.cfg.TLSCACert)
 		if err != nil {
-			return fmt.Errorf("diameter tcp listen: %w", err)
+			return fmt.Errorf("read CA cert: %w", err)
 		}
+		caPool := x509.NewCertPool()
+		if !caPool.AppendCertsFromPEM(caCertPEM) {
+			return fmt.Errorf("failed to parse CA cert")
+		}
+		tlsConfig.RootCAs = caPool
+		tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+		tlsConfig.ClientCAs = caPool
+	}
+
+	listener, err := tls.Listen("tcp", addr, tlsConfig)
+	if err != nil {
+		return fmt.Errorf("TLS listen: %w", err)
+	}
+
+	h.logger.Info("Diameter TLS listener started", "addr", listener.Addr())
+	//nolint:contextcheck
+	go h.serveTCP(listener)
+	return nil
+}
+
+// listenSCTP starts a SCTP listener, falling back to TCP if SCTP is unavailable.
+func (h *DiameterHandler) listenSCTP(_ context.Context, addr string) error {
+	listener, err := net.Listen("sctp", addr)
+	if err != nil {
+		h.logger.Warn("SCTP not available on this host", "error", err)
+		// Fall back to TCP
+		listener, err = net.Listen("tcp", addr)
+		if err != nil {
+			return fmt.Errorf("diameter tcp fallback listen: %w", err)
+		}
+		h.logger.Info("Diameter falling back to TCP", "addr", addr)
 		//nolint:contextcheck
 		go h.serveTCP(listener)
-	case "sctp":
-		listener, err := net.Listen("sctp", addr)
-		if err != nil {
-			h.logger.Warn("SCTP not available on this host", "error", err)
-			// Fall back to TCP
-			listener, err = net.Listen("tcp", addr)
-			if err != nil {
-				return fmt.Errorf("diameter tcp fallback listen: %w", err)
-			}
-			h.logger.Info("Diameter falling back to TCP", "addr", addr)
-			//nolint:contextcheck
-			go h.serveTCP(listener)
-		} else {
-			//nolint:contextcheck
-			go h.serveSCTP(listener)
-		}
-	default:
-		return fmt.Errorf("unsupported diameter protocol: %s (expected tcp or sctp)", protocol)
+	} else {
+		//nolint:contextcheck
+		go h.serveSCTP(listener)
 	}
 	return nil
 }

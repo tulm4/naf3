@@ -28,11 +28,16 @@ type Config struct {
 	BizServiceURL    string // http://svc-nssaa-biz:8080
 	RedisAddr        string // Redis address for pub/sub and session correlation
 	ListenRADIUS     string // ":1812" — UDP listen address for RADIUS
-	ListenDIAMETER   string // ":3868" — listen address for Diameter (TCP or SCTP)
+	ListenDIAMETER   string // ":3868" — listen address for Diameter (TCP, SCTP, or TCP+TLS)
 	AAAGatewayURL    string // self-referential for health checks
 	Logger           *slog.Logger
 	Version          string // Injected at build time
-	DiameterProtocol string // "tcp" or "sctp"
+	DiameterProtocol string // "tcp", "tcp+tls", or "sctp"
+
+	// Diameter TLS configuration (for tcp+tls protocol)
+	TLSCert    string // Path to TLS certificate file
+	TLSKey     string // Path to TLS private key file
+	TLSCACert  string // Path to CA certificate for client auth (optional)
 
 	// Diameter client-initiated config (PLAN §2.3.5):
 	// Required for DER/DEA forwarding to AAA-S.
@@ -129,6 +134,11 @@ func New(cfg Config) *Gateway {
 		g.registry,
 		cfg.DiameterHost,
 		cfg.DiameterRealm,
+		&DiameterHandlerConfig{
+			TLSCert:    cfg.TLSCert,
+			TLSKey:     cfg.TLSKey,
+			TLSCACert:  cfg.TLSCACert,
+		},
 	)
 
 	return g
