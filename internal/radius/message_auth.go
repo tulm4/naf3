@@ -5,6 +5,7 @@ package radius
 import (
 	"crypto/hmac"
 	"crypto/md5"
+	"crypto/subtle"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -12,6 +13,9 @@ import (
 
 // ErrInvalidMessageAuth is returned when Message-Authenticator verification fails.
 var ErrInvalidMessageAuth = errors.New("radius: invalid Message-Authenticator")
+
+// ErrInvalidResponseAuth is returned when Response Authenticator validation fails.
+var ErrInvalidResponseAuth = errors.New("radius: invalid Response Authenticator")
 
 // MessageAuthenticatorSize is the length of the HMAC-MD5 output in bytes.
 const MessageAuthenticatorSize = 16
@@ -129,7 +133,7 @@ func ComputeResponseAuthenticator(code, id uint8, length uint16, requestAuth [16
 	// Build: Code(1) + ID(1) + Length(2) + RequestAuth(16) + Attributes
 	buf := make([]byte, 0, 20+len(attrs))
 	buf = append(buf, code, id)
-	binary.BigEndian.PutUint16(buf[2:4], length)
+	buf = append(buf, byte(length>>8), byte(length&0xFF))
 	buf = append(buf, requestAuth[:]...)
 	buf = append(buf, attrs...)
 
@@ -140,6 +144,43 @@ func ComputeResponseAuthenticator(code, id uint8, length uint16, requestAuth [16
 	var result [16]byte
 	copy(result[:], h.Sum(nil))
 	return result
+}
+
+// VerifyResponseAuthenticator validates the Response Authenticator field in Access-Accept/Reject/Challenge packets.
+// Spec: RFC 2865 §3
+//
+// The Response Authenticator is computed as:
+//
+//	MD5(Code + ID + Length + Request Authenticator + Attributes + Secret)
+//
+// This differs from Message-Authenticator which uses HMAC-MD5.
+func VerifyResponseAuthenticator(response []byte, requestAuth [16]byte, secret string) bool {
+	if len(response) < 20 {
+		return false
+	}
+
+	respAuth := response[4:20]
+	code := response[0]
+	id := response[1]
+	respLen := int(response[2])<<8 | int(response[3])
+
+	if respLen > len(response) || respLen < 20 {
+		return false
+	}
+
+	attrs := response[20:respLen]
+
+	// Build: Code(1) + ID(1) + Length(2) + RequestAuth(16) + Attributes
+	h := md5.New()
+	h.Write([]byte{code, id})
+	h.Write(response[2:4])
+	h.Write(requestAuth[:])
+	h.Write(attrs)
+	h.Write([]byte(secret))
+
+	computed := h.Sum(nil)
+
+	return subtle.ConstantTimeCompare(respAuth, computed) == 1
 }
 
 // AddMessageAuthenticator adds a Message-Authenticator attribute to a RADIUS packet.

@@ -43,11 +43,12 @@ type Config struct {
 
 // Client is the main RADIUS client for NSSAAF.
 type Client struct {
-	config    Config
-	transport Transport
-	packetID  uint8
-	mu        sync.Mutex
-	logger    *slog.Logger
+	config                   Config
+	transport                Transport
+	packetID                 uint8
+	lastRequestAuthenticator [16]byte // Saved for Response Authenticator verification
+	mu                       sync.Mutex
+	logger                   *slog.Logger
 }
 
 // NewRadiusClient creates a new RADIUS client.
@@ -105,6 +106,11 @@ func (c *Client) SendAccessRequest(ctx context.Context, attrs []Attribute) ([]by
 
 	// Add Message-Authenticator.
 	rawPacket = AddMessageAuthenticator(rawPacket, c.config.SharedSecret)
+
+	// Save Request Authenticator for Response verification.
+	c.mu.Lock()
+	copy(c.lastRequestAuthenticator[:], authenticator[:])
+	c.mu.Unlock()
 
 	serverAddr := fmt.Sprintf("%s:%d", c.config.ServerAddress, c.config.ServerPort)
 
@@ -170,6 +176,14 @@ func (c *Client) validateResponse(data []byte, requestID uint8) error {
 		// Valid response codes.
 	default:
 		return fmt.Errorf("radius: unexpected response code: %d", code)
+	}
+
+	// Verify Response Authenticator (RFC 2865 §3).
+	c.mu.Lock()
+	reqAuth := c.lastRequestAuthenticator
+	c.mu.Unlock()
+	if !VerifyResponseAuthenticator(data, reqAuth, c.config.SharedSecret) {
+		return ErrInvalidResponseAuth
 	}
 
 	if HasMessageAuthenticator(data) {
