@@ -11,6 +11,8 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/operator/nssAAF/internal/radius"
 )
 
 const (
@@ -30,6 +32,7 @@ type RadiusHandler struct {
 	tracer       trace.Tracer
 	forwardToBiz func(ctx context.Context, sessionID string, transportType string, messageType string, raw []byte)
 	registry     *ServerInitiatedRegistry
+	sharedSecret string // Shared secret for Message-Authenticator validation (RFC 5176 §3)
 }
 
 // Listen starts the RADIUS UDP listener.
@@ -95,9 +98,9 @@ func (h *RadiusHandler) Forward(ctx context.Context, payload []byte, sessionID s
 }
 
 // handleServerInitiated handles server-initiated RADIUS packets (CoA, DM).
-// It extracts the session ID, registers with the registry, forwards to Biz Pod,
-// waits for response in a detached goroutine, and sends CoA-ACK/NAK back to AAA-S.
-// Spec: RFC 5176 §3 (CoA) and §4 (Disconnect)
+// It extracts the session ID, validates Message-Authenticator, registers with the registry,
+// forwards to Biz Pod, waits for response in a detached goroutine, and sends CoA-ACK/NAK back to AAA-S.
+// Spec: RFC 5176 §3 (CoA) and §4 (Disconnect), RFC 3579 §3.2 (Message-Authenticator)
 func (h *RadiusHandler) handleServerInitiated(ctx context.Context, raw []byte, transport string) {
 	sessionID := extractSessionID(raw)
 	if sessionID == "" {
@@ -108,6 +111,26 @@ func (h *RadiusHandler) handleServerInitiated(ctx context.Context, raw []byte, t
 	msgType := "DM"
 	if raw[0] == radiusCoARequest {
 		msgType = "COA"
+	}
+
+	// RFC 5176 §3.2: CoA-Request MUST contain Message-Authenticator
+	// RFC 5176 §3.1: Disconnect-Request MUST contain Message-Authenticator
+	// Validate MA before processing to prevent unauthenticated CoA/DM packets.
+	if h.sharedSecret != "" {
+		if !radius.HasMessageAuthenticator(raw) {
+			h.logger.Warn("server_initiated_missing_message_authenticator",
+				"transport", transport,
+				"session_id", sessionID,
+				"message_type", msgType)
+			return
+		}
+		if !radius.VerifyMessageAuthenticator(raw, h.sharedSecret) {
+			h.logger.Warn("server_initiated_invalid_message_authenticator",
+				"transport", transport,
+				"session_id", sessionID,
+				"message_type", msgType)
+			return
+		}
 	}
 
 	h.logger.Info("server-initiated RADIUS received",

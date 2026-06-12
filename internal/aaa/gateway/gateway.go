@@ -88,9 +88,10 @@ func New(cfg Config) *Gateway {
 
 	g.radiusHandler = &RadiusHandler{
 		logger:       cfg.Logger,
-		tracer:      otel.Tracer("aaa-gateway/radius"),
+		tracer:       otel.Tracer("aaa-gateway/radius"),
 		forwardToBiz: g.forwardToBiz,
 		registry:     g.registry,
+		sharedSecret: cfg.RadiusSharedSecret,
 	}
 
 	// Create the RADIUS forwarder for client-initiated path.

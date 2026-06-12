@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/operator/nssAAF/internal/radius"
 	"github.com/stretchr/testify/assert"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -425,4 +426,223 @@ func TestRadiusHandler_CoA_RegistryPending(t *testing.T) {
 	// Verify forwardToBiz was called.
 	assert.Len(t, fwd.calls, 1)
 	assert.Equal(t, sessionID, fwd.calls[0].sessionID)
+}
+
+// buildMessageAuthAttr builds a RADIUS Message-Authenticator attribute (type=80).
+func buildMessageAuthAttr(value []byte) []byte {
+	attr := make([]byte, 18)
+	attr[0] = 80 // Message-Authenticator type
+	attr[1] = 18 // Length: type(1) + len(1) + value(16)
+	copy(attr[2:], value)
+	return attr
+}
+
+// buildCoAWithMessageAuth builds a CoA-Request packet with a valid Message-Authenticator.
+func buildCoAWithMessageAuth(secret string) ([]byte, string) {
+	sessionID := "coa-ma-test-session"
+	stateAttr := buildStateAttr(sessionID)
+
+	// Build packet without MA first to compute correct length.
+	totalLen := 20 + len(stateAttr) + 18
+	pkt := make([]byte, totalLen)
+	pkt[0] = 43 // CoA-Request
+	pkt[1] = 12 // ID
+	pkt[2] = byte(totalLen >> 8)
+	pkt[3] = byte(totalLen)
+
+	// Copy State attribute.
+	copy(pkt[20:], stateAttr)
+
+	// Write Message-Authenticator attribute header: type=80, length=18.
+	maOffset := 20 + len(stateAttr)
+	pkt[maOffset] = 80   // Message-Authenticator type
+	pkt[maOffset+1] = 18 // Length
+
+	// Compute Message-Authenticator value (HMAC-MD5) and write it.
+	ma := radius.ComputeMessageAuthenticator(pkt, secret)
+	copy(pkt[maOffset+2:], ma)
+
+	return pkt, sessionID
+}
+
+// TestRadiusHandler_CoA_DropsMissingMessageAuth verifies that CoA without Message-Authenticator
+// is dropped when sharedSecret is configured.
+// Spec: RFC 5176 §3.2
+func TestRadiusHandler_CoA_DropsMissingMessageAuth(t *testing.T) {
+	fwd := &mockForwardToBiz{}
+	registry := NewServerInitiatedRegistry(5 * time.Second)
+	h := &RadiusHandler{
+		logger:       nullLogger(),
+		tracer:       nullTracer(),
+		forwardToBiz: fwd.invoke,
+		registry:     registry,
+		sharedSecret: "secret",
+	}
+
+	// CoA packet without Message-Authenticator.
+	sessionID := "coa-no-ma-session"
+	stateAttr := buildStateAttr(sessionID)
+	coaPkt := buildRadiusPacket(43, 20, stateAttr)
+
+	h.handleServerInitiated(context.Background(), coaPkt, "RADIUS")
+
+	// Wait for any detached goroutine.
+	time.Sleep(50 * time.Millisecond)
+
+	if fwd.forwardCalled() {
+		t.Error("should NOT forward CoA without Message-Authenticator")
+	}
+}
+
+// TestRadiusHandler_CoA_DropsInvalidMessageAuth verifies that CoA with invalid
+// Message-Authenticator is dropped when sharedSecret is configured.
+// Spec: RFC 5176 §3.2
+func TestRadiusHandler_CoA_DropsInvalidMessageAuth(t *testing.T) {
+	fwd := &mockForwardToBiz{}
+	registry := NewServerInitiatedRegistry(5 * time.Second)
+	h := &RadiusHandler{
+		logger:       nullLogger(),
+		tracer:       nullTracer(),
+		forwardToBiz: fwd.invoke,
+		registry:     registry,
+		sharedSecret: "secret",
+	}
+
+	// CoA packet with wrong Message-Authenticator (all zeros).
+	sessionID := "coa-invalid-ma-session"
+	stateAttr := buildStateAttr(sessionID)
+	maAttr := buildMessageAuthAttr(make([]byte, 16)) // Invalid: all zeros
+	attrs := append(stateAttr, maAttr...)
+	coaPkt := buildRadiusPacket(43, 21, attrs)
+
+	h.handleServerInitiated(context.Background(), coaPkt, "RADIUS")
+
+	// Wait for any detached goroutine.
+	time.Sleep(50 * time.Millisecond)
+
+	if fwd.forwardCalled() {
+		t.Error("should NOT forward CoA with invalid Message-Authenticator")
+	}
+}
+
+// TestRadiusHandler_CoA_AcceptsValidMessageAuth verifies that CoA with valid
+// Message-Authenticator is forwarded when sharedSecret is configured.
+func TestRadiusHandler_CoA_AcceptsValidMessageAuth(t *testing.T) {
+	fwd := &mockForwardToBiz{}
+	registry := NewServerInitiatedRegistry(5 * time.Second)
+	h := &RadiusHandler{
+		logger:       nullLogger(),
+		tracer:       nullTracer(),
+		forwardToBiz: fwd.invoke,
+		registry:     registry,
+		sharedSecret: "secret",
+	}
+
+	coaPkt, sessionID := buildCoAWithMessageAuth("secret")
+
+	h.handleServerInitiated(context.Background(), coaPkt, "RADIUS")
+
+	// Wait for detached goroutine to execute.
+	time.Sleep(50 * time.Millisecond)
+
+	if !fwd.forwardCalled() {
+		t.Error("should forward CoA with valid Message-Authenticator")
+	}
+	if len(fwd.calls) != 1 {
+		t.Errorf("expected 1 forward call, got %d", len(fwd.calls))
+	}
+	if fwd.calls[0].sessionID != sessionID {
+		t.Errorf("expected sessionID %s, got %s", sessionID, fwd.calls[0].sessionID)
+	}
+}
+
+// TestRadiusHandler_CoA_NoValidation_WhenNoSecret verifies that CoA is forwarded
+// normally when sharedSecret is not configured (backwards compatibility for testing/dev).
+func TestRadiusHandler_CoA_NoValidation_WhenNoSecret(t *testing.T) {
+	fwd := &mockForwardToBiz{}
+	registry := NewServerInitiatedRegistry(5 * time.Second)
+	h := &RadiusHandler{
+		logger:       nullLogger(),
+		tracer:       nullTracer(),
+		forwardToBiz: fwd.invoke,
+		registry:     registry,
+		sharedSecret: "", // No secret configured
+	}
+
+	sessionID := "coa-no-secret-session"
+	coaPkt := buildRadiusPacket(43, 22, buildStateAttr(sessionID))
+
+	h.handleServerInitiated(context.Background(), coaPkt, "RADIUS")
+
+	// Wait for detached goroutine to execute.
+	time.Sleep(50 * time.Millisecond)
+
+	if !fwd.forwardCalled() {
+		t.Error("should forward CoA when sharedSecret is not configured")
+	}
+}
+
+// TestRadiusHandler_DM_DropsMissingMessageAuth verifies that Disconnect-Request
+// without Message-Authenticator is dropped when sharedSecret is configured.
+// Spec: RFC 5176 §3.1
+func TestRadiusHandler_DM_DropsMissingMessageAuth(t *testing.T) {
+	fwd := &mockForwardToBiz{}
+	registry := NewServerInitiatedRegistry(5 * time.Second)
+	h := &RadiusHandler{
+		logger:       nullLogger(),
+		tracer:       nullTracer(),
+		forwardToBiz: fwd.invoke,
+		registry:     registry,
+		sharedSecret: "secret",
+	}
+
+	// Disconnect-Request packet without Message-Authenticator.
+	sessionID := "dm-no-ma-session"
+	stateAttr := buildStateAttr(sessionID)
+	dmPkt := buildRadiusPacket(40, 23, stateAttr)
+
+	h.handleServerInitiated(context.Background(), dmPkt, "RADIUS")
+
+	// Wait for any detached goroutine.
+	time.Sleep(50 * time.Millisecond)
+
+	if fwd.forwardCalled() {
+		t.Error("should NOT forward DM without Message-Authenticator")
+	}
+}
+
+// TestRadiusHandler_DM_DropsInvalidMessageAuth verifies that Disconnect-Request
+// with invalid Message-Authenticator is dropped when sharedSecret is configured.
+// Spec: RFC 5176 §3.1
+func TestRadiusHandler_DM_DropsInvalidMessageAuth(t *testing.T) {
+	fwd := &mockForwardToBiz{}
+	registry := NewServerInitiatedRegistry(5 * time.Second)
+	h := &RadiusHandler{
+		logger:       nullLogger(),
+		tracer:       nullTracer(),
+		forwardToBiz: fwd.invoke,
+		registry:     registry,
+		sharedSecret: "secret",
+	}
+
+	// Disconnect-Request packet with wrong Message-Authenticator.
+	sessionID := "dm-invalid-ma-session"
+	stateAttr := buildStateAttr(sessionID)
+	maAttr := buildMessageAuthAttr(make([]byte, 16)) // Invalid: all zeros
+	attrs := append(stateAttr, maAttr...)
+	dmPkt := buildRadiusPacket(40, 24, attrs)
+
+	h.handleServerInitiated(context.Background(), dmPkt, "RADIUS")
+
+	// Wait for any detached goroutine.
+	time.Sleep(50 * time.Millisecond)
+
+	if fwd.forwardCalled() {
+		t.Error("should NOT forward DM with invalid Message-Authenticator")
+	}
+}
+
+// forwardCalled is a helper for mockForwardToBiz.
+func (m *mockForwardToBiz) forwardCalled() bool {
+	return len(m.calls) > 0
 }
