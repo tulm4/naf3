@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 
 // mockForwardToBiz captures calls to forwardToBiz.
 type mockForwardToBiz struct {
+	mu    sync.Mutex
 	calls []forwardCall
 }
 
@@ -25,13 +27,46 @@ type forwardCall struct {
 }
 
 func (m *mockForwardToBiz) invoke(ctx context.Context, sessionID, transportType, messageType string, raw []byte) {
+	rawCopy := make([]byte, len(raw))
+	copy(rawCopy, raw)
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.calls = append(m.calls, forwardCall{
 		ctx:           ctx,
 		sessionID:     sessionID,
 		transportType: transportType,
 		messageType:   messageType,
-		raw:           raw,
+		raw:           rawCopy,
 	})
+}
+
+// Accessor methods for race-safe reads in tests.
+func (m *mockForwardToBiz) len() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.calls)
+}
+
+func (m *mockForwardToBiz) get(i int) forwardCall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c := m.calls[i]
+	rawCopy := make([]byte, len(c.raw))
+	copy(rawCopy, c.raw)
+	c.raw = rawCopy
+	return c
+}
+
+func (m *mockForwardToBiz) clear() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = nil
+}
+
+func (m *mockForwardToBiz) nonEmpty() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.calls) > 0
 }
 
 // buildRadiusPacket constructs a minimal RADIUS packet for testing.
@@ -93,7 +128,7 @@ func TestHandlePacket_TooShort(t *testing.T) {
 	// 3 bytes
 	h.handlePacket(context.Background(), nil, nil, []byte{1, 2, 3})
 
-	assert.Empty(t, fwd.calls)
+	assert.Zero(t, fwd.len())
 }
 
 // TestHandlePacket_AccessAccept logs debug message and returns (no pub/sub needed).
@@ -111,7 +146,7 @@ func TestHandlePacket_AccessAccept(t *testing.T) {
 	h.handlePacket(context.Background(), nil, nil, pkt)
 
 	// Client-initiated responses are logged and returned directly; no forwardToBiz call.
-	assert.Empty(t, fwd.calls)
+	assert.Zero(t, fwd.len())
 }
 
 // TestHandlePacket_AccessReject logs debug message and returns (no pub/sub needed).
@@ -128,7 +163,7 @@ func TestHandlePacket_AccessReject(t *testing.T) {
 
 	h.handlePacket(context.Background(), nil, nil, pkt)
 
-	assert.Empty(t, fwd.calls)
+	assert.Zero(t, fwd.len())
 }
 
 // TestHandlePacket_AccessChallenge logs debug message and returns (no pub/sub needed).
@@ -146,7 +181,7 @@ func TestHandlePacket_AccessChallenge(t *testing.T) {
 
 	h.handlePacket(context.Background(), nil, nil, pkt)
 
-	assert.Empty(t, fwd.calls)
+	assert.Zero(t, fwd.len())
 }
 
 // TestHandlePacket_CoARequest calls forwardToBiz with messageType="COA".
@@ -169,11 +204,11 @@ func TestHandlePacket_CoARequest(t *testing.T) {
 	// Wait for detached goroutine to execute.
 	time.Sleep(50 * time.Millisecond)
 
-	assert.Len(t, fwd.calls, 1)
-	assert.Equal(t, state, fwd.calls[0].sessionID)
-	assert.Equal(t, "RADIUS", fwd.calls[0].transportType)
-	assert.Equal(t, "COA", fwd.calls[0].messageType)
-	assert.Equal(t, pkt, fwd.calls[0].raw)
+	assert.Equal(t, 1, fwd.len())
+	assert.Equal(t, state, fwd.get(0).sessionID)
+	assert.Equal(t, "RADIUS", fwd.get(0).transportType)
+	assert.Equal(t, "COA", fwd.get(0).messageType)
+	assert.Equal(t, pkt, fwd.get(0).raw)
 }
 
 // TestHandlePacket_DisconnectRequest calls forwardToBiz with messageType="RAR".
@@ -196,11 +231,11 @@ func TestHandlePacket_DisconnectRequest(t *testing.T) {
 	// Wait for detached goroutine to execute.
 	time.Sleep(50 * time.Millisecond)
 
-	assert.Len(t, fwd.calls, 1)
-	assert.Equal(t, state, fwd.calls[0].sessionID)
-	assert.Equal(t, "RADIUS", fwd.calls[0].transportType)
-	assert.Equal(t, "DM", fwd.calls[0].messageType) // Disconnect-Request → DM
-	assert.Equal(t, pkt, fwd.calls[0].raw)
+	assert.Equal(t, 1, fwd.len())
+	assert.Equal(t, state, fwd.get(0).sessionID)
+	assert.Equal(t, "RADIUS", fwd.get(0).transportType)
+	assert.Equal(t, "DM", fwd.get(0).messageType) // Disconnect-Request → DM
+	assert.Equal(t, pkt, fwd.get(0).raw)
 }
 
 // TestHandlePacket_UnknownCodeIsDropped verifies that unrecognized codes are ignored.
@@ -216,7 +251,7 @@ func TestHandlePacket_UnknownCodeIsDropped(t *testing.T) {
 
 	h.handlePacket(context.Background(), nil, nil, pkt)
 
-	assert.Empty(t, fwd.calls)
+	assert.Zero(t, fwd.len())
 }
 
 // TestHandleServerInitiated_NoSessionID_DropsPacket verifies that packets without
@@ -235,7 +270,7 @@ func TestHandleServerInitiated_NoSessionID_DropsPacket(t *testing.T) {
 
 	h.handlePacket(context.Background(), nil, nil, pkt)
 
-	assert.Empty(t, fwd.calls)
+	assert.Zero(t, fwd.len())
 }
 
 // TestHandleServerInitiated_Direct verifies that handleServerInitiated forwards
@@ -259,20 +294,20 @@ func TestHandleServerInitiated_Direct(t *testing.T) {
 	// Wait for detached goroutine to execute.
 	time.Sleep(50 * time.Millisecond)
 
-	assert.Len(t, fwd.calls, 1)
-	assert.Equal(t, sessionID, fwd.calls[0].sessionID)
-	assert.Equal(t, "COA", fwd.calls[0].messageType)
-	assert.Equal(t, "RADIUS", fwd.calls[0].transportType)
+	assert.Equal(t, 1, fwd.len())
+	assert.Equal(t, sessionID, fwd.get(0).sessionID)
+	assert.Equal(t, "COA", fwd.get(0).messageType)
+	assert.Equal(t, "RADIUS", fwd.get(0).transportType)
 
-	fwd.calls = nil
+	fwd.clear()
 	h.handleServerInitiated(context.Background(), dmPkt, "RADIUS")
 
 	// Wait for detached goroutine to execute.
 	time.Sleep(50 * time.Millisecond)
 
-	assert.Len(t, fwd.calls, 1)
-	assert.Equal(t, sessionID, fwd.calls[0].sessionID)
-	assert.Equal(t, "DM", fwd.calls[0].messageType) // Disconnect-Request → DM
+	assert.Equal(t, 1, fwd.len())
+	assert.Equal(t, sessionID, fwd.get(0).sessionID)
+	assert.Equal(t, "DM", fwd.get(0).messageType) // Disconnect-Request → DM
 }
 
 // TestExtractSessionID_StateAttribute extracts session ID from State attribute.
@@ -340,9 +375,9 @@ func TestRadiusHandler_CoA_WaitsForBizPodResponse(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// forwardToBiz should have been called.
-	assert.Len(t, fwd.calls, 1)
-	assert.Equal(t, sessionID, fwd.calls[0].sessionID)
-	assert.Equal(t, "COA", fwd.calls[0].messageType)
+	assert.Equal(t, 1, fwd.len())
+	assert.Equal(t, sessionID, fwd.get(0).sessionID)
+	assert.Equal(t, "COA", fwd.get(0).messageType)
 }
 
 // TestRadiusHandler_CoA_TimeoutReturnsNAK verifies that timeout on registry
@@ -424,8 +459,8 @@ func TestRadiusHandler_CoA_RegistryPending(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Verify forwardToBiz was called.
-	assert.Len(t, fwd.calls, 1)
-	assert.Equal(t, sessionID, fwd.calls[0].sessionID)
+	assert.Equal(t, 1, fwd.len())
+	assert.Equal(t, sessionID, fwd.get(0).sessionID)
 }
 
 // buildMessageAuthAttr builds a RADIUS Message-Authenticator attribute (type=80).
@@ -545,14 +580,14 @@ func TestRadiusHandler_CoA_AcceptsValidMessageAuth(t *testing.T) {
 	// Wait for detached goroutine to execute.
 	time.Sleep(50 * time.Millisecond)
 
-	if !fwd.forwardCalled() {
+	if !fwd.nonEmpty() {
 		t.Error("should forward CoA with valid Message-Authenticator")
 	}
-	if len(fwd.calls) != 1 {
-		t.Errorf("expected 1 forward call, got %d", len(fwd.calls))
+	if fwd.len() != 1 {
+		t.Errorf("expected 1 forward call, got %d", fwd.len())
 	}
-	if fwd.calls[0].sessionID != sessionID {
-		t.Errorf("expected sessionID %s, got %s", sessionID, fwd.calls[0].sessionID)
+	if fwd.get(0).sessionID != sessionID {
+		t.Errorf("expected sessionID %s, got %s", sessionID, fwd.get(0).sessionID)
 	}
 }
 
@@ -644,5 +679,5 @@ func TestRadiusHandler_DM_DropsInvalidMessageAuth(t *testing.T) {
 
 // forwardCalled is a helper for mockForwardToBiz.
 func (m *mockForwardToBiz) forwardCalled() bool {
-	return len(m.calls) > 0
+	return m.nonEmpty()
 }
