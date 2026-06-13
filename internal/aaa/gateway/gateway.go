@@ -355,14 +355,23 @@ func (g *Gateway) HandleServerInitiatedResponse(w http.ResponseWriter, r *http.R
 	g.logger.Info("HandleServerInitiatedResponse",
 		"session_id", resp.SessionID,
 		"auth_ctx_id", resp.AuthCtxID,
+		"message_type", resp.MessageType,
 		"result_code", resp.ResultCode,
 	)
 
+	// Use the message type from the Biz Pod response.
+	// Default to "ASR" for backward compatibility if not provided.
+	msgType := resp.MessageType
+	if msgType == "" {
+		msgType = "ASR"
+	}
+
 	// Deliver response to the pending request via registry.
-	g.registry.Complete(resp.SessionID, "ASR", &ServerInitiatedResponse{
+	g.registry.Complete(resp.SessionID, msgType, &ServerInitiatedResponse{
 		AuthCtxID:  resp.AuthCtxID,
 		ResultCode: resp.ResultCode,
 		Payload:    resp.Payload,
+		ErrorCause: resp.ErrorCause,
 	})
 
 	w.WriteHeader(http.StatusNoContent)

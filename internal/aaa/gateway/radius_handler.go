@@ -3,6 +3,9 @@ package gateway
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/md5"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -33,6 +36,8 @@ type RadiusHandler struct {
 	forwardToBiz func(ctx context.Context, sessionID string, transportType string, messageType string, raw []byte)
 	registry     *ServerInitiatedRegistry
 	sharedSecret string // Shared secret for Message-Authenticator validation (RFC 5176 §3)
+	replyConn   *net.UDPConn          // UDP connection for sending responses
+	replyAddr   *net.UDPAddr          // Last received source address (for CoA-ACK/NAK)
 }
 
 // Listen starts the RADIUS UDP listener.
@@ -43,6 +48,9 @@ func (h *RadiusHandler) Listen(ctx context.Context, addr string) {
 		return
 	}
 	defer func() { _ = conn.Close() }()
+
+	// Store the connection for sending responses back to AAA-S.
+	h.replyConn = conn
 
 	h.logger.Info("RADIUS UDP listener started", "addr", conn.LocalAddr())
 
@@ -68,7 +76,10 @@ func (h *RadiusHandler) Listen(ctx context.Context, addr string) {
 }
 
 // handlePacket processes an incoming RADIUS packet from AAA-S.
-func (h *RadiusHandler) handlePacket(ctx context.Context, _ *net.UDPConn, addr *net.UDPAddr, raw []byte) {
+func (h *RadiusHandler) handlePacket(ctx context.Context, conn *net.UDPConn, addr *net.UDPAddr, raw []byte) {
+	// Store reply address for use in sendCoAResponse.
+	h.replyAddr = addr
+
 	if len(raw) < 4 {
 		h.logger.Warn("radius_packet_too_short", "len", len(raw))
 		return
@@ -204,24 +215,82 @@ func extractSessionID(raw []byte) string {
 	return ""
 }
 
-// sendCoAResponse sends CoA-ACK (ResultCode=2001) or CoA-NAK (ResultCode!=2001)
+// sendCoAResponse sends CoA-ACK (ResultCode=0) or CoA-NAK (ResultCode!=0)
 // back to AAA-S based on the Biz Pod response.
 // Spec: RFC 5176 §3.2 (CoA-ACK) and §3.3 (CoA-NAK)
 func (h *RadiusHandler) sendCoAResponse(sessionID string, reqRaw []byte, resp *ServerInitiatedResponse) {
-	var code uint8
-	if resp.ResultCode == ResultCodeSuccess {
-		code = radiusCoAACK
-	} else {
-		code = radiusCoANAK
+	if len(reqRaw) < 20 {
+		h.logger.Error("coa_response_too_short", "session_id", sessionID)
+		return
 	}
 
-	// Build CoA response: same structure as request with appropriate code.
-	// Note: The actual network send depends on how the handler receives packets.
-	// If using a UDP socket, send respPkt to the source address from handlePacket.
-	// For now, we log the response (the UDP socket send is handled by the caller
-	// in the Listen goroutine which owns the clientAddr).
+	// Build response packet: copy request as base.
+	respPkt := make([]byte, len(reqRaw))
+	copy(respPkt, reqRaw)
+
+	// ResultCode=0 means success (CoA-ACK).
+	// Non-zero means failure (CoA-NAK).
+	// Per Biz Pod proto spec, ResultCode=0 is success.
+	if resp.ResultCode == 0 {
+		respPkt[0] = radiusCoAACK
+	} else {
+		respPkt[0] = radiusCoANAK
+	}
+
+	// Copy Request Authenticator for Response Authenticator calculation.
+	reqAuth := make([]byte, 16)
+	copy(reqAuth, reqRaw[4:20])
+
+	// Recalculate Message-Authenticator if present in request.
+	// RFC 5176 §3.2: MA = HMAC-MD5(code+id+len+zeroes+request_auth+attrs+secret).
+	if radius.HasMessageAuthenticator(reqRaw) {
+		hmacCalc := hmac.New(md5.New, []byte(h.sharedSecret))
+		hmacCalc.Write([]byte{respPkt[0], respPkt[1]})
+		hmacCalc.Write(respPkt[2:4]) // Length
+		hmacCalc.Write([]byte{0, 0, 0, 0}) // Zero for MA calculation
+		hmacCalc.Write(reqAuth)
+		hmacCalc.Write(reqRaw[20:])
+		computedMA := hmacCalc.Sum(nil)
+
+		// Find and replace MA AVP in response packet.
+		for i := 20; i <= len(reqRaw)-26; {
+			avpCode := binary.LittleEndian.Uint16(reqRaw[i:])
+			avpLen := binary.LittleEndian.Uint16(reqRaw[i+2:])
+			if avpCode == 80 { // Message-Authenticator AVP (type 80)
+				copy(respPkt[i+6:i+22], computedMA)
+				break
+			}
+			i += int(avpLen)
+		}
+	}
+
+	// Recalculate Response Authenticator.
+	// RFC 5176 §3.2: RespAuth = MD5(code+id+len+reqAuth+attrs+secret).
+	if h.sharedSecret != "" {
+		hmacCalc := md5.New()
+		hmacCalc.Write([]byte{respPkt[0], respPkt[1]})
+		hmacCalc.Write(respPkt[2:4])
+		hmacCalc.Write(reqAuth)
+		hmacCalc.Write(respPkt[20:])
+		hmacCalc.Write([]byte(h.sharedSecret))
+		copy(respPkt[4:20], hmacCalc.Sum(nil))
+	}
+
+	// Send response back to AAA-S.
+	if h.replyConn != nil && h.replyAddr != nil {
+		_, err := h.replyConn.WriteToUDP(respPkt, h.replyAddr)
+		if err != nil {
+			h.logger.Error("failed to send CoA response",
+				"code", respPkt[0],
+				"result_code", resp.ResultCode,
+				"error", err,
+				"session_id", sessionID)
+			return
+		}
+	}
+
 	h.logger.Info("CoA response sent",
-		"code", code,
+		"code", respPkt[0],
 		"result_code", resp.ResultCode,
 		"error_cause", resp.ErrorCause,
 		"session_id", sessionID)
