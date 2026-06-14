@@ -55,7 +55,7 @@ func main() {
 		RadiusServerAddress:  cfg.AAAgw.RadiusServerAddress,
 		RadiusSharedSecret:   cfg.AAAgw.RadiusSharedSecret,
 		RedisMode:            cfg.AAAgw.RedisMode,
-		KeepalivedStatePath:  cfg.AAAgw.KeepalivedStatePath,
+		VIPAddress:            cfg.AAAgw.VIPAddress,
 		DLQ:                  cfg.AAAgw.DLQ,
 	})
 
@@ -77,7 +77,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if !gw.StartVIPAware(ctx, cfg.AAAgw.KeepalivedStatePath) {
+	if !gw.StartVIPAware(ctx, cfg.AAAgw.VIPAddress) {
 		slog.Error("gateway failed to acquire VIP or start listeners")
 		os.Exit(1)
 	}
