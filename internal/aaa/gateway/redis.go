@@ -2,9 +2,6 @@
 package gateway
 
 import (
-	"os"
-	"strings"
-
 	"github.com/redis/go-redis/v9"
 )
 
@@ -29,17 +26,4 @@ func newRedisClient(redisAddr, mode string) *redis.Client {
 		// Default: direct connection to single Redis node.
 	}
 	return redis.NewClient(opts)
-}
-
-// readKeepalivedState reads the last line of the keepalived state file.
-func readKeepalivedState(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	if len(lines) == 0 {
-		return "", nil
-	}
-	return lines[len(lines)-1], nil
 }
