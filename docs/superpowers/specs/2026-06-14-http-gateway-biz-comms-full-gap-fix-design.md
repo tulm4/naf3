@@ -11,16 +11,34 @@
 
 ### 1.1 Purpose
 
-This spec defines the work to close all gaps in the HTTP Gateway ↔ Biz communication layer. The current implementation has architectural limitations that prevent production-grade HA:
+This spec defines the work to close all gaps in the NSSAAF communication layer, covering both **inbound** (external NFs → NSSAAF) and **outbound** (Biz Pod → external NFs) communication paths.
 
-- HTTP Gateway uses a static single URL with no load balancing
-- X-Request-ID correlation is not propagated end-to-end
-- Server-initiated handlers (RAR/ASR/CoA) return dummy bytes
-- VIP failover has a 15-30s blackout window due to circuit breaker staleness
-- RADIUS retry behavior is not configurable
-- Timeout values are hardcoded
+### 1.2 Communication Architecture
 
-### 1.2 Gap Summary
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         NSSAAF Communication Architecture                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  INBOUND (đi qua HTTP Gateway)                                           │
+│  ────────────────────────────────                                          │
+│  AMF ──────▶ HTTP Gateway ──────▶ Biz Pod ────▶ AAA GW ────▶ AAA-S        │
+│  AUSF ─────▶ HTTP Gateway ──────▶ Biz Pod                                 │
+│                                                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  OUTBOUND (từ Biz Pod ra ngoài — qua nfclient.Factory)                   │
+│  ─────────────────────────────────────────────────────                     │
+│  Biz Pod ──────▶ NRF      : Service discovery, NF registration           │
+│  Biz Pod ──────▶ UDM      : Get subscription data (N59)                  │
+│  Biz Pod ──────▶ AMF CB   : Re-Auth/Revocation notification               │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 1.3 Gap Summary
+
+#### Inbound Gaps (HTTP Gateway ↔ Biz)
 
 | ID | Path | Gap | Severity | Status |
 |----|------|-----|----------|--------|
@@ -32,6 +50,15 @@ This spec defines the work to close all gaps in the HTTP Gateway ↔ Biz communi
 | G6 | AAA GW → Biz | RADIUS MaxRetries hardcoded | MEDIUM | Should use config |
 | G7 | Biz → AAA GW | VIP health check not started | MEDIUM | Implemented but not wired |
 | G8 | Config | KeepalivedHealthURL missing | MEDIUM | Not in config schema |
+
+#### Outbound Gaps (Biz Pod → NRF/UDM/AMF)
+
+| ID | Path | Gap | Severity | Status |
+|----|------|-----|----------|--------|
+| G9 | Biz → NRF/UDM/AMF | No retry in nfclient.Factory | HIGH | Not implemented |
+| G10 | Biz → NRF/UDM/AMF | Hardcoded 30s timeout | MEDIUM | Not configurable |
+| G11 | Biz → AMF | X-Request-ID not propagated in notifications | MEDIUM | Not implemented |
+| G12 | Biz → AMF | DLQ retry behavior not configurable | LOW | Not implemented |
 
 ---
 
@@ -644,13 +671,228 @@ if cfg.InternalComm.Native.KeepalivedHealthURL == "" {
 
 ---
 
+## 4.9 G9: Add Retry to nfclient.Factory (HIGH)
+
+### Problem
+`nfclient.Factory.Do()` has circuit breaker but no retry. Failed requests are immediately rejected instead of retried.
+
+### Current State
+```go
+// internal/nfclient/factory.go
+func (f *Factory) Do(ctx context.Context, baseURL, method, path string, body []byte) (int, []byte, error) {
+    // ... circuit breaker check ...
+    resp, err := client.Do(req)
+    // No retry — immediate failure
+}
+```
+
+### Solution
+Add retry logic with exponential backoff, similar to `httpclient.NativeBizClient`.
+
+**Modified Factory:**
+
+```go
+// internal/nfclient/factory.go
+
+type Factory struct {
+    cbRegistry *resilience.Registry
+    transport  http.RoundTripper
+    timeout    time.Duration
+    retryCfg   resilience.RetryConfig  // NEW
+}
+
+// NewFactory creates a factory with retry configuration.
+func NewFactory(cbRegistry *resilience.Registry, retryCfg resilience.RetryConfig) *Factory {
+    if retryCfg.MaxAttempts == 0 {
+        retryCfg.MaxAttempts = 3
+    }
+    if retryCfg.BaseDelay == 0 {
+        retryCfg.BaseDelay = 500 * time.Millisecond
+    }
+    if retryCfg.MaxDelay == 0 {
+        retryCfg.MaxDelay = 10 * time.Second
+    }
+    return &Factory{
+        cbRegistry: cbRegistry,
+        transport:  otelhttp.NewTransport(http.DefaultTransport),
+        timeout:    30 * time.Second,
+        retryCfg:   retryCfg,
+    }
+}
+
+// Do executes with retry + circuit breaker.
+func (f *Factory) Do(ctx context.Context, baseURL, method, path string, body []byte) (int, []byte, error) {
+    var lastStatus int
+    var lastBody []byte
+    var lastErr error
+
+    err := resilience.Do(ctx, f.retryCfg, func() error {
+        status, respBody, err := f.doOnce(ctx, baseURL, method, path, body)
+        lastStatus = status
+        lastBody = respBody
+        lastErr = err
+
+        if err != nil {
+            return err
+        }
+
+        // Don't retry 4xx errors
+        if status >= 400 && status < 500 {
+            return nil
+        }
+
+        // Retry 5xx errors
+        if resilience.IsRetryable(status) {
+            lastErr = fmt.Errorf("retryable status: %d", status)
+            return lastErr
+        }
+
+        return nil
+    })
+
+    if err != nil {
+        return lastStatus, lastBody, lastErr
+    }
+    return lastStatus, lastBody, nil
+}
+```
+
+---
+
+## 4.10 G10: Make Timeout Configurable (MEDIUM)
+
+### Problem
+30s timeout is hardcoded in `nfclient.Factory`.
+
+### Solution
+Add `Timeout` to factory and use from config.
+
+**Config Changes:**
+
+```go
+// internal/config/nf_client.go  (NEW file or add to existing)
+
+type NFClientConfig struct {
+    Timeout time.Duration `yaml:"timeout"`
+    Retry  RetryConfig  `yaml:"retry"`
+    CB     CircuitBreakerConfig `yaml:"circuitBreaker"`
+}
+
+// applyDefaults in config.go
+if cfg.NFClient.Timeout == 0 {
+    cfg.NFClient.Timeout = 30 * time.Second
+}
+```
+
+**Usage:**
+
+```go
+// cmd/biz/factory.go
+nfFactory := nfclient.NewFactory(
+    cbRegistry,
+    resilience.RetryConfig{
+        MaxAttempts: cfg.NFClient.Retry.MaxAttempts,
+        BaseDelay:  cfg.NFClient.Retry.BaseDelay,
+        MaxDelay:   cfg.NFClient.Retry.MaxDelay,
+    },
+).WithTimeout(cfg.NFClient.Timeout)
+```
+
+---
+
+## 4.11 G11: X-Request-ID in AMF Notifications (MEDIUM)
+
+### Problem
+AMF notifications don't include `X-Request-ID` for correlation.
+
+### Solution
+Pass `X-Request-ID` through from Biz Pod to AMF callback.
+
+**Modified AMF Client:**
+
+```go
+// internal/amf/amf.go
+
+func (c *Client) sendNotification(ctx context.Context, typ NotificationType, uri, authCtxID string, payload []byte) error {
+    // ... existing logic ...
+
+    // Extract baseURL and path from full URI
+    baseURL, path, err := extractBaseURLAndPath(uri)
+    if err != nil {
+        return fmt.Errorf("amf: parse uri: %w", err)
+    }
+
+    // Build request with X-Request-ID
+    req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+path, bytes.NewReader(payload))
+    if err != nil {
+        return err
+    }
+    req.Header.Set("Content-Type", "application/json")
+    if reqID := middleware.GetRequestID(ctx); reqID != "" {
+        req.Header.Set("X-Request-ID", reqID)
+    }
+
+    status, _, err := c.factory.DoRequest(req)
+    // ...
+}
+```
+
+**New method on Factory:**
+
+```go
+// internal/nfclient/factory.go
+
+// DoRequest executes a pre-built request (allows caller to set custom headers).
+func (f *Factory) DoRequest(req *http.Request) (int, []byte, error) {
+    // Similar to Do() but uses pre-built request
+}
+```
+
+---
+
+## 4.12 G12: Make DLQ Configurable (LOW)
+
+### Problem
+DLQ retry behavior not configurable (max attempts, retry delay).
+
+### Solution
+Add DLQ config to `AMFConfig`.
+
+**Config Changes:**
+
+```go
+// internal/config/amf.go  (or add to existing)
+
+type AMFConfig struct {
+    DLQ DLQConfig `yaml:"dlq"`
+}
+
+type DLQConfig struct {
+    MaxRetries     int           `yaml:"maxRetries"`
+    RetryDelay     time.Duration `yaml:"retryDelay"`
+    AlertThreshold int           `yaml:"alertThreshold"`
+}
+
+// applyDefaults
+if cfg.AMF.DLQ.MaxRetries == 0 {
+    cfg.AMF.DLQ.MaxRetries = 10
+}
+if cfg.AMF.DLQ.RetryDelay == 0 {
+    cfg.AMF.DLQ.RetryDelay = 30 * time.Second
+}
+```
+
+---
+
 ## 5. Implementation Phases
 
-### Phase 1: Config Schema + VIP Health Check (G8, G7)
+### Phase 1: Config Schema + Outbound Basics (G8, G9, G10)
 1. Add `KeepalivedHealthURL` to `NativeCommConfig`
 2. Add `Radius` config with `MaxRetries`, `Timeout`, `ResponseWindow`
 3. Add `Timeout` to `NativeCommConfig`
 4. Wire `StartVIPHealthCheck()` in Biz Pod
+5. Add retry to `nfclient.Factory` (G9)
+6. Add configurable timeout to `nfclient.Factory` (G10)
 
 ### Phase 2: HTTP Gateway Load Balancing (G1, G4)
 1. Create `BizRegistry` type in `internal/httpclient/`
@@ -658,10 +900,11 @@ if cfg.InternalComm.Native.KeepalivedHealthURL == "" {
 3. Update factory to create `BizRegistry`
 4. Modify HTTP Gateway to pass Redis address
 
-### Phase 3: X-Request-ID Propagation (G2)
+### Phase 3: X-Request-ID Propagation (G2, G11)
 1. Update `BizServiceClient` interface to include `requestID`
 2. Update all client implementations
 3. Update HTTP Gateway handlers
+4. Add X-Request-ID to AMF notifications (G11)
 
 ### Phase 4: RADIUS Configurable Retries (G6)
 1. Update `RadiusForwarderConfig` to use config values
@@ -673,9 +916,15 @@ if cfg.InternalComm.Native.KeepalivedHealthURL == "" {
 3. Wire AMF notifications
 4. Register in Biz Pod factory
 
+### Phase 6: DLQ Config (G12)
+1. Add DLQ config to AMF configuration
+2. Update DLQ consumer to use configurable values
+
 ---
 
 ## 6. File Changes Summary
+
+### Inbound (HTTP Gateway ↔ Biz)
 
 | File | Changes |
 |------|---------|
@@ -687,9 +936,19 @@ if cfg.InternalComm.Native.KeepalivedHealthURL == "" {
 | `internal/httpclient/istio_biz.go` | Add `requestID` param |
 | `internal/httpclient/factory.go` | Update factory to create `BizRegistry` |
 | `internal/aaa/gateway/gateway.go` | Use config for RADIUS, pass `InternalCommConfig` |
+| `internal/aaa/gateway/radius_forward.go` | Accept configurable `MaxRetries` |
 | `cmd/http-gateway/main.go` | Pass Redis addr, extract X-Request-ID |
 | `cmd/biz/main.go` | Wire VIP health check, implement real handlers |
-| `cmd/biz/factory.go` | Add `WithServerInitiatedDeps` |
+| `cmd/biz/factory.go` | Add `WithServerInitiatedDeps`, wire VIP health check |
+
+### Outbound (Biz Pod → NRF/UDM/AMF)
+
+| File | Changes |
+|------|---------|
+| `internal/config/config.go` | Add `NFClient` config, `AMF.DLQ` config |
+| `internal/nfclient/factory.go` | Add retry logic, configurable timeout |
+| `internal/amf/amf.go` | Add X-Request-ID propagation, use DLQ config |
+| `cmd/biz/factory.go` | Wire NF clients with config |
 
 ---
 
@@ -715,6 +974,8 @@ if cfg.InternalComm.Native.KeepalivedHealthURL == "" {
 
 ## 8. Acceptance Criteria
 
+### Inbound Criteria (HTTP Gateway ↔ Biz)
+
 | ID | Criteria | Verification |
 |----|----------|---------------|
 | AC1 | HTTP Gateway routes to live Biz Pod only | Kill pod → verify 200 on other pods |
@@ -726,9 +987,20 @@ if cfg.InternalComm.Native.KeepalivedHealthURL == "" {
 | AC7 | VIP failover → CB resets within 10s | Measure time from failover to CB reset |
 | AC8 | KeepalivedHealthURL configurable | Set URL → verify health check hits correct endpoint |
 
+### Outbound Criteria (Biz Pod → NRF/UDM/AMF)
+
+| ID | Criteria | Verification |
+|----|----------|---------------|
+| AC9 | NRF/UDM/AMF requests retry on 5xx | Inject 500 → verify retry attempts |
+| AC10 | NF client timeout configurable | Set 5s → verify timeout |
+| AC11 | AMF notifications include X-Request-ID | Check header in AMF logs |
+| AC12 | AMF DLQ max retries configurable | Set 5 → verify DLQ exhausts after 5 |
+
 ---
 
 ## 9. Metrics
+
+### Inbound Metrics
 
 | Metric | Type | Labels |
 |--------|------|--------|
@@ -737,3 +1009,12 @@ if cfg.InternalComm.Native.KeepalivedHealthURL == "" {
 | `nssAAF_server_initiated_handled_total` | Counter | `type`, `result` |
 | `nssAAF_vip_health_check_state` | Gauge | - |
 | `nssAAF_cb_reset_by_vip_change_total` | Counter | - |
+
+### Outbound Metrics
+
+| Metric | Type | Labels |
+|--------|------|--------|
+| `nssAAF_nf_client_retry_total` | Counter | `nf`, `attempt` |
+| `nssAAF_nf_client_timeout_total` | Counter | `nf` |
+| `nssAAF_amf_notification_retry_total` | Counter | `type`, `attempt` |
+| `nssAAF_amf_dlq_depth` | Gauge | - |
