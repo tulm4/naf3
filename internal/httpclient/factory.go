@@ -40,12 +40,12 @@ func (f *Factory) Mode() Mode {
 }
 
 // NewBizServiceClient creates a BizServiceClient for HTTP GW -> Biz Pod.
-func (f *Factory) NewBizServiceClient(bizServiceURL string) proto.BizServiceClient {
+func (f *Factory) NewBizServiceClient(bizServiceURL string, redisAddr string) proto.BizServiceClient {
 	switch f.mode {
 	case ModeIstio:
 		return newIstioBizClient(bizServiceURL)
 	default:
-		return newNativeBizClient(bizServiceURL, f.cfg.Native)
+		return NewBizRegistry(redisAddr, bizServiceURL, f.cfg.Native)
 	}
 }
 

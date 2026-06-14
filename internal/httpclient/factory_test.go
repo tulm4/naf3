@@ -123,7 +123,7 @@ func TestFactory_NewBizServiceClient_Native(t *testing.T) {
 	os.Unsetenv("ISTIO_MTLS")
 
 	factory := NewFactory(cfg)
-	client := factory.NewBizServiceClient("http://biz-service:8080")
+	client := factory.NewBizServiceClient("http://biz-service:8080", "redis://localhost:6379")
 
 	if client == nil {
 		t.Fatal("expected non-nil client")
@@ -146,7 +146,7 @@ func TestFactory_NewBizServiceClient_Istio(t *testing.T) {
 	os.Unsetenv("ISTIO_MTLS")
 
 	factory := NewFactory(cfg)
-	client := factory.NewBizServiceClient("http://biz-service:8080")
+	client := factory.NewBizServiceClient("http://biz-service:8080", "redis://localhost:6379")
 
 	if client == nil {
 		t.Fatal("expected non-nil client")

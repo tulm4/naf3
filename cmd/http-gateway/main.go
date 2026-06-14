@@ -66,7 +66,10 @@ func main() {
 	}
 	slog.Info("auth initialized", "jwks_url", jwksURL)
 
-	bizClient := httpclient.NewFactory(cfg.InternalComm).NewBizServiceClient(cfg.HTTPgw.BizServiceURL)
+	bizClient := httpclient.NewFactory(cfg.InternalComm).NewBizServiceClient(
+		cfg.HTTPgw.BizServiceURL,
+		cfg.Redis.Addr,
+	)
 
 	// Use a mux for path-based auth scoping.
 	mux := http.NewServeMux()
