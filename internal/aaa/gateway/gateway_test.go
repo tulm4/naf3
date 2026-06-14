@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -37,40 +38,23 @@ func TestNewRedisClient_UnknownMode(t *testing.T) {
 	_ = client.Close()
 }
 
-func TestReadKeepalivedState(t *testing.T) {
-	// Test with non-existent file
-	_, err := readKeepalivedState("/nonexistent/path")
-	if err == nil {
-		t.Error("expected error for non-existent file")
+func TestIsVIPOwner(t *testing.T) {
+	// Test with a non-existent IP (should return false)
+	if isVIPOwner(context.Background(), "192.0.2.1") {
+		t.Error("expected false for non-assigned IP")
+	}
+
+	// Test with empty IP (should return false)
+	if isVIPOwner(context.Background(), "") {
+		t.Error("expected false for empty IP")
 	}
 }
 
-func TestReadKeepalivedState_ValidFile(t *testing.T) {
-	// Create a temp file
-	tmp, err := os.CreateTemp("", "keepalived-state")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.Remove(tmp.Name())
-
-	// Write some content
-	tmp.WriteString("BACKUP\n")
-	tmp.Close()
-
-	state, err := readKeepalivedState(tmp.Name())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if state != "BACKUP" {
-		t.Errorf("state: got %q, want %q", state, "BACKUP")
-	}
-}
-
-func TestVIPHealthHandler_MissingStateFile(t *testing.T) {
+func TestVIPHealthHandler_NoVIPConfigured(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	g := &Gateway{
 		cfg: Config{
-			KeepalivedStatePath: "/nonexistent/keepalived/state",
+			VIPAddress: "", // No VIP configured
 		},
 		logger: logger,
 	}
@@ -78,21 +62,23 @@ func TestVIPHealthHandler_MissingStateFile(t *testing.T) {
 	req := httptest.NewRequest("GET", "/health/vip", nil)
 	rec := httptest.NewRecorder()
 
-	// Just verify it doesn't panic
 	g.VIPHealthHandler(rec, req)
 
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("code: got %d, want %d", rec.Code, http.StatusServiceUnavailable)
 	}
+	if !strings.Contains(rec.Body.String(), "VIP not configured") {
+		t.Errorf("body: got %q, want to contain 'VIP not configured'", rec.Body.String())
+	}
 }
 
-func TestStartVIPAware_DevModeNoStateFile(t *testing.T) {
-	// When statePath is empty, should start immediately without polling
+func TestStartVIPAware_DevModeNoVIP(t *testing.T) {
+	// When VIPAddress is empty, should start immediately without polling
 	gw := &Gateway{
 		cfg: Config{
-			KeepalivedStatePath: "",
-			ListenRADIUS:       "",
-			ListenDIAMETER:     "",
+			VIPAddress:     "",
+			ListenRADIUS:   "",
+			ListenDIAMETER: "",
 		},
 		logger: slog.New(slog.NewTextHandler(os.Stdout, nil)),
 		wg:     sync.WaitGroup{},
@@ -103,25 +89,6 @@ func TestStartVIPAware_DevModeNoStateFile(t *testing.T) {
 	started := gw.StartVIPAware(ctx, "")
 	if !started {
 		t.Fatal("expected StartVIPAware to return true in dev mode")
-	}
-}
-
-func TestStartVIPAware_DevModeDevNull(t *testing.T) {
-	gw := &Gateway{
-		cfg: Config{
-			KeepalivedStatePath: "/dev/null",
-			ListenRADIUS:       "",
-			ListenDIAMETER:     "",
-		},
-		logger: slog.New(slog.NewTextHandler(os.Stdout, nil)),
-		wg:     sync.WaitGroup{},
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	started := gw.StartVIPAware(ctx, "/dev/null")
-	if !started {
-		t.Fatal("expected StartVIPAware to return true with /dev/null state path")
 	}
 }
 
