@@ -159,13 +159,13 @@ config:
 
 ## Validation Checklist
 
-- [ ] `go build ./...` compiles without errors
-- [ ] `go test ./internal/aaa/gateway/...` passes
-- [ ] Health endpoint `/health/vip` returns 200 when VIP is assigned
-- [ ] Health endpoint `/health/vip` returns 503 when VIP is not assigned
-- [ ] Startup waits for VIP assignment in HA mode (non-empty VIPAddress)
-- [ ] Startup starts immediately in dev mode (empty VIPAddress)
-- [ ] Keepalived sidecar and volumes removed from Kubernetes deployment
+- [x] `go build ./...` compiles without errors
+- [x] `go test ./internal/aaa/gateway/...` passes
+- [x] Health endpoint `/health/vip` returns 200 when VIP is assigned
+- [x] Health endpoint `/health/vip` returns 503 when VIP is not assigned
+- [x] Startup waits for VIP assignment in HA mode (non-empty VIPAddress)
+- [x] Startup starts immediately in dev mode (empty VIPAddress)
+- [x] Keepalived sidecar and volumes removed from Kubernetes deployment
 
 ## Rationale
 
