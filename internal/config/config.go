@@ -128,7 +128,7 @@ type AAAgwConfig struct {
 	RadiusSharedSecret  string `yaml:"radiusSharedSecret"`  // Shared secret with AAA-S
 
 	RedisMode           string `yaml:"redisMode"`           // "standalone" or "sentinel"
-	KeepalivedStatePath string `yaml:"keepalivedStatePath"` // "/var/run/keepalived/state"
+	VIPAddress string `yaml:"vipAddress"` // e.g., "10.1.100.50"
 
 	// DLQ holds Dead Letter Queue settings for server-initiated message retries.
 	DLQ DLQConfig `yaml:"dlq"`
@@ -494,9 +494,7 @@ func applyDefaults(cfg *Config) {
 		if cfg.AAAgw.RedisMode == "" {
 			cfg.AAAgw.RedisMode = "standalone"
 		}
-		if cfg.AAAgw.KeepalivedStatePath == "" {
-			cfg.AAAgw.KeepalivedStatePath = "/var/run/keepalived/state"
-		}
+		// VIPAddress has no default — empty means dev/test mode (no VIP check)
 		// Diameter client config defaults (PLAN §2.3.5 — required for DER/DEA forwarding)
 		if cfg.AAAgw.DiameterServerAddress == "" {
 			cfg.AAAgw.DiameterServerAddress = "nss-aaa-server:3868"
