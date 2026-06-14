@@ -11,15 +11,13 @@ import (
 )
 
 func TestBizRegistry_ForwardsToLivePod(t *testing.T) {
-	// Setup mock HTTP server
 	pod1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer pod1.Close()
 
-	// Create BizRegistry with fake Redis (will use static URL fallback since Redis won't have live pods)
 	registry := NewBizRegistry("localhost:9999", pod1.URL, config.NativeCommConfig{
-		Retry:   config.RetryConfig{MaxAttempts: 1},
+		Retry: config.RetryConfig{MaxAttempts: 1},
 		Timeout: 5 * time.Second,
 	})
 
