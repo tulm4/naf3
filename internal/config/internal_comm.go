@@ -18,6 +18,8 @@ type InternalCommConfig struct {
 
 // NativeCommConfig for Go native HTTP client.
 type NativeCommConfig struct {
+	// Timeout is the per-request timeout for HTTP calls (default: 30s).
+	Timeout time.Duration `yaml:"timeout"`
 	// Retry configures retry behavior
 	Retry RetryConfig `yaml:"retry"`
 	// CB configures per-destination circuit breaking

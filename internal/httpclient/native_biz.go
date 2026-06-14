@@ -65,7 +65,7 @@ func newNativeBizClient(baseURL string, cfg config.NativeCommConfig) *nativeBizC
 				MaxIdleConnsPerHost: poolCfg.MaxIdleConnsPerHost,
 				IdleConnTimeout:     poolCfg.IdleConnTimeout,
 			},
-			Timeout: 30 * time.Second,
+			Timeout: cfg.Timeout,
 		},
 		cbRegistry: resilience.NewRegistry(
 			cbCfg.FailureThreshold,

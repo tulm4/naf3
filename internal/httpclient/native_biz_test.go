@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/operator/nssAAF/internal/config"
 )
@@ -109,5 +110,16 @@ func TestNativeBizClient_CircuitBreakerOpen(t *testing.T) {
 	}
 	if status != http.StatusServiceUnavailable {
 		t.Fatalf("expected status 503 for circuit breaker open, got: %d", status)
+	}
+}
+
+func TestNativeBizClient_UsesConfigurableTimeout(t *testing.T) {
+	cfg := config.NativeCommConfig{
+		Timeout: 5 * time.Second,
+	}
+	client := newNativeBizClient("http://localhost:9999", cfg)
+
+	if client.httpClient.Timeout != 5*time.Second {
+		t.Errorf("expected timeout 5s, got %v", client.httpClient.Timeout)
 	}
 }

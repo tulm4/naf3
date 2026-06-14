@@ -501,6 +501,11 @@ func applyDefaults(cfg *Config) {
 		cfg.NRF.CacheTTL = 5 * time.Minute
 	}
 
+	// InternalComm native defaults
+	if cfg.InternalComm.Native.Timeout == 0 {
+		cfg.InternalComm.Native.Timeout = 30 * time.Second
+	}
+
 	// AUSF defaults (Phase 4 — N60 interface integration)
 	if cfg.AUSF.BaseURL == "" {
 		cfg.AUSF.BaseURL = cfg.NRF.BaseURL // Default: discover via NRF
