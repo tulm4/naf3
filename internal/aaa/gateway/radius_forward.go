@@ -27,12 +27,19 @@ type RadiusForwarderConfig struct {
 // Spec: RFC 2865, RFC 3579, TS 29.561 Ch.16
 type radiusForwarder struct {
 	client *radius.Client
+	config RadiusForwarderConfig
 	logger *slog.Logger
+}
+
+// Config returns the RADIUS forwarder configuration.
+func (rf *radiusForwarder) Config() RadiusForwarderConfig {
+	return rf.config
 }
 
 // newRadiusForwarder creates a RADIUS forwarder using the existing radius.Client.
 func newRadiusForwarder(cfg RadiusForwarderConfig, logger *slog.Logger) *radiusForwarder {
 	r := &radiusForwarder{
+		config: cfg,
 		logger: logger,
 	}
 	if cfg.ServerAddress == "" {

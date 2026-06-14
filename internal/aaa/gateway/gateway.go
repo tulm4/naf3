@@ -19,6 +19,7 @@ import (
 
 	"go.opentelemetry.io/otel"
 
+	"github.com/operator/nssAAF/internal/config"
 	"github.com/operator/nssAAF/internal/proto"
 	"github.com/redis/go-redis/v9"
 )
@@ -66,6 +67,9 @@ type Config struct {
 	// Peer validation (GAP-DIA-04): restrict incoming Diameter connections by Origin-Host/Realm
 	DiameterAllowedHosts  []string // Allowed Origin-Host values (empty = allow all)
 	DiameterAllowedRealms []string // Allowed Origin-Realm values (empty = allow all)
+
+	// InternalComm holds RADIUS client settings for the AAA Gateway.
+	InternalComm config.InternalCommConfig
 }
 
 // Gateway is the AAA Gateway component. It runs in a separate process from Biz Pods.
@@ -118,9 +122,9 @@ func New(cfg Config) *Gateway {
 			ServerAddress:   cfg.RadiusServerAddress,
 			ServerPort:     1812,
 			SharedSecret:    cfg.RadiusSharedSecret,
-			Timeout:        10 * time.Second,
-			MaxRetries:     3,
-			ResponseWindow: 10 * time.Second,
+			Timeout:         cfg.InternalComm.Native.Radius.Timeout,
+			MaxRetries:      cfg.InternalComm.Native.Radius.MaxRetries,
+			ResponseWindow:  cfg.InternalComm.Native.Radius.ResponseWindow,
 		}, cfg.Logger)
 	}
 
@@ -367,7 +371,7 @@ func (g *Gateway) HandleServerInitiatedResponse(w http.ResponseWriter, r *http.R
 	}
 
 	// Deliver response to the pending request via registry.
-	g.registry.Complete(resp.SessionID, msgType, &ServerInitiatedResponse{
+	g.registry.Complete(resp.SessionID, string(msgType), &ServerInitiatedResponse{
 		AuthCtxID:  resp.AuthCtxID,
 		ResultCode: resp.ResultCode,
 		Payload:    resp.Payload,

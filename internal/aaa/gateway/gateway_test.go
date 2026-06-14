@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/operator/nssAAF/internal/config"
 )
 
 func TestNewRedisClient_Standalone(t *testing.T) {
@@ -120,5 +122,25 @@ func TestStartVIPAware_DevModeDevNull(t *testing.T) {
 	started := gw.StartVIPAware(ctx, "/dev/null")
 	if !started {
 		t.Fatal("expected StartVIPAware to return true with /dev/null state path")
+	}
+}
+
+func TestGateway_UsesConfigurableMaxRetries(t *testing.T) {
+	cfg := Config{
+		RadiusServerAddress: "localhost:9999",
+		InternalComm: config.InternalCommConfig{
+			Native: config.NativeCommConfig{
+				Radius: config.RadiusConfig{
+					MaxRetries: 5,
+					Timeout:    5 * time.Second,
+				},
+			},
+		},
+	}
+
+	gw := New(cfg)
+	fwdCfg := gw.radiusForwarder.Config()
+	if fwdCfg.MaxRetries != 5 {
+		t.Errorf("expected MaxRetries 5, got %d", fwdCfg.MaxRetries)
 	}
 }
