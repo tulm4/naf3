@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/operator/nssAAF/internal/config"
+	"github.com/operator/nssAAF/internal/proto"
 	"github.com/operator/nssAAF/internal/resilience"
 	"github.com/redis/go-redis/v9"
 )
@@ -30,12 +31,16 @@ type BizPodEntry struct {
 // has no registered pods.
 // Spec: Option B — Redis-based target selection with circuit breakers
 type BizRegistry struct {
-	redisAddr string
-	staticURL string
+	redisAddr  string
+	staticURL  string
 	httpClient *http.Client
 	cbRegistry *resilience.Registry
 	retryCfg   resilience.RetryConfig
 }
+
+// Verify BizRegistry implements proto.BizServiceClient.
+// The interface will be updated in Slice 1.3 to include requestID parameter.
+var _ proto.BizServiceClient = (*BizRegistry)(nil)
 
 // NewBizRegistry creates a new BizRegistry with the given configuration.
 // redisAddr: Redis server address for pod discovery

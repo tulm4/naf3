@@ -17,7 +17,7 @@ func TestBizRegistry_ForwardsToLivePod(t *testing.T) {
 	defer pod1.Close()
 
 	registry := NewBizRegistry("localhost:9999", pod1.URL, config.NativeCommConfig{
-		Retry: config.RetryConfig{MaxAttempts: 1},
+		Retry:   config.RetryConfig{MaxAttempts: 1},
 		Timeout: 5 * time.Second,
 	})
 
