@@ -50,12 +50,6 @@ spec:
             - name: config
               mountPath: /etc/nssAAF
               readOnly: true
-            - name: keepalived-state
-              mountPath: /var/run/keepalived
-          securityContext:
-            capabilities:
-              add:
-                - NET_ADMIN
           readinessProbe:
             httpGet:
               path: /health
@@ -70,31 +64,10 @@ spec:
             periodSeconds: 30
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-        - name: keepalived
-          image: osixopen/keepalived:2.3.1
-          securityContext:
-            capabilities:
-              add:
-                - NET_ADMIN
-          volumeMounts:
-            - name: keepalived-conf
-              mountPath: /etc/keepalived
-            - name: keepalived-state
-              mountPath: /var/run/keepalived
-          env:
-            - name: POD_IP
-              valueFrom:
-                fieldRef:
-                  fieldPath: status.podIP
       volumes:
         - name: config
           configMap:
             name: nssaa-aaa-gateway-config
-        - name: keepalived-conf
-          configMap:
-            name: nssaa-aaa-keepalived
-        - name: keepalived-state
-          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
