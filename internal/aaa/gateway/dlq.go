@@ -14,8 +14,6 @@ import (
 )
 
 const (
-	dlqMaxAttempts    = 10
-	dlqPollInterval   = 30 * time.Second
 	dlqRetryBaseDelay = 1 * time.Second
 )
 
@@ -30,9 +28,9 @@ type DLQMessage struct {
 }
 
 // runDLQConsumer processes messages from the DLQ list.
-// It polls every dlqPollInterval, retries up to dlqMaxAttempts, and discards after exhaustion.
+// It polls every cfg.DLQ.PollInterval, retries up to cfg.DLQ.MaxRetries, and discards after exhaustion.
 func (g *Gateway) runDLQConsumer(ctx context.Context) {
-	ticker := time.NewTicker(dlqPollInterval)
+	ticker := time.NewTicker(g.cfg.DLQ.PollInterval)
 	defer ticker.Stop()
 
 	for {
@@ -70,7 +68,7 @@ func (g *Gateway) processDLQOne(ctx context.Context) {
 
 // processDLQMessage retries a single DLQ message.
 func (g *Gateway) processDLQMessage(ctx context.Context, msg *DLQMessage) {
-	if msg.AttemptCount >= dlqMaxAttempts {
+	if msg.AttemptCount >= g.cfg.DLQ.MaxRetries {
 		g.logger.Error("server_initiated_dlq_exhausted",
 			"session_id", msg.SessionID,
 			"message_type", msg.MessageType,

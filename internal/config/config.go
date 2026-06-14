@@ -129,6 +129,20 @@ type AAAgwConfig struct {
 
 	RedisMode           string `yaml:"redisMode"`           // "standalone" or "sentinel"
 	KeepalivedStatePath string `yaml:"keepalivedStatePath"` // "/var/run/keepalived/state"
+
+	// DLQ holds Dead Letter Queue settings for server-initiated message retries.
+	DLQ DLQConfig `yaml:"dlq"`
+}
+
+// DLQConfig holds Dead Letter Queue configuration for server-initiated message processing.
+// These settings control how the DLQ consumer retries failed messages before discarding them.
+type DLQConfig struct {
+	// MaxRetries is the maximum number of delivery attempts before discarding a message.
+	// Default: 10
+	MaxRetries int `yaml:"maxRetries"`
+	// RetryDelay is the interval between DLQ polling cycles.
+	// Default: 30s
+	PollInterval time.Duration `yaml:"pollInterval"`
 }
 
 // HTTPgwConfig holds HTTP Gateway configuration.
@@ -494,6 +508,14 @@ func applyDefaults(cfg *Config) {
 			cfg.AAAgw.DiameterHost = "nssaa-gw.operator.com"
 		}
 		// RADIUS client config defaults — no required fields (disabled if RadiusServerAddress empty)
+
+		// DLQ defaults for server-initiated message retries
+		if cfg.AAAgw.DLQ.MaxRetries == 0 {
+			cfg.AAAgw.DLQ.MaxRetries = 10
+		}
+		if cfg.AAAgw.DLQ.PollInterval == 0 {
+			cfg.AAAgw.DLQ.PollInterval = 30 * time.Second
+		}
 	}
 
 	// NRF cache TTL default (Phase 4 — NF Integration)
@@ -504,6 +526,15 @@ func applyDefaults(cfg *Config) {
 	// InternalComm native defaults
 	if cfg.InternalComm.Native.Timeout == 0 {
 		cfg.InternalComm.Native.Timeout = 30 * time.Second
+	}
+	if cfg.InternalComm.Native.Radius.MaxRetries == 0 {
+		cfg.InternalComm.Native.Radius.MaxRetries = 3
+	}
+	if cfg.InternalComm.Native.Radius.Timeout == 0 {
+		cfg.InternalComm.Native.Radius.Timeout = 10 * time.Second
+	}
+	if cfg.InternalComm.Native.Radius.ResponseWindow == 0 {
+		cfg.InternalComm.Native.Radius.ResponseWindow = 15 * time.Second
 	}
 
 	// AUSF defaults (Phase 4 — N60 interface integration)

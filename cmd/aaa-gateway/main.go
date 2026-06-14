@@ -50,12 +50,13 @@ func main() {
 		Version:               cfg.Version,
 		DiameterProtocol:      cfg.AAAgw.DiameterProtocol,
 		DiameterServerAddress: cfg.AAAgw.DiameterServerAddress,
-		DiameterRealm:         cfg.AAAgw.DiameterRealm,
-		DiameterHost:          cfg.AAAgw.DiameterHost,
-		RadiusServerAddress:   cfg.AAAgw.RadiusServerAddress,
-		RadiusSharedSecret:    cfg.AAAgw.RadiusSharedSecret,
-		RedisMode:             cfg.AAAgw.RedisMode,
-		KeepalivedStatePath:   cfg.AAAgw.KeepalivedStatePath,
+		DiameterRealm:        cfg.AAAgw.DiameterRealm,
+		DiameterHost:         cfg.AAAgw.DiameterHost,
+		RadiusServerAddress:  cfg.AAAgw.RadiusServerAddress,
+		RadiusSharedSecret:   cfg.AAAgw.RadiusSharedSecret,
+		RedisMode:            cfg.AAAgw.RedisMode,
+		KeepalivedStatePath:  cfg.AAAgw.KeepalivedStatePath,
+		DLQ:                  cfg.AAAgw.DLQ,
 	})
 
 	// Expose HTTP endpoints for Biz Pod communication

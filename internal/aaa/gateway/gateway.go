@@ -70,6 +70,9 @@ type Config struct {
 
 	// InternalComm holds RADIUS client settings for the AAA Gateway.
 	InternalComm config.InternalCommConfig
+
+	// DLQ holds Dead Letter Queue settings for server-initiated message processing.
+	DLQ config.DLQConfig
 }
 
 // Gateway is the AAA Gateway component. It runs in a separate process from Biz Pods.
