@@ -24,11 +24,30 @@ type BizServiceClient interface {
 // a server-initiated message (RAR/ASR/CoA).
 // The response bytes are forwarded by AAA Gateway to AAA-S.
 type AaaServerInitiatedResponse struct {
-	Version     string `json:"v"`
-	SessionID   string `json:"sessionId"`
-	AuthCtxID   string `json:"authCtxId"`
-	MessageType string `json:"messageType"` // "ASR" | "RAR" | "CoA" | "DM" | "STR"
-	ResultCode  uint32 `json:"resultCode"`  // 0=success, 2001=DIAMETER_SUCCESS, 5002=UNKNOWN_SESSION_ID, etc.
-	Payload     []byte `json:"payload,omitempty"`
-	ErrorCause  string `json:"errorCause,omitempty"`
+	Version     string      `json:"v"`
+	SessionID   string      `json:"sessionId"`
+	AuthCtxID   string      `json:"authCtxId"`
+	MessageType MessageType `json:"messageType"` // RAR | ASR | COA | DM | STR
+	ResultCode  uint32      `json:"resultCode"` // 0=success, 2001=DIAMETER_SUCCESS, 5002=UNKNOWN_SESSION_ID, etc.
+	Payload     []byte      `json:"payload,omitempty"`
+	ErrorCause  string      `json:"errorCause,omitempty"`
 }
+
+// ServerInitiatedHandler processes server-initiated messages from AAA GW.
+// Spec: docs/superpowers/specs/... §4.5
+type ServerInitiatedHandler interface {
+	HandleReAuth(ctx context.Context, req *AaaServerInitiatedRequest) (*AaaServerInitiatedResponse, error)
+	HandleRevocation(ctx context.Context, req *AaaServerInitiatedRequest) (*AaaServerInitiatedResponse, error)
+	HandleCoA(ctx context.Context, req *AaaServerInitiatedRequest) (*AaaServerInitiatedResponse, error)
+}
+
+// Result codes for AAA server-initiated responses (Diameter base protocol).
+const (
+	ResultCodeSuccess             uint32 = 2001 // DIAMETER_SUCCESS
+	ResultCodeAuthRejected        uint32 = 5001 // DIAMETER_AUTHORIZATION_REJECTED
+	ResultCodeUnknownSessionID    uint32 = 5002 // DIAMETER_UNKNOWN_SESSION_ID
+	ResultCodeInvalidAvpBits      uint32 = 5003 // DIAMETER_INVALID_AVP_BITS
+	ResultCodeAuthExpired         uint32 = 5004 // DIAMETER_AUTHORIZATION_EXPIRED
+	ResultCodeAdminProhibited     uint32 = 5005 // DIAMETER_ADMIN_PROHIBITED
+	ResultCodeAuthenticationError uint32 = 5012 // DIAMETER_AUTHENTICATION_ERROR
+)

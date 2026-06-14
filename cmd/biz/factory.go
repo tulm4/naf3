@@ -26,7 +26,6 @@ import (
 	"github.com/operator/nssAAF/internal/metrics"
 	"github.com/operator/nssAAF/internal/nfclient"
 	"github.com/operator/nssAAF/internal/nrf"
-	"github.com/operator/nssAAF/internal/proto"
 	"github.com/operator/nssAAF/internal/resilience"
 	"github.com/operator/nssAAF/internal/storage"
 	"github.com/operator/nssAAF/internal/storage/postgres"
@@ -304,13 +303,7 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 	stateWriter := biz.NewReverseFlowStateWriter(nssaaStore)
 	aiwLinker := biz.NewAIWCompletionLinker(aiwStore)
 	coordinator := biz.NewServerInitiatedCoordinator(resolver, stateWriter, amfNotifier, aiwLinker)
-	serverInitiatedHandler = func(ctx context.Context, req *proto.AaaServerInitiatedRequest) (*proto.AaaServerInitiatedResponse, error) {
-		result, err := coordinator.Handle(ctx, req)
-		if err != nil {
-			return nil, err
-		}
-		return &result.Response, nil
-	}
+	serverInitiatedHandler = NewServerInitiatedHandler(coordinator).HandleReAuth
 
 	// ─── N58: Nnssaaf_NSSAA ─────────────────────────────────────────────
 	nssaaHandler := nssaa.NewHandler(nssaaStore,
