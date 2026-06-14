@@ -295,8 +295,9 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 		f.logger,
 	)
 
-	// Start VIP health check for circuit breaker reset on failover
-	go aaaClient.StartVIPHealthCheck(context.Background())
+	// Start VIP health check goroutine after pod initialization.
+	// This resets the circuit breaker when the AAA Gateway VIP fails over.
+	go aaaClient.StartVIPHealthCheck(ctx)
 
 	// ─── Reverse-path coordinator for AAA server-initiated flows ─────────
 	resolver := biz.NewCorrelationResolver(redisPool.Client(), biz.NewNssaaSessionResolver(nssaaStore))
