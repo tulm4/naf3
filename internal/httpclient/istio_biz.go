@@ -24,13 +24,16 @@ func newIstioBizClient(baseURL string) *istioBizClient {
 }
 
 // ForwardRequest delegates to Istio sidecar for resilience.
-func (c *istioBizClient) ForwardRequest(ctx context.Context, path, method string, body []byte) ([]byte, int, error) {
+func (c *istioBizClient) ForwardRequest(ctx context.Context, path, method string, body []byte, requestID string) ([]byte, int, error) {
 	url := c.baseURL + path
 	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if requestID != "" {
+		req.Header.Set("X-Request-ID", requestID)
+	}
 
 	resp, err := c.client.Do(req)
 	if err != nil {

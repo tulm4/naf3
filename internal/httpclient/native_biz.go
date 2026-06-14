@@ -77,7 +77,7 @@ func newNativeBizClient(baseURL string, cfg config.NativeCommConfig) *nativeBizC
 }
 
 // ForwardRequest implements proto.BizServiceClient with retry + per-destination circuit breaker.
-func (c *nativeBizClient) ForwardRequest(ctx context.Context, path, method string, body []byte) ([]byte, int, error) {
+func (c *nativeBizClient) ForwardRequest(ctx context.Context, path, method string, body []byte, requestID string) ([]byte, int, error) {
 	// Per-destination circuit breaker (REQ-11: per-host:port isolation)
 	cb := c.cbRegistry.Get(c.baseURL)
 	if !cb.Allow() {
@@ -93,7 +93,7 @@ func (c *nativeBizClient) ForwardRequest(ctx context.Context, path, method strin
 	prevCBState := cb.State()
 
 	err := resilience.Do(ctx, c.retryCfg, func() error {
-		respBody, status, err := c.doRequest(ctx, path, method, body)
+		respBody, status, err := c.doRequest(ctx, path, method, body, requestID)
 		if err != nil {
 			lastErr = err
 			lastStatus = status
@@ -151,7 +151,7 @@ func (c *nativeBizClient) ForwardRequest(ctx context.Context, path, method strin
 	return lastBody, lastStatus, nil
 }
 
-func (c *nativeBizClient) doRequest(ctx context.Context, path, method string, body []byte) ([]byte, int, error) {
+func (c *nativeBizClient) doRequest(ctx context.Context, path, method string, body []byte, requestID string) ([]byte, int, error) {
 	url := c.baseURL + path
 	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body))
 	if err != nil {
@@ -159,6 +159,9 @@ func (c *nativeBizClient) doRequest(ctx context.Context, path, method string, bo
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Length", strconv.Itoa(len(body)))
+	if requestID != "" {
+		req.Header.Set("X-Request-ID", requestID)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

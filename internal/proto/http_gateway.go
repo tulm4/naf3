@@ -11,12 +11,13 @@ type BizServiceClient interface {
 	// - path: original request path (e.g. "/nnssaaf-nssaa/v1/slice-authentications")
 	// - method: HTTP method (GET, POST, PUT, DELETE)
 	// - body: request body bytes
+	// - requestID: correlation ID for tracing (optional, forwarded as X-Request-ID header)
 	// Returns (responseBody, httpStatus, error)
 	// - 2xx: success, HTTP Gateway forwards response to AMF/AUSF
 	// - 4xx: Biz Pod rejected (validation failure)
 	// - 5xx: Biz Pod error; HTTP Gateway may retry if idempotent
 	// - context.DeadlineExceeded: all Biz Pods failed; HTTP Gateway returns 503
-	ForwardRequest(ctx context.Context, path string, method string, body []byte) ([]byte, int, error)
+	ForwardRequest(ctx context.Context, path string, method string, body []byte, requestID string) ([]byte, int, error)
 }
 
 // AaaServerInitiatedResponse is returned by Biz Pod to AAA Gateway after processing
@@ -27,7 +28,7 @@ type AaaServerInitiatedResponse struct {
 	SessionID   string `json:"sessionId"`
 	AuthCtxID   string `json:"authCtxId"`
 	MessageType string `json:"messageType"` // "ASR" | "RAR" | "CoA" | "DM" | "STR"
-	ResultCode  uint32 `json:"resultCode"`   // 0=success, 2001=DIAMETER_SUCCESS, 5002=UNKNOWN_SESSION_ID, etc.
+	ResultCode  uint32 `json:"resultCode"`  // 0=success, 2001=DIAMETER_SUCCESS, 5002=UNKNOWN_SESSION_ID, etc.
 	Payload     []byte `json:"payload,omitempty"`
 	ErrorCause  string `json:"errorCause,omitempty"`
 }

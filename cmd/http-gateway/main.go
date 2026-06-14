@@ -84,7 +84,8 @@ func main() {
 				body, _ = io.ReadAll(r.Body)
 			}
 
-			respBody, status, err := bizClient.ForwardRequest(r.Context(), r.URL.Path, r.Method, body)
+			requestID := r.Header.Get("X-Request-ID")
+			respBody, status, err := bizClient.ForwardRequest(r.Context(), r.URL.Path, r.Method, body, requestID)
 			if err != nil {
 				slog.Error("forward to biz failed", "error", err, "path", r.URL.Path)
 				http.Error(w, "service unavailable", http.StatusServiceUnavailable)
@@ -106,7 +107,8 @@ func main() {
 				body, _ = io.ReadAll(r.Body)
 			}
 
-			respBody, status, err := bizClient.ForwardRequest(r.Context(), r.URL.Path, r.Method, body)
+			requestID := r.Header.Get("X-Request-ID")
+			respBody, status, err := bizClient.ForwardRequest(r.Context(), r.URL.Path, r.Method, body, requestID)
 			if err != nil {
 				slog.Error("forward to biz failed", "error", err, "path", r.URL.Path)
 				http.Error(w, "service unavailable", http.StatusServiceUnavailable)

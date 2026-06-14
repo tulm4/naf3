@@ -23,7 +23,7 @@ type bizServiceClient struct {
 	forwardCalled     bool
 }
 
-func (b *bizServiceClient) ForwardRequest(ctx context.Context, path, method string, body []byte) ([]byte, int, error) {
+func (b *bizServiceClient) ForwardRequest(ctx context.Context, path, method string, body []byte, requestID string) ([]byte, int, error) {
 	b.forwardCalled = true
 	b.forwardPath = path
 	b.forwardMethod = method
@@ -75,6 +75,7 @@ func TestHttpGateway_ForwardRequest_Success(t *testing.T) {
 		"/test/path",
 		"POST",
 		[]byte(`{"key":"value"}`),
+		"",
 	)
 
 	assert.NoError(t, err)
@@ -95,6 +96,7 @@ func TestHttpGateway_ForwardRequest_502OnBizError(t *testing.T) {
 		"/test",
 		"GET",
 		nil,
+		"",
 	)
 
 	assert.Error(t, err)
@@ -117,6 +119,7 @@ func TestHttpGateway_ForwardRequest_503OnTimeout(t *testing.T) {
 		"/test",
 		"GET",
 		nil,
+		"",
 	)
 
 	assert.Error(t, err)
@@ -141,7 +144,7 @@ func TestHttpGateway_SetsXVersionHeader(t *testing.T) {
 		forwardRespStatus: http.StatusOK,
 	}
 
-	_, _, err := client.ForwardRequest(context.Background(), "/path", "GET", nil)
+	_, _, err := client.ForwardRequest(context.Background(), "/path", "GET", nil, "")
 
 	assert.NoError(t, err)
 	assert.Equal(t, "", receivedVersion)

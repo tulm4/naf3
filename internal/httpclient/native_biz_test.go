@@ -20,7 +20,7 @@ func TestNativeBizClient_HappyPath(t *testing.T) {
 	cfg := config.NativeCommConfig{}
 	client := newNativeBizClient(server.URL, cfg)
 
-	respBody, status, err := client.ForwardRequest(context.Background(), "/test", "POST", []byte(`{}`))
+	respBody, status, err := client.ForwardRequest(context.Background(), "/test", "POST", []byte(`{}`), "")
 
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
@@ -49,7 +49,7 @@ func TestNativeBizClient_RetryOn502(t *testing.T) {
 	cfg := config.NativeCommConfig{}
 	client := newNativeBizClient(server.URL, cfg)
 
-	respBody, status, err := client.ForwardRequest(context.Background(), "/test", "POST", []byte(`{}`))
+	respBody, status, err := client.ForwardRequest(context.Background(), "/test", "POST", []byte(`{}`), "")
 
 	if err != nil {
 		t.Fatalf("expected no error after retry, got: %v", err)
@@ -74,7 +74,7 @@ func TestNativeBizClient_NoRetryOn400(t *testing.T) {
 	cfg := config.NativeCommConfig{}
 	client := newNativeBizClient(server.URL, cfg)
 
-	_, status, err := client.ForwardRequest(context.Background(), "/test", "POST", []byte(`{}`))
+	_, status, err := client.ForwardRequest(context.Background(), "/test", "POST", []byte(`{}`), "")
 
 	if err != nil {
 		t.Fatalf("expected no error for 400, got: %v", err)
@@ -99,11 +99,11 @@ func TestNativeBizClient_CircuitBreakerOpen(t *testing.T) {
 	// Trip the circuit breaker (5 failures)
 	ctx := context.Background()
 	for i := 0; i < 5; i++ {
-		client.ForwardRequest(ctx, "/test", "POST", []byte(`{}`))
+		client.ForwardRequest(ctx, "/test", "POST", []byte(`{}`), "")
 	}
 
 	// Next request should be rejected by circuit breaker
-	_, status, err := client.ForwardRequest(ctx, "/test", "POST", []byte(`{}`))
+	_, status, err := client.ForwardRequest(ctx, "/test", "POST", []byte(`{}`), "")
 
 	if err == nil {
 		t.Fatal("expected error when circuit breaker is open")
