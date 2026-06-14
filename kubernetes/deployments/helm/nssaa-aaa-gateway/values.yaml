@@ -15,7 +15,7 @@ config:
   listenDiameter: ":3868"
   diameterProtocol: tcp
   redisMode: standalone
-  keepalivedStatePath: /var/run/keepalived/state
+  vipAddress: "10.1.100.50"
 
 aaaGateway:
   vip:
