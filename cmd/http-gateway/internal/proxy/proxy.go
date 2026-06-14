@@ -12,6 +12,8 @@ import (
 	"github.com/operator/nssAAF/internal/resilience"
 )
 
+// Config holds configuration for the HTTP proxy that forwards requests to
+// backend NF services (NRF, UDM, AMF).
 type Config struct {
 	NRFBaseURL string
 	UDMBaseURL string
@@ -20,21 +22,22 @@ type Config struct {
 	Timeout    time.Duration
 }
 
-type ProxyHandler struct {
+// Handler proxies HTTP requests to backend NF services (NRF, UDM, AMF).
+type Handler struct {
 	nrfClient *nfClient
 	udmClient *nfClient
 	amfClient *nfClient
 }
 
 type nfClient struct {
-	baseURL   string
+	baseURL    string
 	httpClient *http.Client
 	retryCfg   resilience.RetryConfig
 }
 
 func NewNFClient(baseURL string, retryCfg resilience.RetryConfig, timeout time.Duration) *nfClient {
 	return &nfClient{
-		baseURL:   baseURL,
+		baseURL:    baseURL,
 		httpClient: &http.Client{Timeout: timeout},
 		retryCfg:   retryCfg,
 	}
@@ -63,6 +66,7 @@ func (c *nfClient) Do(ctx context.Context, method, path string, body []byte) (in
 
 		lastStatus = resp.StatusCode
 		lastBody, _ = io.ReadAll(resp.Body)
+		_ = lastBody // body read failure is non-critical for proxy responses
 
 		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
 			return nil
@@ -80,39 +84,42 @@ func (c *nfClient) Do(ctx context.Context, method, path string, body []byte) (in
 	return lastStatus, lastBody, nil
 }
 
-func NewProxyHandler(cfg Config) *ProxyHandler {
-	return &ProxyHandler{
+// NewHandler creates a new proxy handler with clients for NRF, UDM, and AMF.
+func NewHandler(cfg Config) *Handler {
+	return &Handler{
 		nrfClient: NewNFClient(cfg.NRFBaseURL, cfg.RetryCfg, cfg.Timeout),
 		udmClient: NewNFClient(cfg.UDMBaseURL, cfg.RetryCfg, cfg.Timeout),
 		amfClient: NewNFClient(cfg.AMFBaseURL, cfg.RetryCfg, cfg.Timeout),
 	}
 }
 
-func (h *ProxyHandler) RegisterProxyRoutes(mux *http.ServeMux) {
+// RegisterProxyRoutes registers HTTP routes on the given mux for NRF, UDM, and AMF proxying.
+func (h *Handler) RegisterProxyRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/internal/nrf/", h.handleNRFProxy)
 	mux.HandleFunc("/internal/udm/", h.handleUDMProxy)
 	mux.HandleFunc("/internal/amf/", h.handleAMFProxy)
 }
 
-func (h *ProxyHandler) handleNRFProxy(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleNRFProxy(w http.ResponseWriter, r *http.Request) {
 	h.proxyRequest(w, r, h.nrfClient)
 }
 
-func (h *ProxyHandler) handleUDMProxy(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleUDMProxy(w http.ResponseWriter, r *http.Request) {
 	h.proxyRequest(w, r, h.udmClient)
 }
 
-func (h *ProxyHandler) handleAMFProxy(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleAMFProxy(w http.ResponseWriter, r *http.Request) {
 	h.proxyRequest(w, r, h.amfClient)
 }
 
-func (h *ProxyHandler) proxyRequest(w http.ResponseWriter, r *http.Request, client *nfClient) {
+func (h *Handler) proxyRequest(w http.ResponseWriter, r *http.Request, client *nfClient) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
 	var body []byte
 	if r.Body != nil {
 		body, _ = io.ReadAll(r.Body)
+		_ = body // body read failure is non-critical for incoming requests
 	}
 
 	path := extractProxyPath(r.URL.Path)

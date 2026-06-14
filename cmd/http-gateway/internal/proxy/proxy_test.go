@@ -40,7 +40,7 @@ func TestProxyHandler_ProxiesToNRF(t *testing.T) {
 	}))
 	defer nrfServer.Close()
 
-	h := NewProxyHandler(Config{
+	h := NewHandler(Config{
 		NRFBaseURL: nrfServer.URL,
 		Timeout:    10 * time.Second,
 		RetryCfg:   resilience.RetryConfig{MaxAttempts: 1},
@@ -72,7 +72,7 @@ func TestProxyHandler_ProxiesToUDM(t *testing.T) {
 	}))
 	defer udmServer.Close()
 
-	h := NewProxyHandler(Config{
+	h := NewHandler(Config{
 		UDMBaseURL: udmServer.URL,
 		Timeout:    10 * time.Second,
 		RetryCfg:   resilience.RetryConfig{MaxAttempts: 1},
@@ -101,7 +101,7 @@ func TestProxyHandler_ProxiesToAMF(t *testing.T) {
 	}))
 	defer amfServer.Close()
 
-	h := NewProxyHandler(Config{
+	h := NewHandler(Config{
 		AMFBaseURL: amfServer.URL,
 		Timeout:    10 * time.Second,
 		RetryCfg:   resilience.RetryConfig{MaxAttempts: 1},
