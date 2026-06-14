@@ -30,6 +30,9 @@ type DLQMessage struct {
 // runDLQConsumer processes messages from the DLQ list.
 // It polls every cfg.DLQ.PollInterval, retries up to cfg.DLQ.MaxRetries, and discards after exhaustion.
 func (g *Gateway) runDLQConsumer(ctx context.Context) {
+	if g.cfg.DLQ.PollInterval <= 0 {
+		return
+	}
 	ticker := time.NewTicker(g.cfg.DLQ.PollInterval)
 	defer ticker.Stop()
 

@@ -1,7 +1,7 @@
 # HTTP Gateway ↔ Biz Communication: Comprehensive Gap Fix
 
 **Date:** 2026-06-14
-**Status:** Draft
+**Status:** Done
 **Scope:** All 8 gaps across HTTP GW → Biz, AAA GW → Biz, and Biz → AAA GW communication paths
 **Component:** `cmd/http-gateway/`, `cmd/biz/`, `cmd/aaa-gateway/`, `internal/httpclient/`, `internal/aaa/gateway/`, `internal/config/`
 
@@ -16,25 +16,58 @@ This spec defines the work to close all gaps in the NSSAAF communication layer, 
 ### 1.2 Communication Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         NSSAAF Communication Architecture                    │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  INBOUND (đi qua HTTP Gateway)                                           │
-│  ────────────────────────────────                                          │
-│  AMF ──────▶ HTTP Gateway ──────▶ Biz Pod ────▶ AAA GW ────▶ AAA-S        │
-│  AUSF ─────▶ HTTP Gateway ──────▶ Biz Pod                                 │
-│                                                                             │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  OUTBOUND (từ Biz Pod ra ngoài — qua nfclient.Factory)                   │
-│  ─────────────────────────────────────────────────────                     │
-│  Biz Pod ──────▶ NRF      : Service discovery, NF registration           │
-│  Biz Pod ──────▶ UDM      : Get subscription data (N59)                  │
-│  Biz Pod ──────▶ AMF CB   : Re-Auth/Revocation notification               │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────────┐
+│                        NSSAAF Communication Architecture                        │
+├────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                │
+│  INBOUND (đi qua HTTP Gateway)                                                │
+│  ─────────────────────────────────                                             │
+│  AMF ──────▶ HTTP Gateway ──────▶ Biz Pod ────▶ AAA GW ────▶ AAA-S            │
+│  AUSF ─────▶ HTTP Gateway ──────▶ Biz Pod                                      │
+│                                                                                │
+├────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                │
+│  OUTBOUND (từ Biz Pod ra ngoài — qua HTTP Gateway proxy)                      │
+│  ────────────────────────────────────────────────────────                      │
+│  Biz Pod ──────▶ HTTP Gateway /internal/nrf/* ──────▶ NRF                      │
+│  Biz Pod ──────▶ HTTP Gateway /internal/udm/* ──────▶ UDM                     │
+│  Biz Pod ──────▶ HTTP Gateway /internal/amf/* ──────▶ AMF callback            │
+│                                                                                │
+│  ⚠️ HTTP Gateway is the ONLY external-facing pod.                            │
+│     All outbound calls must be proxied through HTTP Gateway.                  │
+│                                                                                │
+└────────────────────────────────────────────────────────────────────────────────┘
 ```
+
+### 1.2.1 Outbound Proxy Design
+
+HTTP Gateway exposes internal proxy endpoints for Biz Pod to reach external NFs:
+
+| Proxy Endpoint | Target NF | Purpose |
+|----------------|-----------|---------|
+| `POST /internal/nrf/v1/{path}` | NRF (Nnrf) | Service discovery, NF registration |
+| `POST /internal/udm/v1/{path}` | UDM (N59) | Get subscription data |
+| `POST /internal/amf/v1/{path}` | AMF callback | Re-Auth/Revocation notification |
+
+**Request flow:**
+```
+Biz Pod                    HTTP Gateway               External NF
+   │                            │                          │
+   │ POST /internal/nrf/v1/...  │                          │
+   │ ──────────────────────────▶│                          │
+   │                            │ GET /nnrf-nfm/v1/...      │
+   │                            │ ─────────────────────────▶│
+   │                            │◀───────────────────────── │ 200 OK
+   │                            │                          │
+   │ 200 OK (proxied response)  │                          │
+   │◀───────────────────────────│                          │
+```
+
+**Proxy request headers (Biz → HTTP GW):**
+- `X-Target-NF`: Target NF identifier (NRF, UDM, AMF)
+- `X-Original-Method`: Original HTTP method
+- `X-Original-Path`: Original API path
+- `Authorization`: Service account token (passthrough)
 
 ### 1.3 Gap Summary
 
@@ -42,23 +75,26 @@ This spec defines the work to close all gaps in the NSSAAF communication layer, 
 
 | ID | Path | Gap | Severity | Status |
 |----|------|-----|----------|--------|
-| G1 | HTTP GW → Biz | Static single URL, no load balancing | HIGH | Not implemented |
-| G2 | HTTP GW → Biz | X-Request-ID not propagated | MEDIUM | Not implemented |
-| G3 | HTTP GW → Biz | Hardcoded 30s timeout | LOW | Not configurable |
-| G4 | HTTP GW → Biz | No dynamic Biz Pod health monitoring | MEDIUM | Not implemented |
-| G5 | AAA GW → Biz | Server-initiated handlers are stubs | HIGH | Wave 3 incomplete |
-| G6 | AAA GW → Biz | RADIUS MaxRetries hardcoded | MEDIUM | Should use config |
-| G7 | Biz → AAA GW | VIP health check not started | MEDIUM | Implemented but not wired |
-| G8 | Config | KeepalivedHealthURL missing | MEDIUM | Not in config schema |
+| G1 | HTTP GW → Biz | Static single URL, no load balancing | HIGH | CLOSED |
+| G2 | HTTP GW → Biz | X-Request-ID not propagated | MEDIUM | CLOSED |
+| G3 | HTTP GW → Biz | Hardcoded 30s timeout | LOW | CLOSED |
+| G4 | HTTP GW → Biz | No dynamic Biz Pod health monitoring | MEDIUM | CLOSED |
+| G5 | AAA GW → Biz | Server-initiated handlers are stubs | HIGH | CLOSED |
+| G6 | AAA GW → Biz | RADIUS MaxRetries hardcoded | MEDIUM | CLOSED |
+| G7 | Biz → AAA GW | VIP health check not started | MEDIUM | CLOSED |
+| G8 | Config | KeepalivedHealthURL missing | MEDIUM | CLOSED |
 
-#### Outbound Gaps (Biz Pod → NRF/UDM/AMF)
+#### Outbound Gaps (Biz Pod to NRF/UDM/AMF via HTTP GW Proxy)
+
+
+> ⚠️ **ARCHITECTURE CONSTRAINT**: All outbound calls MUST go through HTTP Gateway proxy. Direct calls from Biz Pod to external NFs are NOT allowed.
 
 | ID | Path | Gap | Severity | Status |
 |----|------|-----|----------|--------|
-| G9 | Biz → NRF/UDM/AMF | No retry in nfclient.Factory | HIGH | Not implemented |
-| G10 | Biz → NRF/UDM/AMF | Hardcoded 30s timeout | MEDIUM | Not configurable |
-| G11 | Biz → AMF | X-Request-ID not propagated in notifications | MEDIUM | Not implemented |
-| G12 | Biz → AMF | DLQ retry behavior not configurable | LOW | Not implemented |
+| G9 | Biz -HTTP GW Proxy | No proxy endpoints in HTTP Gateway | HIGH | CLOSED |
+| G10 | Biz -HTTP GW Proxy | No retry/timeout in proxy client | MEDIUM | CLOSED |
+| G11 | Biz -AMF | X-Request-ID not propagated in notifications | MEDIUM | CLOSED |
+| G12 | Biz -AMF | DLQ retry behavior not configurable | LOW | CLOSED |
 
 ---
 
@@ -670,80 +706,188 @@ if cfg.InternalComm.Native.KeepalivedHealthURL == "" {
 ```
 
 ---
+---
 
-## 4.9 G9: Add Retry to nfclient.Factory (HIGH)
+## 4.9 G9: HTTP Gateway Outbound Proxy Endpoints (HIGH)
 
 ### Problem
-`nfclient.Factory.Do()` has circuit breaker but no retry. Failed requests are immediately rejected instead of retried.
+HTTP Gateway does not have proxy endpoints for Biz Pod to reach external NFs. All outbound calls must go through HTTP Gateway per architecture constraint.
 
-### Current State
+### Solution
+Add proxy endpoints to HTTP Gateway for each external NF.
+
+**New Proxy Handler in HTTP Gateway:**
+
 ```go
-// internal/nfclient/factory.go
-func (f *Factory) Do(ctx context.Context, baseURL, method, path string, body []byte) (int, []byte, error) {
-    // ... circuit breaker check ...
-    resp, err := client.Do(req)
-    // No retry — immediate failure
+// cmd/http-gateway/internal/proxy/proxy.go
+
+type ProxyHandler struct {
+    nrfClient  nfclient.Factory
+    udmClient  nfclient.Factory
+    amfClient  nfclient.Factory
+    retryCfg   resilience.RetryConfig
+    timeout    time.Duration
+}
+
+// Target NF identifiers
+const (
+    TargetNFNRF = "nrf"
+    TargetNFUDM = "udm"
+    TargetNFAMF = "amf"
+)
+
+// RegisterProxyRoutes adds /internal/* routes to the HTTP Gateway mux.
+func (h *ProxyHandler) RegisterProxyRoutes(mux *http.ServeMux) {
+    mux.HandleFunc("/internal/nrf/", h.handleNRFProxy)
+    mux.HandleFunc("/internal/udm/", h.handleUDMProxy)
+    mux.HandleFunc("/internal/amf/", h.handleAMFProxy)
+}
+
+// handleNRFProxy proxies requests to NRF (Nnrf interface).
+func (h *ProxyHandler) handleNRFProxy(w http.ResponseWriter, r *http.Request) {
+    h.proxyRequest(r, h.nrfClient)
+}
+
+// handleUDMProxy proxies requests to UDM (N59 interface).
+func (h *ProxyHandler) handleUDMProxy(w http.ResponseWriter, r *http.Request) {
+    h.proxyRequest(r, h.udmClient)
+}
+
+// handleAMFProxy proxies requests to AMF callback URL.
+func (h *ProxyHandler) handleAMFProxy(w http.ResponseWriter, r *http.Request) {
+    h.proxyRequest(r, h.amfClient)
+}
+
+// proxyRequest handles the actual proxying with retry and timeout.
+func (h *ProxyHandler) proxyRequest(r *http.Request, client nfclient.Factory) {
+    ctx, cancel := context.WithTimeout(r.Context(), h.timeout)
+    defer cancel()
+
+    // Extract target path (strip /internal/{nf}/)
+    path := extractProxyPath(r.URL.Path)
+
+    // Execute with retry
+    status, body, err := client.Do(ctx, "", r.Method, path, nil) // baseURL from factory config
+    if err != nil {
+        http.Error(w, err.Error(), 502)
+        return
+    }
+
+    w.WriteHeader(status)
+    w.Write(body)
+}
+
+// extractProxyPath removes /internal/{nf}/ prefix from path.
+func extractProxyPath(path string) string {
+    // /internal/nrf/v1/nf-instances -> /v1/nf-instances
+    parts := strings.SplitN(path, "/", 4)
+    if len(parts) >= 4 {
+        return "/" + parts[3]
+    }
+    return path
 }
 ```
 
-### Solution
-Add retry logic with exponential backoff, similar to `httpclient.NativeBizClient`.
-
-**Modified Factory:**
+**HTTP Gateway main.go wiring:**
 
 ```go
-// internal/nfclient/factory.go
+// cmd/http-gateway/main.go
 
-type Factory struct {
-    cbRegistry *resilience.Registry
-    transport  http.RoundTripper
-    timeout    time.Duration
-    retryCfg   resilience.RetryConfig  // NEW
+proxyHandler := proxy.NewProxyHandler(
+    proxy.Config{
+        NRFBaseURL: cfg.NRF.BaseURL,
+        UDMBaseURL: cfg.UDM.BaseURL,
+        AMFBaseURL: cfg.AMF.BaseURL,
+        RetryCfg:   cfg.InternalComm.Native.Retry,
+        Timeout:    cfg.InternalComm.Native.Timeout,
+    },
+)
+proxyHandler.RegisterProxyRoutes(mux)
+```
+
+---
+
+## 4.10 G10: Biz Pod Proxy Client (MEDIUM)
+
+### Problem
+Biz Pod currently has `nfclient.Factory` for direct NF calls. This must be replaced with HTTP Gateway proxy client.
+
+### Solution
+Replace `nfclient.Factory` with a new `ProxyClient` that calls HTTP Gateway's proxy endpoints.
+
+**New Proxy Client in Biz Pod:**
+
+```go
+// internal/httpclient/proxy.go
+
+// ProxyClient calls HTTP Gateway proxy endpoints for external NFs.
+type ProxyClient struct {
+    httpClient  *http.Client
+    gatewayURL  string  // HTTP Gateway internal URL
+    retryCfg    resilience.RetryConfig
+    timeout     time.Duration
 }
 
-// NewFactory creates a factory with retry configuration.
-func NewFactory(cbRegistry *resilience.Registry, retryCfg resilience.RetryConfig) *Factory {
-    if retryCfg.MaxAttempts == 0 {
-        retryCfg.MaxAttempts = 3
-    }
-    if retryCfg.BaseDelay == 0 {
-        retryCfg.BaseDelay = 500 * time.Millisecond
-    }
-    if retryCfg.MaxDelay == 0 {
-        retryCfg.MaxDelay = 10 * time.Second
-    }
-    return &Factory{
-        cbRegistry: cbRegistry,
-        transport:  otelhttp.NewTransport(http.DefaultTransport),
-        timeout:    30 * time.Second,
+// NewProxyClient creates a proxy client for HTTP Gateway.
+func NewProxyClient(gatewayURL string, retryCfg resilience.RetryConfig, timeout time.Duration) *ProxyClient {
+    return &ProxyClient{
+        httpClient: &http.Client{Timeout: timeout},
+        gatewayURL: gatewayURL,
         retryCfg:   retryCfg,
     }
 }
 
-// Do executes with retry + circuit breaker.
-func (f *Factory) Do(ctx context.Context, baseURL, method, path string, body []byte) (int, []byte, error) {
+// CallNRF proxies a request to NRF via HTTP Gateway.
+func (p *ProxyClient) CallNRF(ctx context.Context, method, path string, body []byte) (int, []byte, error) {
+    return p.call(ctx, "nrf", method, path, body)
+}
+
+// CallUDM proxies a request to UDM via HTTP Gateway.
+func (p *ProxyClient) CallUDM(ctx context.Context, method, path string, body []byte) (int, []byte, error) {
+    return p.call(ctx, "udm", method, path, body)
+}
+
+// CallAMF proxies a request to AMF via HTTP Gateway.
+func (p *ProxyClient) CallAMF(ctx context.Context, method, path string, body []byte) (int, []byte, error) {
+    return p.call(ctx, "amf", method, path, body)
+}
+
+func (p *ProxyClient) call(ctx context.Context, targetNF, method, path string, body []byte) (int, []byte, error) {
+    var lastErr error
     var lastStatus int
     var lastBody []byte
-    var lastErr error
 
-    err := resilience.Do(ctx, f.retryCfg, func() error {
-        status, respBody, err := f.doOnce(ctx, baseURL, method, path, body)
-        lastStatus = status
-        lastBody = respBody
-        lastErr = err
+    url := p.gatewayURL + "/internal/" + targetNF + path
 
+    err := resilience.Do(ctx, p.retryCfg, func() error {
+        req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body))
         if err != nil {
             return err
         }
 
-        // Don't retry 4xx errors
-        if status >= 400 && status < 500 {
+        req.Header.Set("Content-Type", "application/json")
+        if reqID := middleware.GetRequestID(ctx); reqID != "" {
+            req.Header.Set("X-Request-ID", reqID)
+        }
+
+        resp, err := p.httpClient.Do(req)
+        if err != nil {
+            lastErr = err
+            return err
+        }
+        defer resp.Body.Close()
+
+        lastStatus = resp.StatusCode
+        lastBody, _ = io.ReadAll(resp.Body)
+
+        // Don't retry 4xx
+        if resp.StatusCode >= 400 && resp.StatusCode < 500 {
             return nil
         }
 
-        // Retry 5xx errors
-        if resilience.IsRetryable(status) {
-            lastErr = fmt.Errorf("retryable status: %d", status)
+        // Retry 5xx
+        if resp.StatusCode >= 500 {
+            lastErr = fmt.Errorf("server error: %d", resp.StatusCode)
             return lastErr
         }
 
@@ -757,96 +901,213 @@ func (f *Factory) Do(ctx context.Context, baseURL, method, path string, body []b
 }
 ```
 
----
-
-## 4.10 G10: Make Timeout Configurable (MEDIUM)
-
-### Problem
-30s timeout is hardcoded in `nfclient.Factory`.
-
-### Solution
-Add `Timeout` to factory and use from config.
-
-**Config Changes:**
-
-```go
-// internal/config/nf_client.go  (NEW file or add to existing)
-
-type NFClientConfig struct {
-    Timeout time.Duration `yaml:"timeout"`
-    Retry  RetryConfig  `yaml:"retry"`
-    CB     CircuitBreakerConfig `yaml:"circuitBreaker"`
-}
-
-// applyDefaults in config.go
-if cfg.NFClient.Timeout == 0 {
-    cfg.NFClient.Timeout = 30 * time.Second
-}
-```
-
-**Usage:**
+**Biz Pod Factory Changes:**
 
 ```go
 // cmd/biz/factory.go
-nfFactory := nfclient.NewFactory(
-    cbRegistry,
-    resilience.RetryConfig{
-        MaxAttempts: cfg.NFClient.Retry.MaxAttempts,
-        BaseDelay:  cfg.NFClient.Retry.BaseDelay,
-        MaxDelay:   cfg.NFClient.Retry.MaxDelay,
-    },
-).WithTimeout(cfg.NFClient.Timeout)
-```
 
----
+type BizPodFactory struct {
+    // ... existing fields ...
+    proxyClient *httpclient.ProxyClient  // NEW: replaces nfclient.Factory for external calls
+}
 
-## 4.11 G11: X-Request-ID in AMF Notifications (MEDIUM)
+// setupProxyClient creates the HTTP Gateway proxy client.
+func (f *BizPodFactory) setupProxyClient() {
+    f.proxyClient = httpclient.NewProxyClient(
+        f.cfg.HTTPGateway.URL,  // Internal HTTP Gateway URL
+        f.cfg.InternalComm.Native.Retry,
+        f.cfg.InternalComm.Native.Timeout,
+    )
+}
 
-### Problem
-AMF notifications don't include `X-Request-ID` for correlation.
+// NRFClient interface for dependency injection
+type NRFClient interface {
+    DiscoverNF(ctx context.Context, ...) (...)
+    RegisterNF(ctx context.Context, ...) (...)
+}
 
-### Solution
-Pass `X-Request-ID` through from Biz Pod to AMF callback.
+// NRFClientImpl wraps ProxyClient for NRF operations.
+type NRFClientImpl struct {
+    proxy *httpclient.ProxyClient
+}
 
-**Modified AMF Client:**
-
-```go
-// internal/amf/amf.go
-
-func (c *Client) sendNotification(ctx context.Context, typ NotificationType, uri, authCtxID string, payload []byte) error {
-    // ... existing logic ...
-
-    // Extract baseURL and path from full URI
-    baseURL, path, err := extractBaseURLAndPath(uri)
-    if err != nil {
-        return fmt.Errorf("amf: parse uri: %w", err)
-    }
-
-    // Build request with X-Request-ID
-    req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+path, bytes.NewReader(payload))
-    if err != nil {
-        return err
-    }
-    req.Header.Set("Content-Type", "application/json")
-    if reqID := middleware.GetRequestID(ctx); reqID != "" {
-        req.Header.Set("X-Request-ID", reqID)
-    }
-
-    status, _, err := c.factory.DoRequest(req)
+func (c *NRFClientImpl) DiscoverNF(ctx context.Context, ...) (...) {
+    path := "/nnrf-disc/v1/nf-instances"
+    status, body, err := c.proxy.CallNRF(ctx, http.MethodGet, path, nil)
     // ...
 }
 ```
 
-**New method on Factory:**
+**Config Changes:**
 
 ```go
-// internal/nfclient/factory.go
+// internal/config/biz.go
 
-// DoRequest executes a pre-built request (allows caller to set custom headers).
-func (f *Factory) DoRequest(req *http.Request) (int, []byte, error) {
-    // Similar to Do() but uses pre-built request
+type BizConfig struct {
+    // ... existing fields ...
+    HTTPGateway HTTPGatewayConfig `yaml:"httpGateway"`
+}
+
+type HTTPGatewayConfig struct {
+    URL string `yaml:"url"`  // Internal URL: http://http-gateway:8080
 }
 ```
+---
+
+## 4.10.1 Outbound Load Balancing: Option A (Kubernetes Service)
+
+### Design Decision
+Outbound traffic from Biz Pod to HTTP Gateway uses **Option A** (Kubernetes Service load balancing), not Option B (Redis-based).
+
+### Rationale
+
+| Aspect | Option A (K8s Service) | Option B (Redis-based) |
+|--------|------------------------|----------------------|
+| Complexity | Low | High |
+| Implementation | 1 line config | New Redis tracking |
+| LB Strategy | kube-proxy round-robin | Explicit pod selection |
+| Consistency with inbound | Different | Same |
+| Use Case | Stateless proxy calls | Stateful session affinity |
+
+**Why Option A for outbound:**
+- HTTP Gateway proxy endpoints are **stateless** — any pod can handle any request
+- No need for session affinity (unlike inbound NSSAA flows)
+- Kubernetes Service already provides HA and load distribution
+- Simpler operations (no Redis dependency for this path)
+
+**Why Option B for inbound:**
+- NSSAA flows require **session affinity** — must route to same Biz Pod
+- `AuthCtxID` correlation needs consistent pod targeting
+- Redis `BizRegistry` already exists for this purpose
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         Outbound Load Balancing                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  Biz Pod                                                               │
+│    │                                                                   │
+│    │ ProxyClient.CallNRF(ctx, "GET", "/nnrf-disc/v1/...")             │
+│    │                                                                   │
+│    ▼                                                                   │
+│  ┌─────────────────────────────────────────────────────────────────┐  │
+│  │  gatewayURL = "http://http-gateway.ns.svc.cluster.local:8080"    │  │
+│  │  (Kubernetes DNS - resolves to Service ClusterIP)                │  │
+│  └─────────────────────────────────────────────────────────────────┘  │
+│    │                                                                   │
+│    │ HTTP Request                                                     │
+│    ▼                                                                   │
+│  ┌─────────────────────────────────────────────────────────────────┐  │
+│  │  kube-proxy (iptables/IPVS)                                      │  │
+│  │  Round-robin across:                                             │  │
+│  │  ┌────────────────┐ ┌────────────────┐ ┌────────────────┐      │  │
+│  │  │ HTTP-GW Pod-1  │ │ HTTP-GW Pod-2  │ │ HTTP-GW Pod-N  │      │  │
+│  │  └────────────────┘ └────────────────┘ └────────────────┘      │  │
+│  └─────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Configuration
+
+```yaml
+# config/biz.yaml
+biz:
+  httpGateway:
+    url: "http://http-gateway.nssAAF.svc.cluster.local:8080"
+```
+
+### Comparison: Inbound vs Outbound
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│  HTTP Gateway                                                           │
+│  ┌────────────────────────────────────────────────────────────────┐   │
+│  │  INBOUND (Option B - Redis-based)                             │   │
+│  │  BizRegistry: SCAN nssaa:biz:pod:* → select pod explicitly    │   │
+│  │  Reason: Session affinity for NSSAA flows                     │   │
+│  └────────────────────────────────────────────────────────────────┘   │
+│                           │                                            │
+│                           │                                           │
+│                           ▼                                           │
+│  ┌────────────────────────────────────────────────────────────────┐   │
+│  │  OUTBOUND (Option A - K8s Service)                            │   │
+│  │  gatewayURL → Kubernetes Service → round-robin                 │   │
+│  │  Reason: Stateless proxy, no affinity needed                  │   │
+│  └────────────────────────────────────────────────────────────────┘   │
+└────────────────────────────────────────────────────────────────┘
+```
+
+### Failover Behavior
+
+With Option A, failover is handled by Kubernetes:
+
+1. **HTTP Gateway Pod dies** → kube-proxy removes from endpoint list automatically
+2. **New HTTP Gateway Pod starts** → kube-proxy adds to endpoint list
+3. **Biz Pod sees connection failure** → `resilience.Do()` retries with exponential backoff
+4. **Retry succeeds** on another healthy pod
+
+No explicit health check from Biz Pod to HTTP Gateway needed — retry handles transient failures.
+
+---
+
+
+## 4.11 G11: X-Request-ID in AMF Notifications (MEDIUM)
+
+### Problem
+AMF notifications don't include `X-Request-ID` for correlation. With the proxy architecture, X-Request-ID must flow through the HTTP Gateway proxy chain.
+
+### Solution
+`ProxyClient.CallAMF()` already extracts `X-Request-ID` from context and propagates it to HTTP Gateway. HTTP Gateway then includes it in the proxy request to AMF.
+
+**X-Request-ID Flow:**
+```
+AMF Request -> HTTP Gateway -> Biz Pod
+     |                              |
+     X-Request-ID ----------------->|
+                                     |
+Biz Pod -> ProxyClient.CallAMF() ----+-> HTTP Gateway /internal/amf/*
+                                       |
+                                       X-Request-ID preserved
+                                       |
+                                       HTTP GW -> AMF callback
+```
+
+**ProxyClient Implementation (already in section 4.10):**
+
+```go
+func (p *ProxyClient) call(ctx context.Context, targetNF, method, path string, body []byte) (int, []byte, error) {
+    // ...
+    if reqID := middleware.GetRequestID(ctx); reqID != "" {
+        req.Header.Set("X-Request-ID", reqID)
+    }
+    // ...
+}
+```
+
+**HTTP Gateway Proxy Handler:**
+
+```go
+// cmd/http-gateway/internal/proxy/proxy.go
+
+func (h *ProxyHandler) handleAMFProxy(w http.ResponseWriter, r *http.Request) {
+    // Pass X-Request-ID through to AMF
+    reqID := r.Header.Get("X-Request-ID")
+    
+    // ... proxy logic ...
+    // HTTP GW must include reqID in the outbound request to AMF
+}
+```
+
+### Verification
+- `middleware.GetRequestID(ctx)` extracts the correlation ID from context
+- `ProxyClient` propagates it in the HTTP header to HTTP Gateway
+- HTTP Gateway proxy preserves and forwards the header to AMF
+- All three hops (AMF->HTTP GW->Biz Pod->HTTP GW->AMF) maintain correlation
+
+---
 
 ---
 
@@ -884,39 +1145,51 @@ if cfg.AMF.DLQ.RetryDelay == 0 {
 
 ---
 
+---
+
 ## 5. Implementation Phases
 
-### Phase 1: Config Schema + Outbound Basics (G8, G9, G10)
+### Phase 1: Config Schema + Health Check Wiring (G8, G7)
 1. Add `KeepalivedHealthURL` to `NativeCommConfig`
 2. Add `Radius` config with `MaxRetries`, `Timeout`, `ResponseWindow`
 3. Add `Timeout` to `NativeCommConfig`
-4. Wire `StartVIPHealthCheck()` in Biz Pod
-5. Add retry to `nfclient.Factory` (G9)
-6. Add configurable timeout to `nfclient.Factory` (G10)
+4. Wire `StartVIPHealthCheck()` in Biz Pod (G7)
 
-### Phase 2: HTTP Gateway Load Balancing (G1, G4)
-1. Create `BizRegistry` type in `internal/httpclient/`
-2. Implement Redis-based target selection
+### Phase 2: HTTP Gateway Proxy Endpoints (G9 - HTTP GW side)
+1. Create `cmd/http-gateway/internal/proxy/proxy.go`
+2. Implement `ProxyHandler` with `/internal/{nrf,udm,amf}/*` routes
+3. Wire `nfclient.Factory` for each NF in proxy handler
+4. Add configurable retry and timeout to proxy handler
+
+### Phase 3: Biz Pod Proxy Client (G9 - Biz Pod side)
+1. Create `internal/httpclient/proxy.go`
+2. Implement `ProxyClient` with `CallNRF()`, `CallUDM()`, `CallAMF()`
+3. Add `X-Request-ID` propagation in proxy client
+4. Add `HTTPGateway` config with internal URL
+
+### Phase 4: HTTP Gateway Load Balancing (G1, G4)
+1. Create `internal/httpclient/biz_registry.go`
+2. Implement Redis-based Biz Pod target selection
 3. Update factory to create `BizRegistry`
 4. Modify HTTP Gateway to pass Redis address
 
-### Phase 3: X-Request-ID Propagation (G2, G11)
+### Phase 5: X-Request-ID Propagation (G2)
 1. Update `BizServiceClient` interface to include `requestID`
-2. Update all client implementations
-3. Update HTTP Gateway handlers
-4. Add X-Request-ID to AMF notifications (G11)
+2. Update `native_biz.go` and `istio_biz.go` implementations
+3. Update HTTP Gateway handlers to extract and forward X-Request-ID
+4. Verify end-to-end correlation (G11 - AMF notifications already covered by Phase 3)
 
-### Phase 4: RADIUS Configurable Retries (G6)
+### Phase 6: RADIUS Configurable Retries (G6)
 1. Update `RadiusForwarderConfig` to use config values
 2. Pass `InternalCommConfig` to Gateway
 
-### Phase 5: Real Server-Initiated Handlers (G5)
+### Phase 7: Real Server-Initiated Handlers (G5)
 1. Implement `ServerInitiatedHandler` interface
 2. Wire session loading from Redis
-3. Wire AMF notifications
+3. Wire AMF notifications via ProxyClient
 4. Register in Biz Pod factory
 
-### Phase 6: DLQ Config (G12)
+### Phase 8: DLQ Config (G12)
 1. Add DLQ config to AMF configuration
 2. Update DLQ consumer to use configurable values
 
@@ -924,31 +1197,37 @@ if cfg.AMF.DLQ.RetryDelay == 0 {
 
 ## 6. File Changes Summary
 
-### Inbound (HTTP Gateway ↔ Biz)
+### HTTP Gateway (Inbound + Outbound Proxy)
 
-| File | Changes |
+|| File | Changes |
 |------|---------|
 | `internal/config/internal_comm.go` | Add `Timeout`, `Radius`, `KeepalivedHealthURL` |
 | `internal/config/config.go` | Apply defaults for new fields |
+| `cmd/http-gateway/internal/proxy/proxy.go` | **NEW**: ProxyHandler with `/internal/{nrf,udm,amf}/*` |
 | `internal/proto/http_gateway.go` | Add `requestID` to interface, `ServerInitiatedHandler` interface |
 | `internal/httpclient/biz_registry.go` | **NEW**: BizRegistry with Redis-based target selection |
 | `internal/httpclient/native_biz.go` | Add `requestID` param, use configurable timeout |
 | `internal/httpclient/istio_biz.go` | Add `requestID` param |
 | `internal/httpclient/factory.go` | Update factory to create `BizRegistry` |
+| `cmd/http-gateway/main.go` | Wire proxy handler, pass Redis addr, extract X-Request-ID |
+
+### Biz Pod (Inbound Server-initiated + Outbound via Proxy)
+
+|| File | Changes |
+|------|---------|
+| `internal/config/biz.go` | Add `HTTPGateway` config |
+| `internal/httpclient/proxy.go` | **NEW**: ProxyClient for HTTP Gateway proxy |
 | `internal/aaa/gateway/gateway.go` | Use config for RADIUS, pass `InternalCommConfig` |
 | `internal/aaa/gateway/radius_forward.go` | Accept configurable `MaxRetries` |
-| `cmd/http-gateway/main.go` | Pass Redis addr, extract X-Request-ID |
 | `cmd/biz/main.go` | Wire VIP health check, implement real handlers |
-| `cmd/biz/factory.go` | Add `WithServerInitiatedDeps`, wire VIP health check |
+| `cmd/biz/factory.go` | Wire ProxyClient, add `WithServerInitiatedDeps` |
 
-### Outbound (Biz Pod → NRF/UDM/AMF)
+### Shared / Removed
 
-| File | Changes |
+|| File | Changes |
 |------|---------|
-| `internal/config/config.go` | Add `NFClient` config, `AMF.DLQ` config |
-| `internal/nfclient/factory.go` | Add retry logic, configurable timeout |
-| `internal/amf/amf.go` | Add X-Request-ID propagation, use DLQ config |
-| `cmd/biz/factory.go` | Wire NF clients with config |
+| `internal/nfclient/factory.go` | **DEPRECATED** for external calls (use ProxyClient instead) |
+| `internal/amf/amf.go` | Now uses ProxyClient.CallAMF() internally |
 
 ---
 
@@ -960,24 +1239,31 @@ if cfg.AMF.DLQ.RetryDelay == 0 {
 - `TestNativeBizClient_PropagatesRequestID` — verifies X-Request-ID header
 - `TestServerInitiatedHandler_HandleReAuth_SessionNotFound` — error case
 - `TestServerInitiatedHandler_HandleReAuth_Success` — happy path
+- `TestProxyHandler_ProxiesToNRF` — verifies NRF proxy endpoint
+- `TestProxyHandler_ProxiesToUDM` — verifies UDM proxy endpoint
+- `TestProxyHandler_ProxiesToAMF` — verifies AMF proxy endpoint
+- `TestProxyClient_CallNRF_IncludesRequestID` — verifies X-Request-ID in proxy client
 
 ### Integration Tests
-- `TestHTTPGateway_LoadBalancesAcrossBizPods` — kill one pod, verify routing
-- `TestVIPFailover_CircuitBreakerResets` — simulate failover, measure reset time
-- `TestServerInitiated_DLQRetries` — inject failure, verify DLQ behavior
+- `TestHTTPGateway_LoadBalancesAcrossBizPods` — kill one pod → verify routing to others
+- `TestVIPFailover_CircuitBreakerResets` — simulate failover → measure reset time
+- `TestServerInitiated_DLQRetries` — inject failure → verify DLQ behavior
+- `TestProxy_EndToEnd_BizPodToNRF` — Biz Pod → HTTP GW → NRF → response
+- `TestProxy_EndToEnd_AMFNotification` — Biz Pod → HTTP GW → AMF callback
 
 ### E2E Tests
 - Full EAP flow with server-initiated re-auth
 - VIP failover with zero-downtime requirement
+- NRF service discovery via HTTP Gateway proxy
 
 ---
 
 ## 8. Acceptance Criteria
 
-### Inbound Criteria (HTTP Gateway ↔ Biz)
+### Inbound Criteria (HTTP Gateway ↔ Biz Pod)
 
 | ID | Criteria | Verification |
-|----|----------|---------------|
+|----|----------|-------------|
 | AC1 | HTTP Gateway routes to live Biz Pod only | Kill pod → verify 200 on other pods |
 | AC2 | X-Request-ID propagates from AMF to Biz Pod | Log correlation in Biz Pod |
 | AC3 | Timeout configurable via YAML | Set 10s → verify timeout behavior |
@@ -987,16 +1273,20 @@ if cfg.AMF.DLQ.RetryDelay == 0 {
 | AC7 | VIP failover → CB resets within 10s | Measure time from failover to CB reset |
 | AC8 | KeepalivedHealthURL configurable | Set URL → verify health check hits correct endpoint |
 
-### Outbound Criteria (Biz Pod → NRF/UDM/AMF)
+### Outbound Criteria (Biz Pod → NRF/UDM/AMF via HTTP GW Proxy)
 
 | ID | Criteria | Verification |
-|----|----------|---------------|
-| AC9 | NRF/UDM/AMF requests retry on 5xx | Inject 500 → verify retry attempts |
-| AC10 | NF client timeout configurable | Set 5s → verify timeout |
-| AC11 | AMF notifications include X-Request-ID | Check header in AMF logs |
-| AC12 | AMF DLQ max retries configurable | Set 5 → verify DLQ exhausts after 5 |
+|----|----------|-------------|
+| AC9 | HTTP Gateway proxy routes to correct NF | Call /internal/nrf/* → verify NRF receives |
+| AC10 | Proxy client retries on 5xx | Inject 500 → verify retry attempts |
+| AC11 | Proxy client timeout configurable | Set 5s → verify timeout |
+| AC12 | X-Request-ID preserved in proxy chain | Check AMF receives same X-Request-ID |
+| AC13 | AMF notifications via proxy work | Nnssf_Update → AMF receives callback |
+| AC14 | AMF DLQ max retries configurable | Set 5 → verify DLQ exhausts after 5 |
 
 ---
+
+
 
 ## 9. Metrics
 
