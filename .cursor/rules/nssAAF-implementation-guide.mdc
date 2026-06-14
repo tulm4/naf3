@@ -2,32 +2,6 @@
 description: NSSAAF implementation methodology — how to write code from design docs
 alwaysApply: true
 ---
-## Code Analysis (Mandatory)
-
-**Before implementing or modifying any code, build a complete picture using code-review-graph MCP.** See `.cursor/rules/mcp-master-rules.mdc` for tool documentation.
-
-**Never use grep, Grep, Glob, or manual file reading for navigation** — the graph tools provide structural context that manual search cannot.
-
-| Situation | Tool | When to Use |
-|-----------|------|-------------|
-| Find types/functions/structs | `semantic_search_nodes_tool` | First step for any lookup |
-| Trace call chains | `query_graph_tool` (callers_of/callees_of) | Before modifying behavior |
-| Find test coverage | `query_graph_tool` (tests_for) | Before writing tests or refactoring |
-| Understand file dependencies | `query_graph_tool` (imports_of/importers_of) | Before changing interfaces |
-| Get architecture overview | `get_architecture_overview_tool` | New module exploration |
-| Analyze impact of changes | `detect_changes_tool` | At session start or after git changes |
-
-**Analysis Workflow:**
-
-```
-1. semantic_search_nodes_tool → find the target type/function
-2. query_graph_tool (callers_of) → who uses this? (impact analysis)
-3. query_graph_tool (tests_for) → what tests exist? (coverage gaps)
-4. query_graph_tool (file_summary) → what else is in this file?
-5. Read specific code sections only after graph analysis
-```
-
-**Fallback Rule:** Only use Grep/Glob/Read when MCP returns 0 results (graph DB not yet updated).
 
 # NSSAAF Implementation Methodology
 

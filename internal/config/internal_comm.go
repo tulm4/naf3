@@ -33,6 +33,19 @@ type NativeCommConfig struct {
 	// Used by NativeAAAClient to detect VIP state changes for circuit breaker reset.
 	// Example: "http://aaa-gateway:9090/health/vip"
 	KeepalivedHealthURL string `yaml:"keepalivedHealthURL"`
+
+	// Radius holds RADIUS client settings used by AAA Gateway when forwarding EAP.
+	Radius RadiusConfig `yaml:"radius"`
+}
+
+// RadiusConfig holds RADIUS client parameters for AAA Gateway.
+type RadiusConfig struct {
+	// MaxRetries is the number of UDP retransmission attempts (default: 3).
+	MaxRetries int `yaml:"maxRetries"`
+	// Timeout is the per-request timeout for Access-Request UDP calls (default: 10s).
+	Timeout time.Duration `yaml:"timeout"`
+	// ResponseWindow is the window to wait for an Access-Accept/Reject (default: 15s).
+	ResponseWindow time.Duration `yaml:"responseWindow"`
 }
 
 // TLSClientConfig for mTLS client authentication.

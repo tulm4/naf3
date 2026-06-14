@@ -1,0 +1,13 @@
+# .graphifyignore
+node_modules/
+dist/
+*.generated.py
+.worktrees/
+.venv/
+.cursor/
+.code-review-graph/
+
+# only index src/, ignore everything else
+#*
+#!src/
+#!src/**
