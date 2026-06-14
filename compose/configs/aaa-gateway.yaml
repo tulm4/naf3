@@ -29,7 +29,7 @@ aaaGateway:
   radiusServerAddress: "aaa-sim:1812"      # AAA-S RADIUS address (compose service name)
   radiusSharedSecret: "secret"                      # Shared secret with AAA-S
   redisMode: "standalone"
-  keepalivedStatePath: "/var/run/keepalived/state"
+  vipAddress: "10.1.100.50"
 
 logging:
   level: "info"
