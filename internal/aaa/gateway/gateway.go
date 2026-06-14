@@ -24,6 +24,26 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// isVIPOwner checks if the VIP address is assigned to any network interface.
+func isVIPOwner(ctx context.Context, vipAddress string) bool {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return false
+	}
+	for _, iface := range interfaces {
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			if ipnet, ok := addr.(*net.IPNet); ok && ipnet.IP.String() == vipAddress {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // Config holds AAA Gateway configuration.
 type Config struct {
 	BizServiceURL    string // http://svc-nssaa-biz:8080
@@ -51,8 +71,8 @@ type Config struct {
 	RadiusServerAddress string // e.g. "nss-aaa-server:1812"
 	RadiusSharedSecret  string // Shared secret for Message-Authenticator
 
-	RedisMode           string // "standalone" or "sentinel"
-	KeepalivedStatePath string // path to keepalived state file
+	RedisMode  string // "standalone" or "sentinel"
+	VIPAddress string // VIP address to check (e.g., "10.1.100.50")
 
 	BizPodEntryTTL time.Duration // TTL for BizPodEntry keys (default 60s)
 
@@ -219,10 +239,10 @@ func (g *Gateway) startListeners(ctx context.Context) error {
 
 // StartVIPAware blocks until this pod becomes VIP owner, then starts all listeners.
 // Returns true if started successfully, false on context cancellation or error.
-func (g *Gateway) StartVIPAware(ctx context.Context, statePath string) bool {
-	// Dev/test mode: no state file → start immediately
-	if statePath == "" || statePath == "/dev/null" {
-		g.logger.Info("no keepalived state file, starting immediately (dev/test mode)")
+func (g *Gateway) StartVIPAware(ctx context.Context, vipAddress string) bool {
+	// Dev/test mode: no VIP → start immediately
+	if vipAddress == "" {
+		g.logger.Info("no VIP configured, starting immediately (dev/test mode)")
 		if err := g.startListeners(ctx); err != nil {
 			g.logger.Error("startListeners failed", "error", err)
 			return false
@@ -234,19 +254,15 @@ func (g *Gateway) StartVIPAware(ctx context.Context, statePath string) bool {
 	defer ticker.Stop()
 
 	for {
-		state, err := readKeepalivedState(statePath)
-		if err != nil {
-			g.logger.Warn("keepalived state unreadable", "error", err)
-		} else if state == "MASTER" {
+		if isVIPOwner(ctx, vipAddress) {
 			g.logger.Info("VIP acquired, starting all listeners")
 			if err := g.startListeners(ctx); err != nil {
 				g.logger.Error("startListeners failed", "error", err)
 				return false
 			}
 			return true
-		} else {
-			g.logger.Info("not VIP owner, waiting", "state", state)
 		}
+		g.logger.Info("not VIP owner, waiting")
 
 		select {
 		case <-ctx.Done():
@@ -622,21 +638,20 @@ func (g *Gateway) getSessionCorr(ctx context.Context, sessionID string) (*proto.
 	return &entry, nil
 }
 
-// VIPHealthHandler returns 200 if this AAA Gateway replica is the VIP owner, 503 otherwise.
+// VIPHealthHandler returns 200 if this AAA Gateway replica owns the VIP, 503 otherwise.
 func (g *Gateway) VIPHealthHandler(w http.ResponseWriter, r *http.Request) {
-	statePath := g.cfg.KeepalivedStatePath
-	data, err := readKeepalivedState(statePath)
-	if err != nil {
-		g.logger.Warn("keepalived state file not readable", "path", statePath, "error", err)
+	vipAddress := g.cfg.VIPAddress
+	if vipAddress == "" {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		_, _ = fmt.Fprintf(w, `{"vip_owner":false,"error":"state file not readable"}`)
+		_, _ = fmt.Fprintf(w, `{"vip_owner":false,"error":"VIP not configured"}`)
 		return
 	}
-	if data == "MASTER" {
+
+	if isVIPOwner(r.Context(), vipAddress) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprintf(w, `{"vip_owner":true}`)
 	} else {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		_, _ = fmt.Fprintf(w, `{"vip_owner":false,"state":"%s"}`, data)
+		_, _ = fmt.Fprintf(w, `{"vip_owner":false}`)
 	}
 }
