@@ -36,8 +36,8 @@ func main() {
 
 	slog.Info("starting NSSAAF AAA Gateway",
 		"version", cfg.Version,
-		"radius_addr", cfg.AAAgw.ListenRADIUS,
-		"diameter_addr", cfg.AAAgw.ListenDIAMETER,
+		"listen_radius", cfg.AAAgw.ListenRADIUS,    // server-initiated inbound
+		"listen_diameter", cfg.AAAgw.ListenDIAMETER, // server-initiated inbound
 	)
 
 	gw := gateway.New(gateway.Config{

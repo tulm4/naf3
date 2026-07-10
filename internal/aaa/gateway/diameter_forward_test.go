@@ -3,9 +3,16 @@
 package gateway
 
 import (
+	"context"
+	"crypto/tls"
+	"io"
 	"log/slog"
+	"net"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/fiorix/go-diameter/v4/diam/dict"
 )
 
 // DefaultConfig returns a default diamForwarderConfig with spec-compliant values.
@@ -374,5 +381,132 @@ func TestDiamForwarder_ConnectionStats_ConcurrentAccess(t *testing.T) {
 	}
 	if stats.LastDWA.IsZero() {
 		t.Error("LastDWA should be set after concurrent recordDWA() calls")
+	}
+}
+
+// fakeNotifierConn is a minimal diam.Conn implementation that also satisfies
+// diam.CloseNotifier so it can drive watchDisconnect in unit tests without a
+// live network connection.
+type fakeNotifierConn struct {
+	notifyCh chan struct{}
+	closed   int32
+}
+
+func newFakeNotifierConn() *fakeNotifierConn {
+	return &fakeNotifierConn{notifyCh: make(chan struct{})}
+}
+
+func (f *fakeNotifierConn) CloseNotify() <-chan struct{} { return f.notifyCh }
+
+func (f *fakeNotifierConn) Write(b []byte) (int, error) {
+	if atomic.LoadInt32(&f.closed) != 0 {
+		return 0, io.EOF
+	}
+	return len(b), nil
+}
+
+func (f *fakeNotifierConn) WriteStream(b []byte, stream uint) (int, error) {
+	return f.Write(b)
+}
+
+func (f *fakeNotifierConn) Close()                    { atomic.StoreInt32(&f.closed, 1); close(f.notifyCh) }
+func (f *fakeNotifierConn) LocalAddr() net.Addr       { return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 3868} }
+func (f *fakeNotifierConn) RemoteAddr() net.Addr      { return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 3869} }
+func (f *fakeNotifierConn) TLS() *tls.ConnectionState { return nil }
+func (f *fakeNotifierConn) Dictionary() *dict.Parser   { return dict.Default }
+func (f *fakeNotifierConn) Context() context.Context  { return context.Background() }
+func (f *fakeNotifierConn) SetContext(ctx context.Context) {
+	_ = ctx
+}
+func (f *fakeNotifierConn) Connection() net.Conn { return nil }
+
+// TestDiamForwarder_WatchDisconnect_NilsConnOnCloseNotify verifies that when
+// the underlying socket signals CloseNotify, watchDisconnect clears df.conn
+// and df.connected so monitorConnection will reconnect.
+func TestDiamForwarder_WatchDisconnect_NilsConnOnCloseNotify(t *testing.T) {
+	df := newDiamForwarder(
+		"localhost:3868",
+		"tcp",
+		"aaa-gateway.example.com",
+		"example.com",
+		"aaa-server.example.com",
+		"example.com",
+		DefaultConfig(),
+		slog.Default(),
+	)
+
+	fake := newFakeNotifierConn()
+	df.mu.Lock()
+	df.conn = fake
+	df.connected = true
+	df.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		df.watchDisconnect(ctx)
+		close(done)
+	}()
+
+	// Simulate peer-initiated close.
+	fake.Close()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("watchDisconnect did not return after CloseNotify")
+	}
+
+	df.mu.RLock()
+	defer df.mu.RUnlock()
+	if df.conn != nil {
+		t.Errorf("expected df.conn to be nil after peer close, got %T", df.conn)
+	}
+	if df.connected {
+		t.Error("expected df.connected=false after peer close")
+	}
+}
+
+// TestDiamForwarder_WatchDisconnect_NoOpWhenConnNil is a safety check:
+// when df.conn is nil watchDisconnect returns without panicking. This
+// happens when monitorConnection has already finished reconnect setup
+// or Close() was invoked on the forwarder.
+func TestDiamForwarder_WatchDisconnect_NoOpWhenConnNil(t *testing.T) {
+	df := newDiamForwarder(
+		"localhost:3868",
+		"tcp",
+		"aaa-gateway.example.com",
+		"example.com",
+		"aaa-server.example.com",
+		"example.com",
+		DefaultConfig(),
+		slog.Default(),
+	)
+	// df.conn is nil by default; the function must return immediately.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	df.watchDisconnect(ctx)
+}
+
+// TestDiamForwarder_GetConn_AfterDisconnect_SyncReconnectAttempt verifies
+// that when df.conn is nil and the server is unreachable, getConn returns
+// an error instead of blocking. This guards the synchronous-reconnect path
+// used by Forward().
+func TestDiamForwarder_GetConn_AfterDisconnect_SyncReconnectAttempt(t *testing.T) {
+	df := newDiamForwarder(
+		"127.0.0.1:1", // nothing listens here — DialNetwork must fail
+		"tcp",
+		"aaa-gateway.example.com",
+		"example.com",
+		"aaa-server.example.com",
+		"example.com",
+		DefaultConfig(),
+		slog.Default(),
+	)
+
+	if _, err := df.getConn(); err == nil {
+		t.Fatal("expected error from getConn when server unreachable, got nil")
 	}
 }

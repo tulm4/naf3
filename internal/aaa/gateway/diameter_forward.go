@@ -152,7 +152,8 @@ func newDiamForwarder(addr, network, originHost, originRealm, destHost, destReal
 
 // Connect establishes and maintains a persistent connection to AAA-S.
 // It performs CER/CEA handshake automatically via sm.Client.
-// After connecting, a monitor goroutine watches for disconnection and reconnects.
+// After connecting, a monitor goroutine watches for disconnection and reconnects,
+// while watchDisconnect clears the conn on peer-initiated loss.
 func (df *diamForwarder) Connect(ctx context.Context) error {
 	conn, err := df.smClient.DialNetwork(df.network, df.addr)
 	if err != nil {
@@ -177,55 +178,95 @@ func (df *diamForwarder) Connect(ctx context.Context) error {
 		"origin_state_id", osi,
 	)
 
-	// Monitor connection in background
+	// Watch peer disconnect via diam.CloseNotifier (RFC 6733 §5.6 + sm internals).
+	go df.watchDisconnect(ctx)
+	// Drive reconnect loop independently.
 	go df.monitorConnection(ctx)
 
 	return nil
 }
 
-// monitorConnection watches for disconnection and reconnects with exponential backoff.
+// watchDisconnect blocks until the underlying socket signals CloseNotify.
+// On notification it clears df.conn so monitorConnection will reconnect.
+// Spec: RFC 6733 §5.6 (DPR), go-diameter diam.CloseNotifier.
+func (df *diamForwarder) watchDisconnect(ctx context.Context) {
+	df.mu.RLock()
+	conn := df.conn
+	df.mu.RUnlock()
+	if conn == nil {
+		return
+	}
+	notifier, ok := conn.(diam.CloseNotifier)
+	if !ok {
+		// CloseNotify not supported on this conn; nothing to watch.
+		return
+	}
+	select {
+	case <-ctx.Done():
+		return
+	case <-notifier.CloseNotify():
+		df.mu.Lock()
+		if df.conn == conn {
+			df.conn = nil
+			df.connected = false
+			df.logger.Warn("diameter_forward_peer_lost", "server", df.addr)
+			df.mu.Unlock()
+			df.clearPending()
+		} else {
+			df.mu.Unlock()
+		}
+	}
+}
+
+// monitorConnection reconnects when df.connected is false (set by either
+// watchDisconnect on peer loss or Close). Backoff is exponential, capped at 30s.
 func (df *diamForwarder) monitorConnection(ctx context.Context) {
 	backoff := 1 * time.Second
 	const maxBackoff = 30 * time.Second
 
 	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
 		df.mu.RLock()
-		conn := df.conn
+		connected := df.connected
 		df.mu.RUnlock()
 
-		if conn == nil {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-
-			// Attempt reconnect
+		if !connected {
 			df.mu.Lock()
 			newConn, err := df.smClient.DialNetwork(df.network, df.addr)
 			if err != nil {
 				df.mu.Unlock()
 				df.logger.Error("diameter_forward_reconnect_failed",
 					"error", err, "backoff", backoff)
-				time.Sleep(backoff)
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(backoff):
+				}
 				backoff = min(backoff*2, maxBackoff)
 				continue
 			}
 			df.conn = newConn
 			df.connected = true
+			df.connStats.ConnectedAt = time.Now()
 			df.mu.Unlock()
 
 			df.logger.Info("diameter_forward_reconnected", "server", df.addr)
 			backoff = 1 * time.Second
-
-			// Clear stale pending entries from the lost connection.
 			df.clearPending()
+
+			// Watch the new connection for peer-initiated close.
+			go df.watchDisconnect(ctx)
 		}
 
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(5 * time.Second):
+		case <-time.After(2 * time.Second):
 		}
 	}
 }
