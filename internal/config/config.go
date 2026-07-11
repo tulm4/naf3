@@ -111,10 +111,8 @@ type BizConfig struct {
 
 // AAAgwConfig holds AAA Gateway configuration.
 type AAAgwConfig struct {
-	BizServiceURL    string `yaml:"bizServiceUrl"`    // http://svc-nssaa-biz:8080
-	ListenRADIUS     string `yaml:"listenRadius"`     // ":1812"
-	ListenDIAMETER   string `yaml:"listenDiameter"`   // ":3868"
-	DiameterProtocol string `yaml:"diameterProtocol"` // "tcp" or "sctp"
+	BizServiceURL string `yaml:"bizServiceUrl"` // http://svc-nssaa-biz:8080
+	ListenRADIUS  string `yaml:"listenRadius"`   // ":1812"
 
 	// Diameter client-initiated config (PLAN §2.3.5):
 	// Required for DER/DEA forwarding to AAA-S.
@@ -484,12 +482,6 @@ func applyDefaults(cfg *Config) {
 	if cfg.AAAgw != nil {
 		if cfg.AAAgw.ListenRADIUS == "" {
 			cfg.AAAgw.ListenRADIUS = ":1812"
-		}
-		if cfg.AAAgw.ListenDIAMETER == "" {
-			cfg.AAAgw.ListenDIAMETER = ":3868"
-		}
-		if cfg.AAAgw.DiameterProtocol == "" {
-			cfg.AAAgw.DiameterProtocol = "tcp"
 		}
 		if cfg.AAAgw.RedisMode == "" {
 			cfg.AAAgw.RedisMode = "standalone"

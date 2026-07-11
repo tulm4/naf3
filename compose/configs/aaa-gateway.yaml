@@ -17,8 +17,6 @@ redis:
 aaaGateway:
   bizServiceUrl: "${BIZ_URL:-http://localhost:8080}"
   listenRadius: ":1812"
-  listenDiameter: ":3868"
-  diameterProtocol: "tcp"
   # Diameter client-initiated config (see PLAN §2.3.5):
   # Required for DER/DEA forwarding to AAA-S. Without these, DIAMETER transport silently fails.
   diameterServerAddress: "aaa-sim:3868"   # AAA-S address (compose service name)
