@@ -528,8 +528,10 @@ services:
     depends_on: [redis, mock-aaa-s]
     environment:
       REDIS_ADDR: redis:6379
-      AAA_S_RADIUS_ADDR: mock-aaa-s:1812
-      AAA_S_DIAMETER_ADDR: mock-aaa-s:3868
+      # Config keys are set in compose/configs/aaa-gateway.yaml under `aaaGateway.`
+      # (YAML fields: diameterServerAddress / radiusServerAddress).
+      # Default example: diameterServerAddress: aaa-sim:3868
+      #                  radiusServerAddress:   aaa-sim:1812
       BIZ_URL: http://biz:8080
     ports: ["9090:9090"]
     network_mode: host  # needed for keepalived to manage VIP in dev
