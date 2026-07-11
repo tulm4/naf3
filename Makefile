@@ -287,6 +287,52 @@ test-fullchain-no-build: ## Run tests with existing images (skip build, ~5s star
 	@echo "$(GREEN)Fullchain tests complete (no-build mode)$(NC)"
 
 # =============================================================================
+# Diameter + RADIUS E2E (logs-only, Makefile-owned compose lifecycle)
+# =============================================================================
+
+.PHONY: test-diameter-radius
+test-diameter-radius: gen-certs build ## Diameter TCP + RADIUS E2E (logs-only)
+	@echo "$(YELLOW)Starting fullchain TCP stack for Diameter/RADIUS tests...$(NC)"
+	docker compose -f compose/fullchain-dev-tcp.yaml up -d --quiet-pull --wait
+	@echo "$(YELLOW)Running Diameter TCP + RADIUS tests...$(NC)"
+	E2E_DOCKER_MANAGED=1 \
+	E2E_COMPOSE_FILE=compose/fullchain-dev-tcp.yaml \
+	E2E_TLS_CA=/tmp/e2e-tls/server.crt \
+	BIZ_PG_URL=postgres://nssaa:nssaa@localhost:5432/nssaa?sslmode=disable \
+	BIZ_REDIS_URL=redis://localhost:6379 \
+	FULLCHAIN_NRF_URL=http://localhost:8082 \
+	FULLCHAIN_UDM_URL=http://localhost:8083 \
+	FULLCHAIN_AAA_SIM_URL=http://localhost:18120 \
+	FULLCHAIN_NRM_URL=http://localhost:8084 \
+	FULLCHAIN_HTTP_GW_URL=https://localhost:8443 \
+	$(GOTEST) -tags=e2e -run 'TestDiameter_TCP|TestRadius' -v -count=1 -timeout=10m ./test/e2e/... \
+	  || { docker compose -f compose/fullchain-dev-tcp.yaml down --remove-orphans; exit 1; }
+	@echo "$(YELLOW)Tearing down TCP stack...$(NC)"
+	docker compose -f compose/fullchain-dev-tcp.yaml down --remove-orphans
+	@echo "$(GREEN)Diameter TCP + RADIUS tests complete$(NC)"
+
+.PHONY: test-diameter-radius-sctp
+test-diameter-radius-sctp: gen-certs build ## Diameter SCTP E2E (logs-only; skips on non-SCTP hosts)
+	@echo "$(YELLOW)Starting fullchain SCTP stack for Diameter tests...$(NC)"
+	docker compose -f compose/fullchain-dev-sctp.yaml up -d --quiet-pull --wait
+	@echo "$(YELLOW)Running Diameter SCTP tests...$(NC)"
+	E2E_DOCKER_MANAGED=1 \
+	E2E_COMPOSE_FILE=compose/fullchain-dev-sctp.yaml \
+	E2E_TLS_CA=/tmp/e2e-tls/server.crt \
+	BIZ_PG_URL=postgres://nssaa:nssaa@localhost:5432/nssaa?sslmode=disable \
+	BIZ_REDIS_URL=redis://localhost:6379 \
+	FULLCHAIN_NRF_URL=http://localhost:8082 \
+	FULLCHAIN_UDM_URL=http://localhost:8083 \
+	FULLCHAIN_AAA_SIM_URL=http://localhost:18120 \
+	FULLCHAIN_NRM_URL=http://localhost:8084 \
+	FULLCHAIN_HTTP_GW_URL=https://localhost:8443 \
+	$(GOTEST) -tags=e2e -run 'TestDiameter_SCTP' -v -count=1 -timeout=10m ./test/e2e/... \
+	  || { docker compose -f compose/fullchain-dev-sctp.yaml down --remove-orphans; exit 1; }
+	@echo "$(YELLOW)Tearing down SCTP stack...$(NC)"
+	docker compose -f compose/fullchain-dev-sctp.yaml down --remove-orphans
+	@echo "$(GREEN)Diameter SCTP tests complete$(NC)"
+
+# =============================================================================
 # Lint targets
 # =============================================================================
 
