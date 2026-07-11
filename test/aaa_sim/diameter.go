@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/fiorix/go-diameter/v4/diam"
@@ -29,6 +30,35 @@ const (
 	diameterAuthRejected = 4003
 	diameterChallenge    = 4002
 )
+
+// eapDictionaryXML is the minimum dictionary extension that registers the
+// Diameter EAP application (AppID=5, RFC 4072). Without it, sm.PrepareSupportedApps
+// would not advertise app 5 in CEA, and clients that send CER with
+// Auth-Application-Id=5 would be rejected with "advertise unsupported application".
+const eapDictionaryXML = `<?xml version="1.0" encoding="UTF-8"?>
+<diameter>
+	<application id="5" type="auth" name="Diameter EAP">
+		<command code="268" short="DER" name="Diameter-EAP-Request"/>
+		<command code="268" short="DEA" name="Diameter-EAP-Answer"/>
+	</application>
+</diameter>
+`
+
+// loadEAPDict returns dict.Default extended with the Diameter EAP application
+// (AppID=5). Loaded once and cached at package init via eapDict.
+var eapDict *dict.Parser
+
+func loadEAPDict() *dict.Parser {
+	if eapDict != nil {
+		return eapDict
+	}
+	eapDict = dict.Default
+	if err := eapDict.Load(strings.NewReader(eapDictionaryXML)); err != nil {
+		// Fall back to dict.Default if extension fails to load.
+		return dict.Default
+	}
+	return eapDict
+}
 
 // DiameterServer handles Diameter EAP requests using go-diameter/v4/sm
 // for RFC 6733-compliant CER/CEA handshake and DWR/DWA watchdog.
@@ -58,17 +88,21 @@ func (s *DiameterServer) Run(ctx context.Context) error {
 		OriginRealm: datatype.DiameterIdentity("test.local"),
 		VendorID:    datatype.Unsigned32(vendor3GPP),
 		ProductName: "AAA-Simulator",
+		Dict:        loadEAPDict(),
 	}
 
 	machine := sm.New(settings)
 
 	machine.HandleFunc("DER", s.handleDER)
+	// Register DER at the EAP app index (AppID=5, Code=268) so PrepareSupportedApps
+	// advertises Diameter EAP (RFC 4072) as a supported auth application.
+	machine.HandleIdx(diam.CommandIndex{AppID: AppIDAAP, Code: 268, Request: true}, diam.HandlerFunc(s.handleDER))
 	// DWR is handled internally by sm.New (watchdogOK wrapper ensures peer passed CER/CEA).
 	// Do NOT register a handler here — would override sm's internal DWR handler.
 
 	errc := make(chan error, 1)
 	go func() {
-		errc <- diam.ListenAndServeNetwork(s.network, s.addr, machine, dict.Default)
+		errc <- diam.ListenAndServeNetwork(s.network, s.addr, machine, loadEAPDict())
 	}()
 
 	select {

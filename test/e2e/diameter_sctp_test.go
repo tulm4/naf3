@@ -53,8 +53,11 @@ func TestDiameter_SCTP_HelloWatchdog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Logs(aaa-gateway): %v", err)
 	}
-	if !containsAny(logs, "CEA", "capabilities exchange", "CER sent") {
-		t.Errorf("aaa-gateway (SCTP) logs do not show CER/CEA exchange; logs:\n%s", logs)
+	if !containsAny(logs, "diameter_forward_connected", "CEA") {
+		t.Errorf("aaa-gateway (SCTP) logs do not show successful CER/CEA exchange; logs:\n%s", logs)
+	}
+	if containsAny(logs, "diameter_forward_connect_failed") {
+		t.Errorf("aaa-gateway (SCTP) logs show connect failure; logs:\n%s", logs)
 	}
 
 	time.Sleep(35 * time.Second)
@@ -62,8 +65,8 @@ func TestDiameter_SCTP_HelloWatchdog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Logs(aaa-gateway): %v", err)
 	}
-	if !containsAny(logs, "DWR", "watchdog", "watchdog exchange") {
-		t.Errorf("aaa-gateway (SCTP) logs do not show DWR/watchdog exchange after 35s; logs:\n%s", logs)
+	if containsAny(logs, "diameter_forward_peer_lost", "diameter_forward_reconnect_failed") {
+		t.Errorf("aaa-gateway (SCTP) dropped peer during watchdog window; logs:\n%s", logs)
 	}
 }
 
@@ -93,7 +96,7 @@ func TestDiameter_SCTP_DER_DEA_EAP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Logs(aaa-gateway): %v", err)
 	}
-	if !containsAny(logs, "DER", "NSSAA", "der sent") {
+	if !containsAny(logs, "diameter_forward_der_sent", "DER", "NSSAA") {
 		t.Errorf("aaa-gateway (SCTP) logs do not show DER/NSSAA exchange; logs:\n%s", logs)
 	}
 }

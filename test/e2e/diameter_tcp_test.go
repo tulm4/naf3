@@ -41,18 +41,23 @@ func TestDiameter_TCP_HelloWatchdog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Logs(aaa-gateway): %v", err)
 	}
-	if !containsAny(logs, "CEA", "capabilities exchange", "CER sent") {
-		t.Errorf("aaa-gateway logs do not show CER/CEA exchange; logs:\n%s", logs)
+	if !containsAny(logs, "diameter_forward_connected", "CEA") {
+		t.Errorf("aaa-gateway logs do not show successful CER/CEA exchange (diameter_forward_connected / CEA); logs:\n%s", logs)
+	}
+	if containsAny(logs, "diameter_forward_connect_failed") {
+		t.Errorf("aaa-gateway logs show connect failure; logs:\n%s", logs)
 	}
 
-	// Wait for at least one DWR/DWA cycle (~30s cadence).
+	// Wait for at least one DWR/DWA cycle (~30s cadence). go-diameter's sm
+	// handles DWR/DWA internally without logging; we verify by checking that
+	// the connection remains alive (no peer_lost / reconnect_failed events).
 	time.Sleep(35 * time.Second)
 	logs, err = drv.Logs("aaa-gateway", 200)
 	if err != nil {
 		t.Fatalf("Logs(aaa-gateway): %v", err)
 	}
-	if !containsAny(logs, "DWR", "watchdog", "watchdog exchange") {
-		t.Errorf("aaa-gateway logs do not show DWR/watchdog exchange after 35s; logs:\n%s", logs)
+	if containsAny(logs, "diameter_forward_peer_lost", "diameter_forward_reconnect_failed") {
+		t.Errorf("aaa-gateway dropped Diameter peer during watchdog window; logs:\n%s", logs)
 	}
 }
 
@@ -91,8 +96,8 @@ func TestDiameter_TCP_DER_DEA_EAP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Logs(aaa-gateway): %v", err)
 	}
-	if !containsAny(logs, "DER", "NSSAA", "der sent") {
-		t.Errorf("aaa-gateway logs do not show DER/NSSAA exchange; logs:\n%s", logs)
+	if !containsAny(logs, "diameter_forward_der_sent", "DER", "NSSAA") {
+		t.Errorf("aaa-gateway logs do not show DER/NSSAA exchange (diameter_forward_der_sent); logs:\n%s", logs)
 	}
 }
 
