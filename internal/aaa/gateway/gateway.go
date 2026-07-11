@@ -155,8 +155,6 @@ func New(cfg Config) *Gateway {
 		cfg.Logger,
 		g.forwardToBiz,
 		g.registry,
-		cfg.BizServiceURL,
-		g.bizHTTPClient,
 	)
 
 	return g

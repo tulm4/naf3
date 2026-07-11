@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -78,8 +77,6 @@ type diamForwarder struct {
 	// forwarder's outbound socket — TCP is bidirectional, RFC 6733 §5.6).
 	forwardToBiz func(ctx context.Context, sessionID string, transportType string, messageType string, raw []byte)
 	registry     *ServerInitiatedRegistry
-	bizURL       string
-	httpClient   *http.Client
 
 	// Protocol configuration (GAP-AAA-04, GAP-DIA-02, GAP-DIA-03)
 	cfg *diamForwarderConfig
@@ -109,8 +106,6 @@ type diamForwarder struct {
 // forwardToBiz is the callback used by server-initiated inbound handlers (ASR/RAR/STR)
 // to deliver inbound Diameter server messages to the Biz Pod via the registry/HTTP path.
 // registry tracks pending server-initiated requests until Biz Pod acknowledges.
-// bizURL is the HTTP base URL of the Biz service (used by server-initiated handlers).
-// httpClient is the HTTP client used by server-initiated handlers to call Biz.
 // Spec: RFC 6733 §5.3 (CER/CEA), RFC 4072 (DER/DEA), RFC 6733 §5.6 (TCP bidirectional)
 func newDiamForwarder(
 	addr, network, originHost, originRealm, destHost, destRealm string,
@@ -118,8 +113,6 @@ func newDiamForwarder(
 	logger *slog.Logger,
 	forwardToBiz func(ctx context.Context, sessionID string, transportType string, messageType string, raw []byte),
 	registry *ServerInitiatedRegistry,
-	bizURL string,
-	httpClient *http.Client,
 ) *diamForwarder {
 	// Apply defaults for optional config fields (GAP-AAA-04, GAP-DIA-02, GAP-DIA-03)
 	if cfg.AuthRequestType == 0 {
@@ -141,8 +134,6 @@ func newDiamForwarder(
 		pending:      make(map[uint32]chan *diam.Message),
 		forwardToBiz: forwardToBiz,
 		registry:     registry,
-		bizURL:       bizURL,
-		httpClient:   httpClient,
 	}
 
 	df.settings = &sm.Settings{

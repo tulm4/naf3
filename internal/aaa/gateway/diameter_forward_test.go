@@ -41,8 +41,6 @@ func TestDiamForwarder_OriginStateId_InitialValue(t *testing.T) {
 		slog.Default(),
 		nil, // forwardToBiz — tests don't exercise server-initiated path
 		nil, // registry
-		"",  // bizURL
-		nil, // httpClient
 	)
 
 	// Initial value should be 0 before increment
@@ -64,8 +62,6 @@ func TestDiamForwarder_OriginStateId_Increments(t *testing.T) {
 		slog.Default(),
 		nil, // forwardToBiz — tests don't exercise server-initiated path
 		nil, // registry
-		"",  // bizURL
-		nil, // httpClient
 	)
 
 	id1 := df.incrementOriginStateID()
@@ -97,8 +93,6 @@ func TestDiamForwarder_OriginStateId_ConcurrentAccess(t *testing.T) {
 		slog.Default(),
 		nil, // forwardToBiz — tests don't exercise server-initiated path
 		nil, // registry
-		"",  // bizURL
-		nil, // httpClient
 	)
 
 	done := make(chan struct{})
@@ -136,8 +130,6 @@ func TestDiamForwarder_AuthRequestType_Default(t *testing.T) {
 		slog.Default(),
 		nil, // forwardToBiz — tests don't exercise server-initiated path
 		nil, // registry
-		"",  // bizURL
-		nil, // httpClient
 	)
 
 	// Default should be 2 (AUTHORIZE_AUTHENTICATE)
@@ -162,8 +154,6 @@ func TestDiamForwarder_AuthRequestType_Configurable(t *testing.T) {
 		slog.Default(),
 		nil, // forwardToBiz — tests don't exercise server-initiated path
 		nil, // registry
-		"",  // bizURL
-		nil, // httpClient
 	)
 
 	if df.cfg.AuthRequestType != 3 {
@@ -184,8 +174,6 @@ func TestDiamForwarder_AuthApplicationId_Default(t *testing.T) {
 		slog.Default(),
 		nil, // forwardToBiz — tests don't exercise server-initiated path
 		nil, // registry
-		"",  // bizURL
-		nil, // httpClient
 	)
 
 	// Default should be 5 (Diameter EAP)
@@ -210,8 +198,6 @@ func TestDiamForwarder_AuthApplicationId_Configurable(t *testing.T) {
 		slog.Default(),
 		nil, // forwardToBiz — tests don't exercise server-initiated path
 		nil, // registry
-		"",  // bizURL
-		nil, // httpClient
 	)
 
 	if df.cfg.AuthApplicationID != 6 {
@@ -235,8 +221,6 @@ func TestDiamForwarder_ZeroAuthRequestType_DefaultsToAuthorizeAuthenticate(t *te
 		slog.Default(),
 		nil, // forwardToBiz — tests don't exercise server-initiated path
 		nil, // registry
-		"",  // bizURL
-		nil, // httpClient
 	)
 
 	// Zero should default to 2 (AUTHORIZE_AUTHENTICATE)
@@ -261,8 +245,6 @@ func TestDiamForwarder_ZeroAuthApplicationId_DefaultsToDiameterEAP(t *testing.T)
 		slog.Default(),
 		nil, // forwardToBiz — tests don't exercise server-initiated path
 		nil, // registry
-		"",  // bizURL
-		nil, // httpClient
 	)
 
 	// Zero should default to AppIDAAP (5 - Diameter EAP)
@@ -283,8 +265,6 @@ func TestDiamForwarder_GetConnectionStats(t *testing.T) {
 		slog.Default(),
 		nil, // forwardToBiz — tests don't exercise server-initiated path
 		nil, // registry
-		"",  // bizURL
-		nil, // httpClient
 	)
 
 	stats := df.GetConnectionStats()
@@ -312,8 +292,6 @@ func TestDiamForwarder_recordDWA(t *testing.T) {
 		slog.Default(),
 		nil, // forwardToBiz — tests don't exercise server-initiated path
 		nil, // registry
-		"",  // bizURL
-		nil, // httpClient
 	)
 
 	time.Sleep(10 * time.Millisecond)
@@ -337,8 +315,6 @@ func TestDiamForwarder_recordDWR(t *testing.T) {
 		slog.Default(),
 		nil, // forwardToBiz — tests don't exercise server-initiated path
 		nil, // registry
-		"",  // bizURL
-		nil, // httpClient
 	)
 
 	df.recordDWR()
@@ -361,8 +337,6 @@ func TestDiamForwarder_incrementMessagesSent(t *testing.T) {
 		slog.Default(),
 		nil, // forwardToBiz — tests don't exercise server-initiated path
 		nil, // registry
-		"",  // bizURL
-		nil, // httpClient
 	)
 
 	df.incrementMessagesSent()
@@ -386,8 +360,6 @@ func TestDiamForwarder_incrementMessagesRecv(t *testing.T) {
 		slog.Default(),
 		nil, // forwardToBiz — tests don't exercise server-initiated path
 		nil, // registry
-		"",  // bizURL
-		nil, // httpClient
 	)
 
 	df.incrementMessagesRecv()
@@ -412,8 +384,6 @@ func TestDiamForwarder_ConnectionStats_ConcurrentAccess(t *testing.T) {
 		slog.Default(),
 		nil, // forwardToBiz — tests don't exercise server-initiated path
 		nil, // registry
-		"",  // bizURL
-		nil, // httpClient
 	)
 
 	done := make(chan struct{})
@@ -510,8 +480,6 @@ func TestDiamForwarder_WatchDisconnect_NilsConnOnCloseNotify(t *testing.T) {
 		slog.Default(),
 		nil, // forwardToBiz — tests don't exercise server-initiated path
 		nil, // registry
-		"",  // bizURL
-		nil, // httpClient
 	)
 
 	fake := newFakeNotifierConn()
@@ -564,8 +532,6 @@ func TestDiamForwarder_WatchDisconnect_NoOpWhenConnNil(t *testing.T) {
 		slog.Default(),
 		nil, // forwardToBiz — tests don't exercise server-initiated path
 		nil, // registry
-		"",  // bizURL
-		nil, // httpClient
 	)
 	// df.conn is nil by default; the function must return immediately.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -589,8 +555,6 @@ func TestDiamForwarder_GetConn_AfterDisconnect_SyncReconnectAttempt(t *testing.T
 		slog.Default(),
 		nil, // forwardToBiz — tests don't exercise server-initiated path
 		nil, // registry
-		"",  // bizURL
-		nil, // httpClient
 	)
 
 	if _, err := df.getConn(); err == nil {
@@ -625,8 +589,6 @@ func TestDiamForwarder_ASR_FiresOnForwarderMachine(t *testing.T) {
 		slog.Default(),
 		forwardToBiz,
 		registry,
-		"http://biz:8080",
-		nil,
 	)
 
 	fake := newFakeNotifierConn()
