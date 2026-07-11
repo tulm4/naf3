@@ -1,0 +1,29 @@
+# compose/fullchain-dev-tcp.yaml
+# TCP variant of the static-IP fullchain overlay.
+# Includes compose/fullchain-dev-base.yaml and forces DIAMETER_TRANSPORT=tcp.
+# Network name: nssaa_fullchain_tcp.
+#
+# Usage:
+#   docker compose -f compose/fullchain-dev-tcp.yaml up -d --wait
+#   docker compose -f compose/fullchain-dev-tcp.yaml down -v
+
+include:
+  - path: compose/fullchain-dev-base.yaml
+
+services:
+  aaa-sim:
+    environment:
+      AAA_SIM_DIAMETER_TRANSPORT: "tcp"
+
+  aaa-gateway:
+    environment:
+      DIAMETER_TRANSPORT: "tcp"
+
+networks:
+  default:
+    name: nssaa_fullchain_tcp
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.0.3.0/24
+          gateway: 172.0.3.1
