@@ -1,180 +1,222 @@
-// Package fullchain_dev_diameter_radius provides E2E tests for the static-IP
-// fullchain compose environment, verifying Diameter (TCP/SCTP) and RADIUS
-// transport between aaa-gateway and aaa-sim.
+//go:build e2e
+// +build e2e
+
+// Package fullchain_dev_diameter_radius exercises the static-IP fullchain
+// compose stack end-to-end. The tests cover:
+//   - Diameter CER/CEA handshake and DWR/DWA watchdog (TCP and SCTP)
+//   - Diameter DER/DEA EAP exchange
+//   - RADIUS Access-Request/Access-Accept with valid and invalid shared secrets
 //
-// Tests manage their own Docker Compose lifecycle (bringUp / tearDown) so each
-// test is independent and can use a different compose file (TCP or SCTP variant).
-// This differs from the shared-harness approach used by the top-level e2e package.
-//
-// Spec: docs/superpowers/specs/2026-07-11-static-ip-compose-diameter-radius-e2e-design.md
+// Tests self-manage docker compose up/down because the existing test/e2e/
+// harness assumes Makefile-managed compose with a single variant. We need two
+// distinct stacks (TCP and SCTP) and the SCTP stack requires cap_add/INSTALL_SCTP
+// at image build time, which the Makefile-managed target does not support.
 package fullchain_dev_diameter_radius
 
 import (
+	"bufio"
 	"context"
+	"fmt"
+	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
 
-// bringUp starts the Docker Compose stack and waits for it to be healthy.
-// composeFile is relative to the repo root (e.g., "compose/fullchain-dev-tcp.yaml").
-// networkName is the Docker network name (e.g., "nssaa_fullchain_tcp").
-// extraEnv adds or overrides environment variables for docker compose up.
+// Static-IP plan from docs/superpowers/specs/2026-07-11-static-ip-compose-diameter-radius-e2e-design.md §4.1.
+// composeFile is the TCP variant; referenced by RADIUS tests before diameter_tcp_test.go exists.
+const tcpComposeFile = "compose/fullchain-dev-tcp.yaml"
+
+const (
+	aaaSimDiameterAddr = "172.0.3.14:3868"
+	aaaSimRadiusAddr   = "172.0.3.14:1812"
+	aaaGatewayHTTPAddr = "172.0.3.15:9090"
+
+	diameterNetworkTCP  = "nssaa_fullchain_tcp"
+	diameterNetworkSCTP = "nssaa_fullchain_sctp"
+
+	composeUpTimeout   = 120 * time.Second
+	healthCheckTimeout = 60 * time.Second
+	healthCheckPoll    = 2 * time.Second
+)
+
+// bringUp starts the requested compose file, removes any pre-existing static-IP
+// network of the same name to avoid IP collisions, and waits until aaa-gateway
+// reports healthy via /health. Blocks until ready or context timeout.
+//
+// composeFile is relative to the repo root (e.g. "compose/fullchain-dev-tcp.yaml").
+// extraEnv may contain overrides like {"DIAMETER_TRANSPORT": "sctp"}; it is also
+// passed to docker compose via --env-file when non-empty.
 func bringUp(t *testing.T, composeFile string, networkName string, extraEnv map[string]string) {
 	t.Helper()
-	repoRoot := repoRoot(t)
-	dc := composeCmd(repoRoot, composeFile)
 
-	// Merge extra env into the compose invocation's environment.
-	env := os.Environ()
+	repoRoot, err := repoRootFromThisFile()
+	if err != nil {
+		t.Fatalf("locate repo root: %v", err)
+	}
+
+	// Pre-clean: drop any stale network with this name so a fresh subnet
+	// allocation succeeds even after a previous interrupted run.
+	_ = runShell(t, repoRoot, "docker", "network", "rm", networkName)
+
+	// Build args.
+	args := []string{"compose", "-f", composeFile, "up", "-d", "--quiet-pull", "--wait"}
+	cmd := exec.Command("docker", args...)
+	cmd.Dir = repoRoot
+	cmd.Env = os.Environ()
 	for k, v := range extraEnv {
-		env = append(env, k+"="+v)
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("docker compose up failed for %s: %v\n%s", composeFile, err, string(out))
 	}
 
-	// Build images first (required since the compose file uses build: directives).
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
-	if err := runCmd(ctx, t, append(dc, "build", "--pull", "--quiet")...); err != nil {
-		t.Fatalf("docker compose build failed: %v", err)
+	// Wait for aaa-gateway /health.
+	if err := waitHTTPHealthy(repoRoot, aaaGatewayHTTPAddr+"/health", healthCheckTimeout); err != nil {
+		tearDown(t, composeFile) // best-effort
+		t.Fatalf("aaa-gateway did not become healthy: %v", err)
 	}
 
-	// Bring up with --wait (blocks until all health checks pass).
-	if err := runCmd(ctx, t, append(dc, "up", "-d", "--wait")...); err != nil {
-		// On failure, dump container logs for diagnosis.
-		_ = runCmd(context.Background(), t, append(dc, "logs", "--tail=50")...)
-		t.Fatalf("docker compose up --wait failed: %v", err)
-	}
+	// Extra 2s grace period to ensure aaa-sim has finished both radius+diameter
+	// server initialization after its own healthcheck (spec §7.1 row 4).
+	time.Sleep(2 * time.Second)
 }
 
-// tearDown stops and removes the Docker Compose stack.
+// tearDown runs `docker compose down -v` for the compose file.
 func tearDown(t *testing.T, composeFile string) {
 	t.Helper()
-	repoRoot := repoRoot(t)
-	dc := composeCmd(repoRoot, composeFile)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-	if err := runCmd(ctx, t, append(dc, "down", "-v", "--remove-orphans")...); err != nil {
-		t.Logf("docker compose down failed (non-fatal): %v", err)
+	repoRoot, err := repoRootFromThisFile()
+	if err != nil {
+		t.Logf("tearDown: locate repo root: %v", err)
+		return
+	}
+	cmd := exec.Command("docker", "compose", "-f", composeFile, "down", "-v", "--remove-orphans")
+	cmd.Dir = repoRoot
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Logf("docker compose down failed (continuing): %v\n%s", err, string(out))
 	}
 }
 
-// aaaSimAddr returns the aaa-sim service's IPv4 address for a given compose network.
-// Use this to construct Diameter/RADIUS client connections to aaa-sim from the host.
+// aaaSimAddr returns the static IP:port pair for a given AAA-S service.
+// service is "diameter" or "radius".
 func aaaSimAddr(service string) string {
-	// In the static-IP overlay, aaa-sim always has 172.0.3.14.
-	// This is a constant for the test network plan (spec §4.1).
-	return "172.0.3.14"
+	switch service {
+	case "diameter":
+		return aaaSimDiameterAddr
+	case "radius":
+		return aaaSimRadiusAddr
+	default:
+		panic(fmt.Sprintf("unknown service %q", service))
+	}
 }
 
-// sctpKernelAvailable checks whether the SCTP kernel module is loaded on the host.
-// This determines whether SCTP-variant E2E tests can run.
-// Returns true if /proc/net/protocols contains an SCTP line.
+// sctpKernelAvailable reports whether the host supports SCTP at runtime.
+// Returns false on non-Linux hosts or when /proc/net/protocols lacks SCTP.
+// Used by the SCTP tests to skip cleanly.
 func sctpKernelAvailable() bool {
-	data, err := os.ReadFile("/proc/net/protocols")
+	if runtime.GOOS != "linux" {
+		return false
+	}
+	f, err := os.Open("/proc/net/protocols")
 	if err != nil {
 		return false
 	}
-	return strings.Contains(string(data), "sctp")
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		// /proc/net/protocols lines look like:
+		//   "SCTP     2      0  ...   132"
+		if strings.HasPrefix(scanner.Text(), "SCTP") {
+			return true
+		}
+	}
+	return false
 }
 
-// requireSCTP skips the current test if SCTP is unavailable on the host.
+// requireSCTP skips the test if the host lacks SCTP support.
 func requireSCTP(t *testing.T) {
 	t.Helper()
 	if !sctpKernelAvailable() {
-		t.Skip("SCTP kernel module not available on this host (Linux required for SCTP E2E)")
+		t.Skipf("SCTP kernel module unavailable on host %s", runtime.GOOS)
 	}
 }
 
-// --- Internal helpers ---
-
-// repoRoot returns the repository root directory for tests.
-func repoRoot(t *testing.T) string {
-	t.Helper()
-	// Walk up from this file's directory to find the repo root.
-	const maxDepth = 10
-	for entry := range walkUp(t, maxDepth) {
-		if entry.depth > maxDepth {
-			break
-		}
-		if _, err := os.Stat(filepath.Join(entry.dir, "go.mod")); err == nil {
-			return entry.dir
-		}
-	}
-	t.Fatal("could not find repo root (go.mod not found)")
-	return ""
-}
-
-// walkUp yields directory paths starting from the test binary's current working
-// directory and walking up toward the filesystem root.
-func walkUp(t *testing.T, maxDepth int) <-chan walkEntry {
-	t.Helper()
-	ch := make(chan walkEntry, maxDepth)
-	go func() {
-		defer close(ch)
-		wd, err := os.Getwd()
-		if err != nil {
-			return
-		}
-		dir := wd
-		for i := 0; i <= maxDepth; i++ {
-			ch <- walkEntry{dir: dir, depth: i}
-			parent := filepath.Dir(dir)
-			if parent == dir {
-				break
+// waitHTTPHealthy polls a HTTP endpoint until it returns 200 or the timeout elapses.
+func waitHTTPHealthy(repoRoot, url string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", strings.TrimPrefix(url, "http://"), healthCheckPoll)
+		if err == nil {
+			_ = conn.Close()
+			// Now do the actual GET.
+			cmd := exec.Command("curl", "-sf", "-o", "/dev/null", url)
+			cmd.Dir = repoRoot
+			if curlErr := cmd.Run(); curlErr == nil {
+				return nil
 			}
-			dir = parent
 		}
-	}()
-	return ch
-}
-
-type walkEntry struct {
-	dir   string
-	depth int
-}
-
-// composeCmd returns the docker compose command slice for a given compose file path,
-// relative to the repo root.
-func composeCmd(repoRoot string, composeFile string) []string {
-	// Use "docker compose" (v2 plugin) if available, fall back to "docker-compose".
-	base := "docker"
-	pluginCheck := exec.Command("docker", "compose", "version")
-	if pluginCheck.Run() == nil {
-		base = "docker"
-		return []string{base, "compose", "-f", composeFile, "-p", composeProjectName(composeFile)}
+		time.Sleep(healthCheckPoll)
 	}
-	return []string{"docker-compose", "-f", composeFile, "-p", composeProjectName(composeFile)}
+	return fmt.Errorf("timeout after %v waiting for %s", timeout, url)
 }
 
-// composeProjectName returns a stable project name for the given compose file
-// so multiple variants can coexist.
-func composeProjectName(composeFile string) string {
-	base := filepath.Base(composeFile)
-	base = strings.TrimSuffix(base, filepath.Ext(base))
-	base = strings.TrimPrefix(base, "fullchain-dev-")
-	return "nssaa-" + base
-}
-
-// runCmd executes a command and returns an error if it fails.
-// stdout and stderr are streamed to the test's log.
-func runCmd(ctx context.Context, t *testing.T, args ...string) error {
+// runShell runs an external command with stdout/stderr captured for test output.
+func runShell(t *testing.T, dir string, name string, args ...string) error {
 	t.Helper()
-	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
-	cmd.Stdout = &testLogWriter{t: t, prefix: "  [stdout] "}
-	cmd.Stderr = &testLogWriter{t: t, prefix: "  [stderr] "}
+	cmd := exec.Command(name, args...)
+	cmd.Dir = dir
+	cmd.Stdout = io.Discard
+	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 
-type testLogWriter struct {
-	t      *testing.T
-	prefix string
+// repoRootFromThisFile finds the repository root by walking up from this file's
+// directory until it finds go.mod. Mirrors ofThisFile() in test/e2e/harness.go,
+// but kept independent to avoid coupling this package to the Makefile-managed
+// harness package.
+func repoRootFromThisFile() (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	for dir := cwd; dir != "/"; dir = filepath.Dir(dir) {
+		if _, statErr := os.Stat(filepath.Join(dir, "go.mod")); statErr == nil {
+			return dir, nil
+		}
+	}
+	return "", fmt.Errorf("go.mod not found above %s", cwd)
 }
 
-func (w *testLogWriter) Write(p []byte) (int, error) {
-	w.t.Logf("%s%s", w.prefix, strings.TrimSpace(string(p)))
-	return len(p), nil
+// ctxWithTimeout is a convenience for tests that need a bounded context.
+func ctxWithTimeout(t *testing.T, d time.Duration) (context.Context, context.CancelFunc) {
+	t.Helper()
+	return context.WithTimeout(context.Background(), d)
+}
+
+// containerLogs fetches the logs of a named container from the compose stack.
+func containerLogs(t *testing.T, composeFile, service string) string {
+	t.Helper()
+	repoRoot, err := repoRootFromThisFile()
+	if err != nil {
+		t.Logf("containerLogs: locate repo root: %v", err)
+		return ""
+	}
+	cmd := exec.Command("docker", "compose", "-f", composeFile, "logs", service)
+	cmd.Dir = repoRoot
+	out, err := cmd.Output()
+	if err != nil {
+		t.Logf("docker compose logs %s: %v", service, err)
+		return ""
+	}
+	return string(out)
+}
+
+// contains reports whether substr appears anywhere in s.
+func contains(s, substr string) bool {
+	return strings.Contains(s, substr)
 }
