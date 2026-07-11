@@ -8,53 +8,81 @@
 # which includes this base.
 
 include:
-  - path: compose/commons.yaml
+  - path: commons.yaml
 
 services:
+  # --- 172.0.3.10: redis ---
   redis:
     image: redis:7-alpine
     ports: ["6379:6379"]
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 2s
-      timeout: 1s
-      retries: 30
     networks:
       default:
         ipv4_address: 172.0.3.10
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
+  # --- 172.0.3.11: postgres ---
   postgres:
     image: postgres:16-alpine
-    ports: ["5432:5432"]
     environment:
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: nssaa
+      POSTGRES_PASSWORD: nssaa
       POSTGRES_DB: nssaa
+    ports: ["5432:5432"]
     volumes:
       - postgres-data:/var/lib/postgresql/data
     networks:
       default:
         ipv4_address: 172.0.3.11
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nssaa -d nssaa"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
+  # --- 172.0.3.12: nrf-mock ---
   nrf-mock:
     build:
       context: ..
       dockerfile: Dockerfile.nrf-mock
     image: nssaaf-nrf-mock:latest
     ports: ["8082:8081"]
+    volumes:
+      - ../bin/nrf-mock:/app/nrf-mock:ro
+    environment:
+      NRF_NF_STATUS: "udm-001:REGISTERED,ausf-001:REGISTERED,aaa-gw-001:REGISTERED"
+      NRF_SERVICE_ENDPOINTS: "UDM:nudm-uem:udm-mock:8081,AUSF:nausf-auth:ausf-mock:8081"
     networks:
       default:
         ipv4_address: 172.0.3.12
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/nnrf-disc/v1/nf-instances || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
+  # --- 172.0.3.13: udm-mock ---
   udm-mock:
     build:
       context: ..
       dockerfile: Dockerfile.udm-mock
     image: nssaaf-udm-mock:latest
     ports: ["8083:8081"]
+    volumes:
+      - ../bin/udm-mock:/app/udm-mock:ro
     networks:
       default:
         ipv4_address: 172.0.3.13
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/nudm-uemm/v1/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
+  # --- 172.0.3.14: aaa-sim ---
   aaa-sim:
     build:
       context: ..
@@ -72,6 +100,7 @@ services:
       default:
         ipv4_address: 172.0.3.14
 
+  # --- 172.0.3.15: aaa-gateway ---
   aaa-gateway:
     build:
       context: ..
@@ -95,29 +124,54 @@ services:
     networks:
       default:
         ipv4_address: 172.0.3.15
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9090/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
+  # --- 172.0.3.16: biz ---
   biz:
     build:
       context: ..
       dockerfile: Dockerfile.biz
     image: nssaaf-biz:latest
     depends_on:
-      postgres:
-        condition: service_started
       redis:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
+      aaa-gateway:
+        condition: service_healthy
       nrf-mock:
-        condition: service_started
+        condition: service_healthy
       udm-mock:
-        condition: service_started
+        condition: service_healthy
+      nrm:
+        condition: service_healthy
     volumes:
       - ./configs/biz.yaml:/etc/nssAAF/biz.yaml:ro
       - ../bin/biz:/app/biz:ro
+    environment:
+      MASTER_KEY_HEX: "${MASTER_KEY_HEX:-6767a7ad0416a19ea174608288761dde35dfabba2a8dda9602fc520b80e1af15}"
+      POSTGRES_HOST: "172.0.3.11"
+      REDIS_ADDR: "172.0.3.10:6379"
+      NRF_URL: "http://172.0.3.12:8081"
+      UDM_URL: "http://172.0.3.13:8081"
+      NRM_URL: "http://172.0.3.18:8081"
+      AAA_GW_URL: "http://172.0.3.15:9090"
     ports: ["8080:8080"]
     networks:
       default:
         ipv4_address: 172.0.3.16
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/healthz/live || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
 
+  # --- 172.0.3.17: http-gateway ---
   http-gateway:
     build:
       context: ..
@@ -125,21 +179,44 @@ services:
     image: nssaaf-http-gw:latest
     depends_on:
       biz:
-        condition: service_started
+        condition: service_healthy
+    volumes:
+      - ./configs/http-gateway.yaml:/etc/nssAAF/http-gateway.yaml:ro
+      - /tmp/e2e-tls:/tmp/e2e-tls:ro
+      - ../bin/http-gateway:/app/http-gateway:ro
+    environment:
+      NAF3_AUTH_DISABLED: "1"
+      BIZ_URL: "http://172.0.3.16:8080"
     ports: ["8443:8443"]
     networks:
       default:
         ipv4_address: 172.0.3.17
+    healthcheck:
+      test: ["CMD-SHELL", "curl -skf https://localhost:8443/healthz/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
+  # --- 172.0.3.18: nrm ---
   nrm:
     build:
       context: ..
       dockerfile: Dockerfile.nrm
     image: nssaaf-nrm:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./configs/nrm.yaml:/etc/nssAAF/nrm.yaml:ro
     ports: ["8084:8081"]
     networks:
       default:
         ipv4_address: 172.0.3.18
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
 volumes:
   postgres-data:
