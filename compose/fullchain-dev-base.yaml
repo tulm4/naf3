@@ -1,0 +1,145 @@
+# compose/fullchain-dev-base.yaml
+# Static-IP base layer for the fullchain dev environment.
+# Includes commons.yaml and defines all services with fixed IPv4 addresses
+# in the 172.0.3.0/24 subnet.
+#
+# This file is NOT used directly by `docker compose up`; the user runs
+# one of the variant overlays (fullchain-dev-tcp.yaml or fullchain-dev-sctp.yaml)
+# which includes this base.
+
+include:
+  - path: compose/commons.yaml
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 1s
+      retries: 30
+    networks:
+      default:
+        ipv4_address: 172.0.3.10
+
+  postgres:
+    image: postgres:16-alpine
+    ports: ["5432:5432"]
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: nssaa
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      default:
+        ipv4_address: 172.0.3.11
+
+  nrf-mock:
+    build:
+      context: ..
+      dockerfile: Dockerfile.nrf-mock
+    image: nssaaf-nrf-mock:latest
+    ports: ["8082:8081"]
+    networks:
+      default:
+        ipv4_address: 172.0.3.12
+
+  udm-mock:
+    build:
+      context: ..
+      dockerfile: Dockerfile.udm-mock
+    image: nssaaf-udm-mock:latest
+    ports: ["8083:8081"]
+    networks:
+      default:
+        ipv4_address: 172.0.3.13
+
+  aaa-sim:
+    build:
+      context: ..
+      dockerfile: Dockerfile.aaa-sim
+      args:
+        INSTALL_SCTP: "${INSTALL_SCTP:-0}"
+    image: nssaaf-aaa-sim:latest
+    ports: ["18120:1812", "38680:3868"]
+    volumes:
+      - ../bin/aaa-sim:/app/aaa-sim:ro
+    environment:
+      AAA_SIM_MODE: "${AAA_SIM_MODE:-EAP_TLS_SUCCESS}"
+      AAA_SIM_DIAMETER_TRANSPORT: "${DIAMETER_TRANSPORT:-tcp}"
+    networks:
+      default:
+        ipv4_address: 172.0.3.14
+
+  aaa-gateway:
+    build:
+      context: ..
+      dockerfile: Dockerfile.aaa-gateway
+      args:
+        INSTALL_SCTP: "${INSTALL_SCTP:-0}"
+    image: nssaaf-aaa-gw:latest
+    depends_on:
+      redis:
+        condition: service_healthy
+      aaa-sim:
+        condition: service_started
+    volumes:
+      - ./configs/aaa-gateway.yaml:/etc/nssAAF/aaa-gateway.yaml:ro
+      - ../bin/aaa-gateway:/app/aaa-gateway:ro
+    environment:
+      REDIS_ADDR: "172.0.3.10:6379"
+      BIZ_URL: "http://172.0.3.16:8080"
+      DIAMETER_TRANSPORT: "${DIAMETER_TRANSPORT:-tcp}"
+    ports: ["9090:9090", "18121:1812/udp", "38681:3868"]
+    networks:
+      default:
+        ipv4_address: 172.0.3.15
+
+  biz:
+    build:
+      context: ..
+      dockerfile: Dockerfile.biz
+    image: nssaaf-biz:latest
+    depends_on:
+      postgres:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      nrf-mock:
+        condition: service_started
+      udm-mock:
+        condition: service_started
+    volumes:
+      - ./configs/biz.yaml:/etc/nssAAF/biz.yaml:ro
+      - ../bin/biz:/app/biz:ro
+    ports: ["8080:8080"]
+    networks:
+      default:
+        ipv4_address: 172.0.3.16
+
+  http-gateway:
+    build:
+      context: ..
+      dockerfile: Dockerfile.http-gateway
+    image: nssaaf-http-gw:latest
+    depends_on:
+      biz:
+        condition: service_started
+    ports: ["8443:8443"]
+    networks:
+      default:
+        ipv4_address: 172.0.3.17
+
+  nrm:
+    build:
+      context: ..
+      dockerfile: Dockerfile.nrm
+    image: nssaaf-nrm:latest
+    ports: ["8084:8081"]
+    networks:
+      default:
+        ipv4_address: 172.0.3.18
+
+volumes:
+  postgres-data:
