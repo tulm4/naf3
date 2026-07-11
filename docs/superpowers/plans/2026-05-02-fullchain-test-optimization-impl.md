@@ -15,7 +15,7 @@
 | File | Action |
 |------|--------|
 | `Makefile` | Modify: add `test-fullchain-fast`, `test-fullchain-no-build`, update `test-fullchain` |
-| `compose/fullchain-dev.yaml` | Create: dev compose file with volume mounts |
+| `compose/fullchain-dev-tcp.yaml` | Create: dev compose file with volume mounts |
 | `.github/workflows/e2e.yml` | Create/Modify: add BuildKit cache for CI |
 
 ---
@@ -55,10 +55,10 @@ git commit -m "feat: enable Docker BuildKit for faster builds"
 
 ---
 
-## Task 2: Create compose/fullchain-dev.yaml
+## Task 2: Create compose/fullchain-dev-tcp.yaml
 
 **Files:**
-- Create: `compose/fullchain-dev.yaml`
+- Create: `compose/fullchain-dev-tcp.yaml`
 - Reference: `compose/fullchain.yaml`
 
 - [ ] **Step 1: Read fullchain.yaml structure**
@@ -68,14 +68,14 @@ Read `compose/fullchain.yaml` to understand service definitions, especially:
 - `http-gateway` service ports and volumes
 - `aaa-gateway` service ports and volumes
 
-- [ ] **Step 2: Create compose/fullchain-dev.yaml**
+- [ ] **Step 2: Create compose/fullchain-dev-tcp.yaml**
 
 Create the file with volume mounts for services that change frequently:
 
 ```yaml
-# compose/fullchain-dev.yaml
+# compose/fullchain-dev-tcp.yaml
 # Dev variant: mounts pre-built binaries for fast iteration.
-# Use with: docker compose -f compose/fullchain-dev.yaml up
+# Use with: docker compose -f compose/fullchain-dev-tcp.yaml up
 #
 # Services that change frequently get volume mounts (biz, http-gateway, aaa-gateway).
 # Static services (nrf-mock, udm-mock, aaa-sim, redis, postgres) build normally.
@@ -267,8 +267,8 @@ volumes:
 - [ ] **Step 3: Commit**
 
 ```bash
-git add compose/fullchain-dev.yaml
-git commit -m "feat: add compose/fullchain-dev.yaml with binary volume mounts"
+git add compose/fullchain-dev-tcp.yaml
+git commit -m "feat: add compose/fullchain-dev-tcp.yaml with binary volume mounts"
 ```
 
 ---
@@ -295,8 +295,8 @@ Add this new target:
 test-fullchain-fast: gen-certs ## Fast dev loop: binary mount pattern for ~15-30s iteration
 	@echo "$(YELLOW)Starting fullchain docker compose stack (fast mode)...$(NC)"
 	@echo "$(YELLOW)Using pre-built binaries from bin/ with volume mounts...$(NC)"
-	docker compose -f compose/fullchain-dev.yaml build
-	docker compose -f compose/fullchain-dev.yaml up -d --quiet-pull
+	docker compose -f compose/fullchain-dev-tcp.yaml build
+	docker compose -f compose/fullchain-dev-tcp.yaml up -d --quiet-pull
 	@sleep 15
 	E2E_DOCKER_MANAGED=1 \
 	E2E_TLS_CA=/tmp/e2e-tls/server.crt \
@@ -306,15 +306,15 @@ test-fullchain-fast: gen-certs ## Fast dev loop: binary mount pattern for ~15-30
 	FULLCHAIN_UDM_URL=http://localhost:8083 \
 	$(GOTEST) -tags=e2e -v -count=1 -timeout=10m \
 		./test/e2e/fullchain/... \
-		|| { docker compose -f compose/fullchain-dev.yaml down --remove-orphans; exit 1; }
+		|| { docker compose -f compose/fullchain-dev-tcp.yaml down --remove-orphans; exit 1; }
 	@echo "$(YELLOW)Tearing down fullchain stack...$(NC)"
-	docker compose -f compose/fullchain-dev.yaml down --remove-orphans
+	docker compose -f compose/fullchain-dev-tcp.yaml down --remove-orphans
 	@echo "$(GREEN)Fullchain tests complete (fast mode)$(NC)"
 
 .PHONY: test-fullchain-no-build
 test-fullchain-no-build: ## Run tests with existing images (skip build, ~5s startup)
 	@echo "$(YELLOW)Starting fullchain stack (no build)...$(NC)"
-	docker compose -f compose/fullchain-dev.yaml up -d
+	docker compose -f compose/fullchain-dev-tcp.yaml up -d
 	@sleep 15
 	E2E_DOCKER_MANAGED=1 \
 	E2E_TLS_CA=/tmp/e2e-tls/server.crt \
@@ -324,9 +324,9 @@ test-fullchain-no-build: ## Run tests with existing images (skip build, ~5s star
 	FULLCHAIN_UDM_URL=http://localhost:8083 \
 	$(GOTEST) -tags=e2e -v -count=1 -timeout=10m \
 		./test/e2e/fullchain/... \
-		|| { docker compose -f compose/fullchain-dev.yaml down --remove-orphans; exit 1; }
+		|| { docker compose -f compose/fullchain-dev-tcp.yaml down --remove-orphans; exit 1; }
 	@echo "$(YELLOW)Tearing down fullchain stack...$(NC)"
-	docker compose -f compose/fullchain-dev.yaml down --remove-orphans
+	docker compose -f compose/fullchain-dev-tcp.yaml down --remove-orphans
 	@echo "$(GREEN)Fullchain tests complete (no-build mode)$(NC)"
 ```
 
@@ -509,11 +509,11 @@ test-fullchain-fast: gen-certs ## Fast dev loop...
 test-fullchain-no-build: ## Run tests with existing images...
 ```
 
-- [ ] **Step 2: Verify compose/fullchain-dev.yaml syntax**
+- [ ] **Step 2: Verify compose/fullchain-dev-tcp.yaml syntax**
 
 Run:
 ```bash
-docker compose -f compose/fullchain-dev.yaml config --quiet
+docker compose -f compose/fullchain-dev-tcp.yaml config --quiet
 ```
 Expected: No output (valid YAML)
 

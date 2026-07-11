@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace `compose/fullchain-dev.yaml` with static-IP variants on `172.0.3.0/24`, expose the Diameter transport (tcp/sctp) via config, and add Go-based E2E tests that verify Diameter CER/CEA, DWR/DWA, DER/DEA, and RADIUS Access-Request/Access-Accept against the running stack.
+**Goal:** Replace the legacy `compose/fullchain-dev.yaml` (service-name DNS, default bridge) with static-IP variants on `172.0.3.0/24` (`compose/fullchain-dev-{base,tcp,sctp}.yaml`), expose the Diameter transport (tcp/sctp) via config, and add Go-based E2E tests that verify Diameter CER/CEA, DWR/DWA, DER/DEA, and RADIUS Access-Request/Access-Accept against the running stack.
 
 **Architecture:** Compose is split into three layers: `compose/commons.yaml` (shared bridge network + `x-` extension fragments), `compose/fullchain-dev-base.yaml` (services wired to static IPv4 addresses via `<<: *common-fragment`), and a thin variant overlay (`fullchain-dev-tcp.yaml` or `fullchain-dev-sctp.yaml`) that selects the Diameter transport and the named network. The AAA Gateway's `diamForwarder` already accepts a `network` argument via `df.network`; we thread a `DiameterTransport` config field through `internal/config.AAAgwConfig` → `internal/aaa/gateway.Config` → `newDiamForwarder`. E2E tests live in a new package `test/e2e/fullchain_dev_diameter_radius/` with `//go:build e2e` and self-manage compose up/down per test using `os/exec` against the two static-IP overlays.
 
@@ -43,7 +43,7 @@
 
 | Path | Reason |
 |------|--------|
-| `compose/fullchain-dev.yaml` | Superseded by `fullchain-dev-tcp.yaml` (TCP variant becomes the new default for existing `make test-fullchain-fast` callers; per spec §5.1). |
+| `compose/fullchain-dev.yaml` (legacy dev variant) | Superseded by `fullchain-dev-tcp.yaml` (TCP variant becomes the new default for existing `make test-fullchain-fast` callers; per spec §5.1). |
 
 ---## Tasks
 
@@ -819,7 +819,7 @@ git commit -m "feat(compose): add fullchain-dev-sctp.yaml variant overlay"
 
 ---
 
-### Task 8: Delete legacy `compose/fullchain-dev.yaml`
+### Task 8: Delete legacy `compose/fullchain-dev.yaml` (the dev variant, pre-TCP/SCTP split)
 
 **Files:**
 - Delete: `compose/fullchain-dev.yaml`
@@ -841,7 +841,7 @@ Run: `grep -rn "fullchain-dev.yaml" --include="*.go" --include="*.yaml" --includ
 Expected: no matches in non-doc files. If `Makefile` still references it, update those lines to `fullchain-dev-tcp.yaml`.
 
 For example, in `Makefile`, replace:
-- `compose/fullchain-dev.yaml` → `compose/fullchain-dev-tcp.yaml`
+- `compose/fullchain-dev-tcp.yaml` → `compose/fullchain-dev-tcp.yaml`
 in the `test-fullchain`, `test-fullchain-fast`, `test-fullchain-no-build`, `test-integration` targets (around lines 197, 221, 234, 236, 248, 249, 262, 264, 271, 282, 284).
 
 - [ ] **Step 4: Build and run unit tests**
@@ -2093,7 +2093,7 @@ git commit -m "test(e2e): add RADIUS Access-Request success and bad-secret tests
 | §5.1 compose/fullchain-dev-base.yaml | Task 5 |
 | §5.1 compose/fullchain-dev-tcp.yaml | Task 6 |
 | §5.1 compose/fullchain-dev-sctp.yaml | Task 7 |
-| §5.1 compose/fullchain-dev.yaml (delete) | Task 8 |
+| §5.1 compose/fullchain-dev-tcp.yaml (delete) | Task 8 |
 | §5.1 compose/configs/aaa-gateway.yaml | Task 10 |
 | §5.1 compose/configs/biz.yaml | Task 10 |
 | §5.1 internal/aaa/gateway/diameter_forward.go | Task 2 |

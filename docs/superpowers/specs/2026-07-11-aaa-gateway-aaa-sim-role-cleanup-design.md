@@ -94,7 +94,7 @@ Code changes:
 - `freeradius/clients.conf`
 - `freeradius/eap.conf`
 
-Verified that no CI or conformance test references this stack. The conformance tests for AIW use `compose/fullchain-dev.yaml` and `scripts/curl-aiw-tests.sh`.
+Verified that no CI or conformance test references this stack. The conformance tests for AIW use `compose/fullchain-dev-tcp.yaml` and `scripts/curl-aiw-tests.sh`.
 
 ### 3.3 Issue C — Delete orphan duplicate
 
@@ -103,7 +103,7 @@ Verified that no CI or conformance test references this stack. The conformance t
 Confirmed unreferenced by:
 - `grep -r "compose/mock_aaa_s" .` — no results
 - `Dockerfile.mock-aaa-s:16` — copies `bin/aaa-sim` (not the duplicate)
-- `compose/fullchain-dev.yaml` — uses `Dockerfile.aaa-sim`, not the duplicate
+- `compose/fullchain-dev-tcp.yaml` — uses `Dockerfile.aaa-sim`, not the duplicate
 
 The legitimate server is `test/aaa_sim/`, built via `cmd/aaa-sim/`.
 
