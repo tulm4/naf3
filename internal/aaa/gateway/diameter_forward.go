@@ -914,3 +914,18 @@ func (df *diamForwarder) extractAuthCtxID(m *diam.Message) string {
 	}
 	return ""
 }
+
+// extractSessionIDFromMsg extracts the Session-Id AVP from a decoded diam.Message.
+func extractSessionIDFromMsg(m *diam.Message) string {
+	for _, avp := range m.AVP {
+		if avp.Code == 263 { // Session-Id AVP code
+			if os, ok := avp.Data.(datatype.UTF8String); ok {
+				return string(os)
+			}
+			if os, ok := avp.Data.(datatype.OctetString); ok {
+				return string(os)
+			}
+		}
+	}
+	return ""
+}
