@@ -1,3 +1,6 @@
+//go:build e2e
+// +build e2e
+
 // Package fullchain_dev_diameter_radius provides E2E tests for the static-IP
 // fullchain compose environment, verifying Diameter (TCP/SCTP) and RADIUS
 // transport between aaa-gateway and aaa-sim.
