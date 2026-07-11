@@ -9,25 +9,27 @@ server:
   idleTimeout: 120s
 
 redis:
-  addr: "${REDIS_ADDR:-localhost:6379}"
+  addr: "${REDIS_ADDR:-172.0.3.10:6379}"
   password: ""
   db: 0
   poolSize: 50
 
 aaaGateway:
-  bizServiceUrl: "${BIZ_URL:-http://localhost:8080}"
+  bizServiceUrl: "${BIZ_URL:-http://172.0.3.16:8080}"
   listenRadius: ":1812"
   # Diameter client-initiated config (see PLAN §2.3.5):
   # Required for DER/DEA forwarding to AAA-S. Without these, DIAMETER transport silently fails.
-  diameterServerAddress: "aaa-sim:3868"   # AAA-S address (compose service name)
+  diameterServerAddress: "172.0.3.14:3868"  # AAA-S address (static IP per spec §4.1)
   diameterRealm: "operator.com"                     # AAA-S realm (Origin-Realm in CER)
   diameterHost: "nssaa-gw.operator.com"            # Origin-Host for CER (AAA Gateway identity)
+  # "tcp" (default) or "sctp"; env override DIAMETER_TRANSPORT (RFC 6733 §3).
+  diameterTransport: "${DIAMETER_TRANSPORT:-tcp}"
   # RADIUS client-initiated config:
   # Required for Access-Request forwarding to AAA-S. Disabled if empty.
-  radiusServerAddress: "aaa-sim:1812"      # AAA-S RADIUS address (compose service name)
+  radiusServerAddress: "172.0.3.14:1812"     # AAA-S RADIUS address (static IP per spec §4.1)
   radiusSharedSecret: "secret"                      # Shared secret with AAA-S
   redisMode: "standalone"
-  vipAddress: "10.1.100.50"
+  vipAddress: "172.0.3.15"                          # Equals the container's static IP (spec §4.2)
 
 logging:
   level: "info"

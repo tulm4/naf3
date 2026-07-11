@@ -12,7 +12,7 @@ server:
   idleTimeout: 120s
 
 database:
-  host: "${POSTGRES_HOST:-localhost}"
+  host: "${POSTGRES_HOST:-172.0.3.11}"
   port: 5432
   name: "nssaa"
   user: "nssaa"
@@ -23,7 +23,7 @@ database:
   sslMode: "disable"
 
 redis:
-  addr: "${REDIS_ADDR:-localhost:6379}"
+  addr: "${REDIS_ADDR:-172.0.3.10:6379}"
   password: ""
   db: 0
   poolSize: 50
@@ -54,12 +54,12 @@ metrics:
 
 # NRF integration — REQ-01, REQ-02, REQ-03
 nrf:
-  baseURL: "${NRF_URL:-http://localhost:8081}"
+  baseURL: "${NRF_URL:-http://172.0.3.12:8081}"
   discoverTimeout: 5s
 
 # UDM integration — REQ-04, REQ-05
 udm:
-  baseURL: "${UDM_URL:-http://localhost:8082}"
+  baseURL: "${UDM_URL:-http://172.0.3.13:8081}"
   timeout: 10s
 
 # AUSF integration — REQ-08
@@ -68,7 +68,7 @@ ausf:
   timeout: 10s
 
 biz:
-  aaaGatewayUrl: "${AAA_GW_URL:-http://localhost:9090}"
+  aaaGatewayUrl: "${AAA_GW_URL:-http://172.0.3.15:9090}"
   # mTLS between Biz Pod and AAA Gateway
   useMTLS: false
   tlsCert: "/certs/biz-to-aaa.crt"
