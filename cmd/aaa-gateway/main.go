@@ -36,27 +36,24 @@ func main() {
 
 	slog.Info("starting NSSAAF AAA Gateway",
 		"version", cfg.Version,
-		"listen_radius", cfg.AAAgw.ListenRADIUS,    // server-initiated inbound
-		"listen_diameter", cfg.AAAgw.ListenDIAMETER, // server-initiated inbound
+		"listen_radius", cfg.AAAgw.ListenRADIUS, // server-initiated inbound
 	)
 
 	gw := gateway.New(gateway.Config{
 		BizServiceURL:         cfg.AAAgw.BizServiceURL,
 		RedisAddr:             cfg.Redis.Addr,
 		ListenRADIUS:          cfg.AAAgw.ListenRADIUS,
-		ListenDIAMETER:        cfg.AAAgw.ListenDIAMETER,
 		AAAGatewayURL:         "http://" + cfg.Server.Addr,
 		Logger:                logger,
 		Version:               cfg.Version,
-		DiameterProtocol:      cfg.AAAgw.DiameterProtocol,
 		DiameterServerAddress: cfg.AAAgw.DiameterServerAddress,
-		DiameterRealm:        cfg.AAAgw.DiameterRealm,
-		DiameterHost:         cfg.AAAgw.DiameterHost,
-		RadiusServerAddress:  cfg.AAAgw.RadiusServerAddress,
-		RadiusSharedSecret:   cfg.AAAgw.RadiusSharedSecret,
-		RedisMode:            cfg.AAAgw.RedisMode,
+		DiameterRealm:         cfg.AAAgw.DiameterRealm,
+		DiameterHost:          cfg.AAAgw.DiameterHost,
+		RadiusServerAddress:   cfg.AAAgw.RadiusServerAddress,
+		RadiusSharedSecret:    cfg.AAAgw.RadiusSharedSecret,
+		RedisMode:             cfg.AAAgw.RedisMode,
 		VIPAddress:            cfg.AAAgw.VIPAddress,
-		DLQ:                  cfg.AAAgw.DLQ,
+		DLQ:                   cfg.AAAgw.DLQ,
 	})
 
 	// Expose HTTP endpoints for Biz Pod communication
