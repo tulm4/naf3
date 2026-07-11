@@ -46,19 +46,12 @@ func isVIPOwner(ctx context.Context, vipAddress string) bool {
 
 // Config holds AAA Gateway configuration.
 type Config struct {
-	BizServiceURL    string // http://svc-nssaa-biz:8080
-	RedisAddr        string // Redis address for pub/sub and session correlation
-	ListenRADIUS     string // ":1812" — UDP listen address for RADIUS
-	ListenDIAMETER   string // ":3868" — listen address for Diameter (TCP, SCTP, or TCP+TLS)
-	AAAGatewayURL    string // self-referential for health checks
-	Logger           *slog.Logger
-	Version          string // Injected at build time
-	DiameterProtocol string // "tcp", "tcp+tls", or "sctp"
-
-	// Diameter TLS configuration (for tcp+tls protocol)
-	TLSCert    string // Path to TLS certificate file
-	TLSKey     string // Path to TLS private key file
-	TLSCACert  string // Path to CA certificate for client auth (optional)
+	BizServiceURL string // http://svc-nssaa-biz:8080
+	RedisAddr     string // Redis address for pub/sub and session correlation
+	ListenRADIUS  string // ":1812" — UDP listen address for RADIUS
+	AAAGatewayURL string // self-referential for health checks
+	Logger        *slog.Logger
+	Version       string // Injected at build time
 
 	// Diameter client-initiated config (PLAN §2.3.5):
 	// Required for DER/DEA forwarding to AAA-S.
@@ -104,9 +97,8 @@ type Gateway struct {
 	version       string
 	logger        *slog.Logger
 
-	registry       *ServerInitiatedRegistry // tracks pending server-initiated requests
+	registry        *ServerInitiatedRegistry // tracks pending server-initiated requests
 	radiusHandler   *RadiusHandler
-	diameterHandler *DiameterHandler
 	radiusForwarder *radiusForwarder // RADIUS client (client-initiated path)
 	diamForwarder   *diamForwarder   // Diameter client (client-initiated path)
 
@@ -142,12 +134,12 @@ func New(cfg Config) *Gateway {
 	// It wraps EAP payload in Access-Request with EAP-Message and Message-Authenticator.
 	if cfg.RadiusServerAddress != "" {
 		g.radiusForwarder = newRadiusForwarder(RadiusForwarderConfig{
-			ServerAddress:   cfg.RadiusServerAddress,
+			ServerAddress:  cfg.RadiusServerAddress,
 			ServerPort:     1812,
-			SharedSecret:    cfg.RadiusSharedSecret,
-			Timeout:         cfg.InternalComm.Native.Radius.Timeout,
-			MaxRetries:      cfg.InternalComm.Native.Radius.MaxRetries,
-			ResponseWindow:  cfg.InternalComm.Native.Radius.ResponseWindow,
+			SharedSecret:   cfg.RadiusSharedSecret,
+			Timeout:        cfg.InternalComm.Native.Radius.Timeout,
+			MaxRetries:     cfg.InternalComm.Native.Radius.MaxRetries,
+			ResponseWindow: cfg.InternalComm.Native.Radius.ResponseWindow,
 		}, cfg.Logger)
 	}
 
@@ -155,35 +147,20 @@ func New(cfg Config) *Gateway {
 	// This maintains CER/CEA handshake and DWR/DWA watchdog to AAA-S.
 	g.diamForwarder = newDiamForwarder(
 		cfg.DiameterServerAddress,
-		cfg.DiameterProtocol,
+		"tcp",
 		cfg.DiameterHost,
 		cfg.DiameterRealm,
 		cfg.DiameterServerAddress, // destHost: use server address as host identifier
-		cfg.DiameterRealm,        // destRealm
+		cfg.DiameterRealm,         // destRealm
 		&diamForwarderConfig{
 			AuthRequestType:   cfg.DiameterAuthRequestType,
 			AuthApplicationID: cfg.DiameterAuthApplicationID,
 		},
 		cfg.Logger,
-	)
-
-	g.diameterHandler = NewDiameterHandler(
-		cfg.Logger,
 		g.forwardToBiz,
-		cfg.Version,
+		g.registry,
 		cfg.BizServiceURL,
 		g.bizHTTPClient,
-		g.diamForwarder,
-		g.registry,
-		cfg.DiameterHost,
-		cfg.DiameterRealm,
-		&DiameterHandlerConfig{
-			AllowedHosts:  cfg.DiameterAllowedHosts,
-			AllowedRealms: cfg.DiameterAllowedRealms,
-			TLSCert:       cfg.TLSCert,
-			TLSKey:        cfg.TLSKey,
-			TLSCACert:     cfg.TLSCACert,
-		},
 	)
 
 	return g
@@ -199,17 +176,6 @@ func (g *Gateway) startListeners(ctx context.Context) error {
 		go func() {
 			defer g.wg.Done()
 			g.radiusHandler.Listen(g.ctx, g.cfg.ListenRADIUS)
-		}()
-	}
-
-	// Start Diameter listener (TCP or SCTP)
-	if g.cfg.ListenDIAMETER != "" {
-		g.wg.Add(1)
-		go func() {
-			defer g.wg.Done()
-			if err := g.diameterHandler.Listen(g.ctx, g.cfg.ListenDIAMETER, g.cfg.DiameterProtocol); err != nil {
-				g.logger.Error("diameter listener failed", "error", err)
-			}
 		}()
 	}
 
@@ -496,9 +462,9 @@ func (g *Gateway) selectTargetBizURL(ctx context.Context, podID string) (string,
 }
 
 const (
-	serverInitMaxRetries   = 3
-	serverInitRetryBase    = 1 * time.Second
-	serverInitRetryMax     = 3 * time.Second
+	serverInitMaxRetries = 3
+	serverInitRetryBase  = 1 * time.Second
+	serverInitRetryMax   = 3 * time.Second
 )
 
 // forwardToBiz sends a server-initiated message to the Biz Pod via HTTP POST.
@@ -518,11 +484,11 @@ func (g *Gateway) forwardToBiz(ctx context.Context, sessionID string, transportT
 	// 2. Build the request body once
 	req := &proto.AaaServerInitiatedRequest{
 		Version:       g.version,
-		SessionID:    sessionID,
-		AuthCtxID:    entry.AuthCtxID,
+		SessionID:     sessionID,
+		AuthCtxID:     entry.AuthCtxID,
 		TransportType: proto.TransportType(transportType),
-		MessageType:  proto.MessageType(messageType),
-		Payload:      raw,
+		MessageType:   proto.MessageType(messageType),
+		Payload:       raw,
 	}
 	body, err := json.Marshal(req)
 	if err != nil {

@@ -76,9 +76,8 @@ func TestStartVIPAware_DevModeNoVIP(t *testing.T) {
 	// When VIPAddress is empty, should start immediately without polling
 	gw := &Gateway{
 		cfg: Config{
-			VIPAddress:     "",
-			ListenRADIUS:   "",
-			ListenDIAMETER: "",
+			VIPAddress:   "",
+			ListenRADIUS: "",
 		},
 		logger: slog.New(slog.NewTextHandler(os.Stdout, nil)),
 		wg:     sync.WaitGroup{},
