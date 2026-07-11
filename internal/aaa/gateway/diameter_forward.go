@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -71,6 +72,13 @@ type diamForwarder struct {
 	logger      *slog.Logger
 	connected   bool
 
+	// Server-initiated inbound (handlers live on df.machine, fire on the
+	// forwarder's outbound socket — TCP is bidirectional, RFC 6733 §5.6).
+	forwardToBiz func(ctx context.Context, sessionID string, transportType string, messageType string, raw []byte)
+	registry     *ServerInitiatedRegistry
+	bizURL       string
+	httpClient   *http.Client
+
 	// Protocol configuration (GAP-AAA-04, GAP-DIA-02, GAP-DIA-03)
 	cfg *diamForwarderConfig
 
@@ -96,8 +104,21 @@ type diamForwarder struct {
 // originHost/originRealm are the AAA Gateway's identity (Origin-Host in CER).
 // destHost/destRealm are the AAA-S identity (Destination-Host in DER).
 // cfg contains protocol configuration parameters.
-// Spec: RFC 6733 §5.3 (CER/CEA), RFC 4072 (DER/DEA)
-func newDiamForwarder(addr, network, originHost, originRealm, destHost, destRealm string, cfg *diamForwarderConfig, logger *slog.Logger) *diamForwarder {
+// forwardToBiz is the callback used by server-initiated inbound handlers (ASR/RAR/STR)
+// to deliver inbound Diameter server messages to the Biz Pod via the registry/HTTP path.
+// registry tracks pending server-initiated requests until Biz Pod acknowledges.
+// bizURL is the HTTP base URL of the Biz service (used by server-initiated handlers).
+// httpClient is the HTTP client used by server-initiated handlers to call Biz.
+// Spec: RFC 6733 §5.3 (CER/CEA), RFC 4072 (DER/DEA), RFC 6733 §5.6 (TCP bidirectional)
+func newDiamForwarder(
+	addr, network, originHost, originRealm, destHost, destRealm string,
+	cfg *diamForwarderConfig,
+	logger *slog.Logger,
+	forwardToBiz func(ctx context.Context, sessionID string, transportType string, messageType string, raw []byte),
+	registry *ServerInitiatedRegistry,
+	bizURL string,
+	httpClient *http.Client,
+) *diamForwarder {
 	// Apply defaults for optional config fields (GAP-AAA-04, GAP-DIA-02, GAP-DIA-03)
 	if cfg.AuthRequestType == 0 {
 		cfg.AuthRequestType = 2 // AUTHORIZE_AUTHENTICATE
@@ -107,15 +128,19 @@ func newDiamForwarder(addr, network, originHost, originRealm, destHost, destReal
 	}
 
 	df := &diamForwarder{
-		addr:        addr,
-		network:     network,
-		originHost:  originHost,
-		originRealm: originRealm,
-		destHost:    destHost,
-		destRealm:   destRealm,
-		logger:      logger,
-		cfg:         cfg,
-		pending:     make(map[uint32]chan *diam.Message),
+		addr:         addr,
+		network:      network,
+		originHost:   originHost,
+		originRealm:  originRealm,
+		destHost:     destHost,
+		destRealm:    destRealm,
+		logger:       logger,
+		cfg:          cfg,
+		pending:      make(map[uint32]chan *diam.Message),
+		forwardToBiz: forwardToBiz,
+		registry:     registry,
+		bizURL:       bizURL,
+		httpClient:   httpClient,
 	}
 
 	df.settings = &sm.Settings{
