@@ -8,11 +8,16 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/fiorix/go-diameter/v4/diam"
+	"github.com/fiorix/go-diameter/v4/diam/avp"
+	"github.com/fiorix/go-diameter/v4/diam/datatype"
 	"github.com/fiorix/go-diameter/v4/diam/dict"
+	"github.com/fiorix/go-diameter/v4/diam/sm/smpeer"
 )
 
 // DefaultConfig returns a default diamForwarderConfig with spec-compliant values.
@@ -450,10 +455,14 @@ func TestDiamForwarder_ConnectionStats_ConcurrentAccess(t *testing.T) {
 type fakeNotifierConn struct {
 	notifyCh chan struct{}
 	closed   int32
+	ctxMu    sync.RWMutex
+	ctx      context.Context
 }
 
 func newFakeNotifierConn() *fakeNotifierConn {
-	return &fakeNotifierConn{notifyCh: make(chan struct{})}
+	f := &fakeNotifierConn{notifyCh: make(chan struct{})}
+	f.ctx = context.Background()
+	return f
 }
 
 func (f *fakeNotifierConn) CloseNotify() <-chan struct{} { return f.notifyCh }
@@ -474,9 +483,15 @@ func (f *fakeNotifierConn) LocalAddr() net.Addr       { return &net.TCPAddr{IP: 
 func (f *fakeNotifierConn) RemoteAddr() net.Addr      { return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 3869} }
 func (f *fakeNotifierConn) TLS() *tls.ConnectionState { return nil }
 func (f *fakeNotifierConn) Dictionary() *dict.Parser   { return dict.Default }
-func (f *fakeNotifierConn) Context() context.Context  { return context.Background() }
+func (f *fakeNotifierConn) Context() context.Context {
+	f.ctxMu.RLock()
+	defer f.ctxMu.RUnlock()
+	return f.ctx
+}
 func (f *fakeNotifierConn) SetContext(ctx context.Context) {
-	_ = ctx
+	f.ctxMu.Lock()
+	defer f.ctxMu.Unlock()
+	f.ctx = ctx
 }
 func (f *fakeNotifierConn) Connection() net.Conn { return nil }
 
@@ -580,5 +595,71 @@ func TestDiamForwarder_GetConn_AfterDisconnect_SyncReconnectAttempt(t *testing.T
 
 	if _, err := df.getConn(); err == nil {
 		t.Fatal("expected error from getConn when server unreachable, got nil")
+	}
+}
+
+// TestDiamForwarder_ASR_FiresOnForwarderMachine verifies the architectural
+// migration: an inbound ASR on the gateway's outbound TCP socket fires
+// handleASR (now registered on diamForwarder.machine, not on a separate
+// DiameterHandler state machine bound to an inbound listener).
+func TestDiamForwarder_ASR_FiresOnForwarderMachine(t *testing.T) {
+	registry := NewServerInitiatedRegistry(30 * time.Second)
+	var forwarded []byte
+	var forwardedMu sync.Mutex
+	forwardToBiz := func(ctx context.Context, sessionID, transportType, messageType string, raw []byte) {
+		forwardedMu.Lock()
+		forwarded = raw
+		forwardedMu.Unlock()
+		resp := &ServerInitiatedResponse{ResultCode: 2001}
+		registry.Complete(sessionID, "ASR", resp)
+	}
+
+	df := newDiamForwarder(
+		"127.0.0.1:1",
+		"tcp",
+		"aaa-gateway.example.com",
+		"example.com",
+		"aaa-server.example.com",
+		"example.com",
+		DefaultConfig(),
+		slog.Default(),
+		forwardToBiz,
+		registry,
+		"http://biz:8080",
+		nil,
+	)
+
+	fake := newFakeNotifierConn()
+	// The state machine's handshakeOK wrapper only invokes non-CER/CEA handlers
+	// when a peer is associated with the connection context. Synthesize that
+	// peer so the ASR handler actually fires.
+	fake.SetContext(smpeer.NewContext(fake.Context(), &smpeer.Metadata{
+		OriginHost:   datatype.DiameterIdentity("aaa-server.example.com"),
+		OriginRealm:  datatype.DiameterIdentity("example.com"),
+		Applications: []uint32{df.cfg.AuthApplicationID},
+	}))
+
+	m := diam.NewRequest(diam.AbortSession, df.cfg.AuthApplicationID, dict.Default)
+	_, _ = m.NewAVP(avp.SessionID, avp.Mbit, 0, datatype.UTF8String("sess-1"))
+	m.Header.HopByHopID = 1
+	m.Header.EndToEndID = 2
+
+	df.machine.ServeDIAM(fake, m)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		forwardedMu.Lock()
+		done := len(forwarded) > 0
+		forwardedMu.Unlock()
+		if done {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	forwardedMu.Lock()
+	forwardedLen := len(forwarded)
+	forwardedMu.Unlock()
+	if forwardedLen == 0 {
+		t.Fatal("forwardToBiz was never called by ASR handler")
 	}
 }
