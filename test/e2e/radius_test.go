@@ -29,10 +29,10 @@ const (
 	attrEAPMessage  = 79
 	attrMessageAuth = 80
 
-	// sharedSecret matches compose/configs/aaa-gateway.yaml (RadiusSharedSecret).
-	// The aaa-sim container also reads AAA_SIM_RADIUS_SECRET; in default config
-	// it is "secret".
-	radiusSharedSecret = "secret"
+	// sharedSecret matches aaa-sim default (test/aaa_sim/mode.go line 73:
+	// "testing123" unless AAA_SIM_SECRET env var overrides it). The Makefile
+	// does NOT set AAA_SIM_SECRET, so "testing123" is the effective shared secret.
+	radiusSharedSecret = "testing123"
 )
 
 // buildRadiusAccessRequest constructs a minimal RADIUS Access-Request with
