@@ -1,0 +1,44 @@
+# compose/fullchain-dev-sctp.yaml
+# SCTP variant of the static-IP fullchain overlay.
+# Sets DIAMETER_TRANSPORT=sctp, adds cap_add NET_ADMIN, installs lksctp-tools
+# at image build time, and names the network nssaa_fullchain_sctp so it does
+# not collide with the TCP variant.
+#
+# Requires the host kernel to support SCTP. On non-Linux hosts (Docker Desktop
+# on macOS/Windows), the container will fail to start SCTP listeners and the
+# e2e test will skip via /proc/net/protocols pre-check.
+#
+# Usage:
+#   docker compose -f compose/fullchain-dev-sctp.yaml up -d --wait
+#   docker compose -f compose/fullchain-dev-sctp.yaml down -v
+
+include:
+  - path: compose/fullchain-dev-base.yaml
+
+services:
+  aaa-sim:
+    build:
+      args:
+        INSTALL_SCTP: "1"
+    cap_add:
+      - NET_ADMIN
+    environment:
+      AAA_SIM_DIAMETER_TRANSPORT: "sctp"
+
+  aaa-gateway:
+    build:
+      args:
+        INSTALL_SCTP: "1"
+    cap_add:
+      - NET_ADMIN
+    environment:
+      DIAMETER_TRANSPORT: "sctp"
+
+networks:
+  default:
+    name: nssaa_fullchain_sctp
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.0.3.0/24
+          gateway: 172.0.3.1
