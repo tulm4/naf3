@@ -1,0 +1,86 @@
+# compose/commons.yaml
+# Shared fragments for the fullchain-dev-{tcp,sctp} overlays.
+# This file defines the static bridge network plus reusable YAML anchors
+# (image, ports, env blocks) consumed by compose/fullchain-dev-base.yaml.
+# Per spec §4.1: subnet 172.0.3.0/24, gateway 172.0.3.1.
+#
+# This file is NOT used directly by `docker compose up`; the user runs
+# one of the variant overlays (fullchain-dev-tcp.yaml or fullchain-dev-sctp.yaml).
+
+x-common-image-anchors: &common-image-anchors
+  redis: &redis-image
+    image: redis:7-alpine
+  postgres: &postgres-image
+    image: postgres:16-alpine
+  nrf-mock: &nrf-mock-image
+    build:
+      context: ..
+      dockerfile: Dockerfile.nrf-mock
+    image: nssaaf-nrf-mock:latest
+  udm-mock: &udm-mock-image
+    build:
+      context: ..
+      dockerfile: Dockerfile.udm-mock
+    image: nssaaf-udm-mock:latest
+  aaa-sim: &aaa-sim-image
+    build:
+      context: ..
+      dockerfile: Dockerfile.aaa-sim
+      args:
+        INSTALL_SCTP: "${INSTALL_SCTP:-0}"
+    image: nssaaf-aaa-sim:latest
+  aaa-gateway: &aaa-gateway-image
+    build:
+      context: ..
+      dockerfile: Dockerfile.aaa-gateway
+      args:
+        INSTALL_SCTP: "${INSTALL_SCTP:-0}"
+    image: nssaaf-aaa-gw:latest
+  biz: &biz-image
+    build:
+      context: ..
+      dockerfile: Dockerfile.biz
+    image: nssaaf-biz:latest
+  http-gateway: &http-gateway-image
+    build:
+      context: ..
+      dockerfile: Dockerfile.http-gateway
+    image: nssaaf-http-gw:latest
+  nrm: &nrm-image
+    build:
+      context: ..
+      dockerfile: Dockerfile.nrm
+    image: nssaaf-nrm:latest
+
+x-common-port-fragments: &common-port-fragments
+  redis-ports: &redis-ports
+    ports: ["6379:6379"]
+  postgres-ports: &postgres-ports
+    ports: ["5432:5432"]
+  nrf-mock-ports: &nrf-mock-ports
+    ports: ["8082:8081"]
+  udm-mock-ports: &udm-mock-ports
+    ports: ["8083:8081"]
+  aaa-sim-ports: &aaa-sim-ports
+    ports: ["18120:1812", "38680:3868"]
+  aaa-gateway-ports: &aaa-gateway-ports
+    ports: ["9090:9090", "18121:1812/udp", "38681:3868"]
+  biz-ports: &biz-ports
+    ports: ["8080:8080"]
+  http-gateway-ports: &http-gateway-ports
+    ports: ["8443:8443"]
+  nrm-ports: &nrm-ports
+    ports: ["8084:8081"]
+
+# Default named bridge for the TCP variant.
+# The SCTP overlay redefines this with a different `name:` so the two
+# compose projects can coexist on the same host without subnet collisions.
+networks:
+  default:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: nssaa_fullchain_tcp
+    ipam:
+      config:
+        - subnet: 172.0.3.0/24
+          gateway: 172.0.3.1
