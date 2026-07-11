@@ -8,7 +8,7 @@
 #   docker compose -f compose/fullchain-dev-tcp.yaml down -v
 
 include:
-  - path: compose/fullchain-dev-base.yaml
+  - path: fullchain-dev-base.yaml
 
 services:
   aaa-sim:
