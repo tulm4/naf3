@@ -253,6 +253,31 @@ func TestDiamForwarder_ZeroAuthApplicationId_DefaultsToDiameterEAP(t *testing.T)
 	}
 }
 
+func TestNewDiamForwarder_DefaultsTransportToTCP(t *testing.T) {
+	// Empty config — Transport omitted. After newDiamForwarder returns,
+	// the defaults-application block at the top of the constructor must
+	// populate cfg.Transport with "tcp".
+	cfg := &diamForwarderConfig{}
+	df := newDiamForwarder(
+		"localhost:3868",
+		"", // transport arg intentionally empty
+		"nssaa-gw",
+		"operator.com",
+		"localhost",
+		"operator.com",
+		cfg,
+		slog.Default(),
+		nil, // forwardToBiz — tests don't exercise server-initiated path
+		nil, // registry
+	)
+	if df == nil {
+		t.Fatal("newDiamForwarder returned nil")
+	}
+	if cfg.Transport != "tcp" {
+		t.Errorf("default Transport = %q; want %q", cfg.Transport, "tcp")
+	}
+}
+
 func TestDiamForwarder_GetConnectionStats(t *testing.T) {
 	df := newDiamForwarder(
 		"localhost:3868",

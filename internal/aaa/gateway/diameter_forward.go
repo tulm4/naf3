@@ -44,6 +44,10 @@ type ConnectionStats struct {
 // diamForwarderConfig holds configuration for the Diameter forwarder.
 // Spec: RFC 6733, RFC 4072, TS 29.561 Ch.17
 type diamForwarderConfig struct {
+	// Transport is the dial network passed to sm.Client.DialNetwork.
+	// Valid values: "tcp" (default) or "sctp".
+	// Spec: RFC 6733 §3.
+	Transport string
 	// AuthRequestType is the AVP 406 value for DER messages.
 	// Default: 2 (AUTHORIZE_AUTHENTICATE)
 	// Spec: RFC 4072 §3.1
@@ -115,6 +119,9 @@ func newDiamForwarder(
 	registry *ServerInitiatedRegistry,
 ) *diamForwarder {
 	// Apply defaults for optional config fields (GAP-AAA-04, GAP-DIA-02, GAP-DIA-03)
+	if cfg.Transport == "" {
+		cfg.Transport = "tcp"
+	}
 	if cfg.AuthRequestType == 0 {
 		cfg.AuthRequestType = 2 // AUTHORIZE_AUTHENTICATE
 	}
