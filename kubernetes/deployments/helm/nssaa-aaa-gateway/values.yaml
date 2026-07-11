@@ -12,8 +12,6 @@ config:
   bizServiceUrl: http://svc-nssaa-biz:8080
   redisAddr: redis:6379
   listenRadius: ":1812"
-  listenDiameter: ":3868"
-  diameterProtocol: tcp
   redisMode: standalone
   vipAddress: "10.1.100.50"
 

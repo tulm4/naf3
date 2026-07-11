@@ -77,10 +77,6 @@ type Config struct {
 	// Default: 5 (Diameter EAP)
 	DiameterAuthApplicationID uint32
 
-	// Peer validation (GAP-DIA-04): restrict incoming Diameter connections by Origin-Host/Realm
-	DiameterAllowedHosts  []string // Allowed Origin-Host values (empty = allow all)
-	DiameterAllowedRealms []string // Allowed Origin-Realm values (empty = allow all)
-
 	// InternalComm holds RADIUS client settings for the AAA Gateway.
 	InternalComm config.InternalCommConfig
 
