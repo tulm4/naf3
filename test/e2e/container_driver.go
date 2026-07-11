@@ -11,10 +11,10 @@ import (
 )
 
 // ContainerDriver routes to containerized NRF, UDM, and AAA-S services
-// from the fullchain docker compose stack (compose/fullchain-dev.yaml).
+// from the fullchain docker compose stack (compose/fullchain-dev-tcp.yaml).
 //
 // This driver is used when E2E_PROFILE=fullchain. The Biz Pod is configured
-// via environment variables in compose/fullchain-dev.yaml to point to the containerized
+// via environment variables in compose/fullchain-dev-tcp.yaml to point to the containerized
 // services:
 //
 //	NRF_URL=http://nrf-mock:8081
@@ -103,7 +103,7 @@ func (d *ContainerDriver) Close() {
 // SetNRFServiceEndpoint configures a service endpoint in the containerized NRF mock.
 //
 // NOTE: The containerized NRF mock (nrf-mock) is configured via environment
-// variables at container startup (NRF_SERVICE_ENDPOINTS in compose/fullchain-dev.yaml).
+// variables at container startup (NRF_SERVICE_ENDPOINTS in compose/fullchain-dev-tcp.yaml).
 // This method is a stub for future admin API support.
 //
 // For programmatic per-test configuration, the NRF mock should expose an admin API:
@@ -121,7 +121,7 @@ func (d *ContainerDriver) SetNRFServiceEndpoint(nfType, serviceName, host string
 // SetUDMAuthSubscription configures auth subscription for a SUPI in the containerized UDM mock.
 //
 // NOTE: The containerized UDM mock (udm-mock) is configured via environment
-// variables at container startup (FULLCHAIN_UDM_AUTH_SUBSCRIPTIONS in compose/fullchain-dev.yaml).
+// variables at container startup (FULLCHAIN_UDM_AUTH_SUBSCRIPTIONS in compose/fullchain-dev-tcp.yaml).
 // This method is a stub for future admin API support.
 //
 // For programmatic per-test configuration, the UDM mock should expose an admin API:

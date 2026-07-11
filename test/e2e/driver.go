@@ -14,11 +14,11 @@ import (
 // Driver abstracts the backend for E2E tests.
 //
 // ContainerDriver routes to the containerized NRF/UDM/AAA-S services
-// defined in compose/fullchain-dev.yaml. AMF and AUSF callbacks are
+// defined in compose/fullchain-dev-tcp.yaml. AMF and AUSF callbacks are
 // mocked in-process via httptest.Server.
 //
 // Driver is selected at test startup via the E2E_PROFILE environment variable:
-//   - "" or "fullchain": ContainerDriver + compose/fullchain-dev.yaml
+//   - "" or "fullchain": ContainerDriver + compose/fullchain-dev-tcp.yaml
 //   - "mock":             MockDriver + in-process mocks (unit-level testing only)
 type Driver interface {
 	// SetupAMFMock starts an AMF callback mock server.
