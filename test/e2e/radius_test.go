@@ -128,8 +128,8 @@ func TestRadius_AccessRequest_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Logs(aaa-sim): %v", err)
 	}
-	if !containsAny(logs, "Access-Accept", "AccessAccept", "EAP-Success", "access-accept") {
-		t.Errorf("aaa-sim logs do not show Access-Accept; logs:\n%s", logs)
+	if !containsAny(logs, "radius_access_accept", "Access-Accept", "AccessAccept", "EAP-Success") {
+		t.Errorf("aaa-sim logs do not show Access-Accept (radius_access_accept); logs:\n%s", logs)
 	}
 }
 
