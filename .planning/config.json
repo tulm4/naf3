@@ -32,5 +32,8 @@
       "skills/golang-patterns",
       "skills/golang-testing"
     ]
+  },
+  "graphify": {
+    "enabled": true
   }
 }

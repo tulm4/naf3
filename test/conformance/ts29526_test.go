@@ -135,7 +135,7 @@ func TestTS29526_NSSAA_CreateSlice_ValidRequest(t *testing.T) {
 	h := nssaaHandlerFromStore(store, nssaa.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
-		"gpsi":     "520804600000001",
+		"gpsi":     "msisdn-520804600000001",
 		"snssai":   map[string]interface{}{"sst": 1, "sd": "000001"},
 		"eapIdRsp": "dGVzdA==",
 	}
@@ -192,7 +192,7 @@ func TestTS29526_NSSAA_CreateSlice_MissingSnssai(t *testing.T) {
 	h := nssaaHandlerFromStore(store, nssaa.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
-		"gpsi":     "520804600000001",
+		"gpsi":     "msisdn-520804600000001",
 		"eapIdRsp": "dGVzdA==",
 	}
 	rec := nssaaRequest(h, http.MethodPost, "/nnssaaf-nssaa/v1/slice-authentications", body)
@@ -211,7 +211,7 @@ func TestTS29526_NSSAA_CreateSlice_SSTOutOfRange(t *testing.T) {
 	h := nssaaHandlerFromStore(store, nssaa.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
-		"gpsi":     "520804600000001",
+		"gpsi":     "msisdn-520804600000001",
 		"snssai":   map[string]interface{}{"sst": 300},
 		"eapIdRsp": "dGVzdA==",
 	}
@@ -228,7 +228,7 @@ func TestTS29526_NSSAA_CreateSlice_SDInvalidHex(t *testing.T) {
 	h := nssaaHandlerFromStore(store, nssaa.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
-		"gpsi":     "520804600000001",
+		"gpsi":     "msisdn-520804600000001",
 		"snssai":   map[string]interface{}{"sst": 1, "sd": "GGGGGG"},
 		"eapIdRsp": "dGVzdA==",
 	}
@@ -245,7 +245,7 @@ func TestTS29526_NSSAA_CreateSlice_MissingEapIdRsp(t *testing.T) {
 	h := nssaaHandlerFromStore(store, nssaa.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
-		"gpsi":   "520804600000001",
+		"gpsi":   "msisdn-520804600000001",
 		"snssai": map[string]interface{}{"sst": 1},
 	}
 	rec := nssaaRequest(h, http.MethodPost, "/nnssaaf-nssaa/v1/slice-authentications", body)
@@ -261,7 +261,7 @@ func TestTS29526_NSSAA_CreateSlice_EmptyEapIdRsp(t *testing.T) {
 	h := nssaaHandlerFromStore(store, nssaa.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
-		"gpsi":     "520804600000001",
+		"gpsi":     "msisdn-520804600000001",
 		"snssai":   map[string]interface{}{"sst": 1},
 		"eapIdRsp": "",
 	}
@@ -278,7 +278,7 @@ func TestTS29526_NSSAA_CreateSlice_InvalidBase64EapIdRsp(t *testing.T) {
 	h := nssaaHandlerFromStore(store, nssaa.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
-		"gpsi":     "520804600000001",
+		"gpsi":     "msisdn-520804600000001",
 		"snssai":   map[string]interface{}{"sst": 1},
 		"eapIdRsp": "not-valid-base64!!!",
 	}
@@ -300,7 +300,7 @@ func TestTS29526_NSSAA_CreateSlice_AAANotConfigured(t *testing.T) {
 	h := nssaaHandlerFromStore(store, nssaa.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
-		"gpsi":     "520804600000001",
+		"gpsi":     "msisdn-520804600000001",
 		"snssai":   map[string]interface{}{"sst": 1, "sd": "FFFFFF"},
 		"eapIdRsp": "dGVzdA==",
 	}
@@ -338,7 +338,7 @@ func TestTS29526_NSSAA_CreateSlice_MissingAuthorization(t *testing.T) {
 	h := nssaaHandlerFromStore(store, nssaa.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
-		"gpsi":     "520804600000001",
+		"gpsi":     "msisdn-520804600000001",
 		"snssai":   map[string]interface{}{"sst": 1},
 		"eapIdRsp": "dGVzdA==",
 	}
@@ -355,7 +355,7 @@ func TestTS29526_NSSAA_CreateSlice_InvalidAuthorization(t *testing.T) {
 	h := nssaaHandlerFromStore(store, nssaa.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
-		"gpsi":     "520804600000001",
+		"gpsi":     "msisdn-520804600000001",
 		"snssai":   map[string]interface{}{"sst": 1},
 		"eapIdRsp": "dGVzdA==",
 	}
@@ -373,7 +373,7 @@ func TestTS29526_NSSAA_CreateSlice_NoAmfInstanceId(t *testing.T) {
 	h := nssaaHandlerFromStore(store, nssaa.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
-		"gpsi":     "520804600000001",
+		"gpsi":     "msisdn-520804600000001",
 		"snssai":   map[string]interface{}{"sst": 1},
 		"eapIdRsp": "dGVzdA==",
 	}
@@ -390,7 +390,7 @@ func TestTS29526_NSSAA_CreateSlice_EmptySnssai(t *testing.T) {
 	h := nssaaHandlerFromStore(store, nssaa.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
-		"gpsi":      "520804600000001",
+		"gpsi":      "msisdn-520804600000001",
 		"snssai":    map[string]interface{}{},
 		"supi":      "imsi-208930000000001",
 		"supiKind":  "SUCI",
@@ -412,14 +412,14 @@ func TestTS29526_NSSAA_ConfirmSlice_ValidConfirm(t *testing.T) {
 	store := newNssaaMockStore()
 	store.data["ctx-020"] = &storage.NssaaSession{
 		AuthCtxID: "ctx-020",
-		GPSI:      "520804600000001",
+		GPSI:      "msisdn-520804600000001",
 		SnssaiSST: 1,
 		SnssaiSD:  "000001",
 	}
 	h := nssaaHandlerFromStore(store, nssaa.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
-		"gpsi":       "520804600000001",
+		"gpsi":       "msisdn-520804600000001",
 		"snssai":     map[string]interface{}{"sst": 1, "sd": "000001"},
 		"eapMessage": "dGVzdA==",
 	}
@@ -435,7 +435,7 @@ func TestTS29526_NSSAA_ConfirmSlice_SessionNotFound(t *testing.T) {
 	h := nssaaHandlerFromStore(store, nssaa.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
-		"gpsi":       "520804600000001",
+		"gpsi":       "msisdn-520804600000001",
 		"snssai":     map[string]interface{}{"sst": 1},
 		"eapMessage": "dGVzdA==",
 	}
@@ -450,13 +450,13 @@ func TestTS29526_NSSAA_ConfirmSlice_GPSIMismatch(t *testing.T) {
 	store := newNssaaMockStore()
 	store.data["ctx-022"] = &storage.NssaaSession{
 		AuthCtxID: "ctx-022",
-		GPSI:      "520804600000001",
+		GPSI:      "msisdn-520804600000001",
 		SnssaiSST: 1,
 	}
 	h := nssaaHandlerFromStore(store, nssaa.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
-		"gpsi":       "599999999999999",
+		"gpsi":       "msisdn-599999999999999",
 		"snssai":     map[string]interface{}{"sst": 1},
 		"eapMessage": "dGVzdA==",
 	}
@@ -471,14 +471,14 @@ func TestTS29526_NSSAA_ConfirmSlice_SnssaiMismatch(t *testing.T) {
 	store := newNssaaMockStore()
 	store.data["ctx-023"] = &storage.NssaaSession{
 		AuthCtxID: "ctx-023",
-		GPSI:      "520804600000001",
+		GPSI:      "msisdn-520804600000001",
 		SnssaiSST: 1,
 		SnssaiSD:  "000001",
 	}
 	h := nssaaHandlerFromStore(store, nssaa.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
-		"gpsi":       "520804600000001",
+		"gpsi":       "msisdn-520804600000001",
 		"snssai":     map[string]interface{}{"sst": 2, "sd": "000002"},
 		"eapMessage": "dGVzdA==",
 	}
@@ -492,11 +492,11 @@ func TestTS29526_NSSAA_ConfirmSlice_SnssaiMismatch(t *testing.T) {
 func TestTS29526_NSSAA_ConfirmSlice_MissingEapMessage(t *testing.T) {
 	t.Parallel()
 	store := newNssaaMockStore()
-	store.data["ctx-024"] = &storage.NssaaSession{AuthCtxID: "ctx-024", GPSI: "520804600000001", SnssaiSST: 1}
+	store.data["ctx-024"] = &storage.NssaaSession{AuthCtxID: "ctx-024", GPSI: "msisdn-520804600000001", SnssaiSST: 1}
 	h := nssaaHandlerFromStore(store, nssaa.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
-		"gpsi":   "520804600000001",
+		"gpsi":   "msisdn-520804600000001",
 		"snssai": map[string]interface{}{"sst": 1},
 	}
 	rec := nssaaRequest(h, http.MethodPut, "/nnssaaf-nssaa/v1/slice-authentications/ctx-024", body)
@@ -509,11 +509,11 @@ func TestTS29526_NSSAA_ConfirmSlice_MissingEapMessage(t *testing.T) {
 func TestTS29526_NSSAA_ConfirmSlice_InvalidBase64EapMessage(t *testing.T) {
 	t.Parallel()
 	store := newNssaaMockStore()
-	store.data["ctx-025"] = &storage.NssaaSession{AuthCtxID: "ctx-025", GPSI: "520804600000001", SnssaiSST: 1}
+	store.data["ctx-025"] = &storage.NssaaSession{AuthCtxID: "ctx-025", GPSI: "msisdn-520804600000001", SnssaiSST: 1}
 	h := nssaaHandlerFromStore(store, nssaa.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
-		"gpsi":       "520804600000001",
+		"gpsi":       "msisdn-520804600000001",
 		"snssai":     map[string]interface{}{"sst": 1},
 		"eapMessage": "not-valid-base64!!!",
 	}
@@ -529,13 +529,13 @@ func TestTS29526_NSSAA_ConfirmSlice_SessionAlreadyCompleted(t *testing.T) {
 	store := newNssaaMockStore()
 	store.data["ctx-026"] = &storage.NssaaSession{
 		AuthCtxID: "ctx-026",
-		GPSI:      "520804600000001",
+		GPSI:      "msisdn-520804600000001",
 		SnssaiSST: 1,
 	}
 	h := nssaaHandlerFromStore(store, nssaa.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
-		"gpsi":       "520804600000001",
+		"gpsi":       "msisdn-520804600000001",
 		"snssai":     map[string]interface{}{"sst": 1},
 		"eapMessage": "dGVzdA==",
 	}
@@ -553,7 +553,7 @@ func TestTS29526_NSSAA_ConfirmSlice_InvalidAuthCtxIdFormat(t *testing.T) {
 	h := nssaaHandlerFromStore(store, nssaa.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
-		"gpsi":       "520804600000001",
+		"gpsi":       "msisdn-520804600000001",
 		"snssai":     map[string]interface{}{"sst": 1},
 		"eapMessage": "dGVzdA==",
 	}
@@ -570,7 +570,7 @@ func TestTS29526_NSSAA_ConfirmSlice_RedisUnavailable(t *testing.T) {
 	h := nssaaHandlerFromStore(store, nssaa.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
-		"gpsi":       "520804600000001",
+		"gpsi":       "msisdn-520804600000001",
 		"snssai":     map[string]interface{}{"sst": 1},
 		"eapMessage": "dGVzdA==",
 	}
@@ -585,13 +585,13 @@ func TestTS29526_NSSAA_ConfirmSlice_AAAGWUnreachable(t *testing.T) {
 	store := newNssaaMockStore()
 	store.data["ctx-029"] = &storage.NssaaSession{
 		AuthCtxID: "ctx-029",
-		GPSI:      "520804600000001",
+		GPSI:      "msisdn-520804600000001",
 		SnssaiSST: 1,
 	}
 	h := nssaaHandlerFromStore(store, nssaa.WithAPIRoot("http://test"))
 
 	body := map[string]interface{}{
-		"gpsi":       "520804600000001",
+		"gpsi":       "msisdn-520804600000001",
 		"snssai":     map[string]interface{}{"sst": 1, "sd": "000001"},
 		"eapMessage": "dGVzdA==",
 	}
@@ -612,7 +612,7 @@ func TestTS29526_NSSAA_GetSlice_SessionExists(t *testing.T) {
 	store := newNssaaMockStore()
 	store.data["ctx-030"] = &storage.NssaaSession{
 		AuthCtxID: "ctx-030",
-		GPSI:      "520804600000001",
+		GPSI:      "msisdn-520804600000001",
 		SnssaiSST: 1,
 		SnssaiSD:  "000001",
 	}
