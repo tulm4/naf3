@@ -28,15 +28,13 @@ import (
 	"time"
 )
 
-// Static-IP plan from docs/superpowers/specs/2026-07-11-static-ip-compose-diameter-radius-e2e-design.md §4.1.
-// composeFile is the TCP variant; referenced by RADIUS tests before diameter_tcp_test.go exists.
+// aaaSimDiameterAddr is the container-internal Diameter endpoint for aaa-sim.
+const aaaSimDiameterAddr = "172.0.3.14:3868"
+
+// tcpComposeFile is the TCP variant of the static-IP compose stack.
 const tcpComposeFile = "compose/fullchain-dev-tcp.yaml"
 
 const (
-	aaaSimDiameterAddr = "172.0.3.14:3868"
-	aaaSimRadiusAddr   = "172.0.3.14:1812"
-	aaaGatewayHTTPAddr = "172.0.3.15:9090"
-
 	diameterNetworkTCP  = "nssaa_fullchain_tcp"
 	diameterNetworkSCTP = "nssaa_fullchain_sctp"
 
@@ -102,14 +100,15 @@ func tearDown(t *testing.T, composeFile string) {
 	}
 }
 
-// aaaSimAddr returns the static IP:port pair for a given AAA-S service.
-// service is "diameter" or "radius".
+// aaaSimAddr returns the address for a given AAA-S service.
+// "diameter" returns the container-internal address (used for log inspection).
+// "radius" returns the host-mapped address (used by UDP tests running on the host).
 func aaaSimAddr(service string) string {
 	switch service {
 	case "diameter":
 		return aaaSimDiameterAddr
 	case "radius":
-		return aaaSimRadiusAddr
+		return "localhost:18120"
 	default:
 		panic(fmt.Sprintf("unknown service %q", service))
 	}
