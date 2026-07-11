@@ -18,6 +18,8 @@ import (
 	"github.com/fiorix/go-diameter/v4/diam/dict"
 	"github.com/fiorix/go-diameter/v4/diam/sm"
 	"github.com/fiorix/go-diameter/v4/diam/sm/smpeer"
+
+	"github.com/operator/nssAAF/internal/diameter"
 )
 
 const (
@@ -164,13 +166,23 @@ func newDiamForwarder(
 		},
 	}
 
-	// Register handler for DEA (and STA) responses.
+	// Register handler for DEA responses (pending-channel dispatch by hop-by-hop ID).
 	df.machine.Handle("DEA", df.handleDEA())
-	df.machine.Handle("STA", df.handleDEA())
 
 	// Register DWR/DWA handlers for connection stats (GAP-DIA-06, GAP-DIA-07)
 	df.machine.Handle("DWR", df.handleDWR())
 	df.machine.Handle("DWA", df.handleDWA())
+
+	// Register server-initiated inbound handlers (ASR/ASA/RAR/RAA/STR/STA) on this
+	// same state machine so they fire on the forwarder's outbound TCP socket.
+	// RFC 6733 §5.6: TCP connections are bidirectional; server-initiated messages
+	// arrive on the same socket the gateway dialed.
+	df.machine.Handle("ASR", df.handleASR())
+	df.machine.Handle("ASA", df.handleASA())
+	df.machine.Handle("RAR", df.handleRAR())
+	df.machine.Handle("RAA", df.handleRAA())
+	df.machine.Handle("STR", df.handleSTR())
+	df.machine.Handle("STA", df.handleSTA())
 
 	return df
 }
@@ -635,4 +647,270 @@ func parseSD(sd string) ([]byte, error) {
 		}
 	}
 	return result[:], nil
+}
+
+// handleASR handles Abort-Session-Request from AAA-S (server-initiated).
+// Fires on the forwarder's outbound TCP socket after CER/CEA handshake succeeds.
+// Registers the pending ASR with the registry, forwards to Biz Pod, waits for Biz
+// Pod response, and sends ASA with the result code.
+//
+// Spec: RFC 6733 §5.3, ASR/ASA as per TS 29.561 Ch.17
+func (df *diamForwarder) handleASR() diam.HandlerFunc {
+	return func(conn diam.Conn, m *diam.Message) {
+		sessionID := extractSessionIDFromMsg(m)
+		if sessionID == "" {
+			sessionID = "unknown"
+		}
+
+		authCtxID := df.extractAuthCtxID(m)
+
+		df.logger.Info("Diameter ASR received",
+			"session_id", sessionID,
+			"hop_by_hop", m.Header.HopByHopID,
+			"end_to_end", m.Header.EndToEndID,
+		)
+
+		raw, err := m.Serialize()
+		if err != nil {
+			df.logger.Error("failed to serialize ASR", "error", err)
+			df.sendASAWithResult(conn, m, &ServerInitiatedResponse{ResultCode: 3002, ErrorCause: "serialize_failed"})
+			return
+		}
+
+		respCh, err := df.registry.Register(sessionID, authCtxID, "ASR", 10*time.Second)
+		if err != nil {
+			df.logger.Error("failed to register ASR", "error", err)
+			df.sendASAWithResult(conn, m, &ServerInitiatedResponse{ResultCode: 3002, ErrorCause: "register_failed"})
+			return
+		}
+
+		// Detach entire flow into background goroutine to avoid blocking the
+		// handler goroutine. Under high load, blocking would exhaust the pool.
+		go func() {
+			df.forwardToBiz(context.Background(), sessionID, "DIAMETER", "ASR", raw)
+			resp := respCh.Wait()
+			df.logger.Info("ASR: received response from registry",
+				"session_id", sessionID,
+				"result_code", resp.ResultCode,
+			)
+			df.sendASAWithResult(conn, m, resp)
+		}()
+	}
+}
+
+// sendASAWithResult sends Abort-Session-Answer with the specified result code.
+// This is used when waiting for Biz Pod response before sending ASA.
+func (df *diamForwarder) sendASAWithResult(conn diam.Conn, req *diam.Message, resp *ServerInitiatedResponse) {
+	ans := req.Answer(resp.ResultCode)
+	ans.Header.HopByHopID = req.Header.HopByHopID
+	ans.Header.EndToEndID = req.Header.EndToEndID
+	_, _ = ans.NewAVP(avp.OriginHost, avp.Mbit, 0, df.settings.OriginHost)
+	_, _ = ans.NewAVP(avp.OriginRealm, avp.Mbit, 0, df.settings.OriginRealm)
+	if resp.Payload != nil {
+		// Use AVP code 1269 (Experimental-Result-Code) for extended result codes
+		_, _ = ans.NewAVP(avp.ExperimentalResult, avp.Mbit, 0, datatype.OctetString(resp.Payload))
+	}
+	if _, err := ans.WriteTo(conn); err != nil {
+		df.logger.Error("failed to send ASA", "error", err)
+	}
+}
+
+// handleASA handles Abort-Session-Answer from AAA-S (response to our STR).
+func (df *diamForwarder) handleASA() diam.HandlerFunc {
+	return func(conn diam.Conn, m *diam.Message) {
+		sessionID := extractSessionIDFromMsg(m)
+		df.logger.Debug("diameter_asa_received", "session_id", sessionID)
+	}
+}
+
+// handleRAR handles Re-Auth-Request from AAA-S (server-initiated).
+// Follows the same register → forward → wait → sendRAA pattern as handleASR
+// to ensure Biz Pod response is processed before sending RAA.
+//
+// Spec: RFC 6733 §5.3, RAR/RAA as per TS 29.561 Ch.17
+func (df *diamForwarder) handleRAR() diam.HandlerFunc {
+	return func(conn diam.Conn, m *diam.Message) {
+		sessionID := extractSessionIDFromMsg(m)
+		if sessionID == "" {
+			sessionID = "unknown"
+		}
+
+		authCtxID := df.extractAuthCtxID(m)
+
+		df.logger.Info("Diameter RAR received", "session_id", sessionID)
+
+		raw, err := m.Serialize()
+		if err != nil {
+			df.logger.Error("failed to serialize RAR", "error", err)
+			df.sendRAAWithResult(conn, m, &ServerInitiatedResponse{ResultCode: 3002, ErrorCause: "serialize_failed"})
+			return
+		}
+
+		respCh, err := df.registry.Register(sessionID, authCtxID, "RAR", 10*time.Second)
+		if err != nil {
+			df.logger.Error("failed to register RAR", "error", err)
+			df.sendRAAWithResult(conn, m, &ServerInitiatedResponse{ResultCode: 3002, ErrorCause: "register_failed"})
+			return
+		}
+
+		go func() {
+			df.forwardToBiz(context.Background(), sessionID, "DIAMETER", "RAR", raw)
+			resp := respCh.Wait()
+			df.logger.Info("RAR: received response from registry",
+				"session_id", sessionID,
+				"result_code", resp.ResultCode,
+			)
+			df.sendRAAWithResult(conn, m, resp)
+		}()
+	}
+}
+
+// sendRAAWithResult sends Re-Auth-Answer with the specified result code.
+// Used when waiting for Biz Pod response before sending RAA.
+func (df *diamForwarder) sendRAAWithResult(conn diam.Conn, req *diam.Message, resp *ServerInitiatedResponse) {
+	ans := req.Answer(resp.ResultCode)
+	ans.Header.HopByHopID = req.Header.HopByHopID
+	ans.Header.EndToEndID = req.Header.EndToEndID
+	_, _ = ans.NewAVP(avp.OriginHost, avp.Mbit, 0, df.settings.OriginHost)
+	_, _ = ans.NewAVP(avp.OriginRealm, avp.Mbit, 0, df.settings.OriginRealm)
+	if resp.Payload != nil {
+		_, _ = ans.NewAVP(diameter.AVPCodeEAPPayload, avp.Mbit, 0, datatype.OctetString(resp.Payload))
+	}
+	if _, err := ans.WriteTo(conn); err != nil {
+		df.logger.Error("failed to send RAA", "error", err)
+	}
+}
+
+// handleRAA handles Re-Auth-Answer from AAA-S.
+func (df *diamForwarder) handleRAA() diam.HandlerFunc {
+	return func(conn diam.Conn, m *diam.Message) {
+		sessionID := extractSessionIDFromMsg(m)
+		df.logger.Debug("diameter_raa_received", "session_id", sessionID)
+	}
+}
+
+// handleSTR handles Session-Termination-Request from AAA-S (server-initiated).
+// Fires on the forwarder's outbound TCP socket after CER/CEA handshake succeeds.
+// Registers the pending STR with the registry, forwards to Biz Pod, waits for
+// Biz Pod response, and sends STA with the result code.
+//
+// Spec: RFC 6733 §5.3, STR/STA as per TS 29.561 Ch.17
+func (df *diamForwarder) handleSTR() diam.HandlerFunc {
+	return func(conn diam.Conn, m *diam.Message) {
+		sessionID := extractSessionIDFromMsg(m)
+		if sessionID == "" {
+			sessionID = "unknown"
+		}
+
+		authCtxID := df.extractAuthCtxID(m)
+
+		df.logger.Info("Diameter STR received", "session_id", sessionID)
+
+		raw, err := m.Serialize()
+		if err != nil {
+			df.logger.Error("failed to serialize STR", "error", err)
+			df.sendSTAWithResult(conn, m, &ServerInitiatedResponse{ResultCode: 3002, ErrorCause: "serialize_failed"})
+			return
+		}
+
+		respCh, err := df.registry.Register(sessionID, authCtxID, "STR", 10*time.Second)
+		if err != nil {
+			df.logger.Error("failed to register STR", "error", err)
+			df.sendSTAWithResult(conn, m, &ServerInitiatedResponse{ResultCode: 3002, ErrorCause: "register_failed"})
+			return
+		}
+
+		// Detach entire flow into background goroutine to avoid blocking the
+		// handler goroutine. Under high load, blocking would exhaust the pool.
+		go func() {
+			df.forwardToBiz(context.Background(), sessionID, "DIAMETER", "STR", raw)
+			resp := respCh.Wait()
+			df.logger.Info("STR: received response from registry",
+				"session_id", sessionID,
+				"result_code", resp.ResultCode,
+			)
+			df.sendSTAWithResult(conn, m, resp)
+		}()
+	}
+}
+
+// handleSTA handles Session-Termination-Answer from AAA-S.
+func (df *diamForwarder) handleSTA() diam.HandlerFunc {
+	return func(conn diam.Conn, m *diam.Message) {
+		sessionID := extractSessionIDFromMsg(m)
+		df.logger.Debug("diameter_sta_received", "session_id", sessionID)
+	}
+}
+
+// sendSTAWithResult sends Session-Termination-Answer with the given result code.
+// Used when waiting for Biz Pod response before sending STA.
+// Spec: TS 29.561 §17.3 (STA)
+func (df *diamForwarder) sendSTAWithResult(conn diam.Conn, req *diam.Message, resp *ServerInitiatedResponse) {
+	ans := req.Answer(resp.ResultCode)
+	ans.Header.HopByHopID = req.Header.HopByHopID
+	ans.Header.EndToEndID = req.Header.EndToEndID
+	_, _ = ans.NewAVP(avp.OriginHost, avp.Mbit, 0, df.settings.OriginHost)
+	_, _ = ans.NewAVP(avp.OriginRealm, avp.Mbit, 0, df.settings.OriginRealm)
+	if resp.Payload != nil {
+		_, _ = ans.NewAVP(diameter.AVPCodeEAPPayload, avp.Mbit, 0, datatype.OctetString(resp.Payload))
+	}
+	if _, err := ans.WriteTo(conn); err != nil {
+		df.logger.Error("failed to send STA", "error", err)
+	}
+}
+
+// sendASA sends Abort-Session-Answer in response to ASR.
+// Result-Code = DIAMETER_SUCCESS (2001).
+func (df *diamForwarder) sendASA(conn diam.Conn, m *diam.Message) {
+	ans := m.Answer(diam.Success)
+	ans.Header.HopByHopID = m.Header.HopByHopID
+	ans.Header.EndToEndID = m.Header.EndToEndID
+	_, _ = ans.NewAVP(avp.OriginHost, avp.Mbit, 0, df.settings.OriginHost)
+	_, _ = ans.NewAVP(avp.OriginRealm, avp.Mbit, 0, df.settings.OriginRealm)
+	_, err := ans.WriteTo(conn)
+	if err != nil {
+		df.logger.Error("failed to send ASA", "error", err)
+	}
+}
+
+// sendRAA sends Re-Auth-Answer in response to RAR.
+func (df *diamForwarder) sendRAA(conn diam.Conn, m *diam.Message) {
+	ans := m.Answer(diam.Success)
+	ans.Header.HopByHopID = m.Header.HopByHopID
+	ans.Header.EndToEndID = m.Header.EndToEndID
+	_, _ = ans.NewAVP(avp.OriginHost, avp.Mbit, 0, df.settings.OriginHost)
+	_, _ = ans.NewAVP(avp.OriginRealm, avp.Mbit, 0, df.settings.OriginRealm)
+	_, err := ans.WriteTo(conn)
+	if err != nil {
+		df.logger.Error("failed to send RAA", "error", err)
+	}
+}
+
+// sendSTA sends Session-Termination-Answer in response to STR.
+func (df *diamForwarder) sendSTA(conn diam.Conn, m *diam.Message) {
+	ans := m.Answer(diam.Success)
+	ans.Header.HopByHopID = m.Header.HopByHopID
+	ans.Header.EndToEndID = m.Header.EndToEndID
+	_, _ = ans.NewAVP(avp.OriginHost, avp.Mbit, 0, df.settings.OriginHost)
+	_, _ = ans.NewAVP(avp.OriginRealm, avp.Mbit, 0, df.settings.OriginRealm)
+	_, err := ans.WriteTo(conn)
+	if err != nil {
+		df.logger.Error("failed to send STA", "error", err)
+	}
+}
+
+// extractAuthCtxID extracts the Auth-Application-Id AVP from a decoded diam.Message.
+// This AVP identifies the authentication context/session.
+func (df *diamForwarder) extractAuthCtxID(m *diam.Message) string {
+	for _, avp := range m.AVP {
+		if avp.Code == 258 { // Auth-Application-Id AVP code
+			if ui32, ok := avp.Data.(datatype.Unsigned32); ok {
+				return fmt.Sprintf("%d", ui32)
+			}
+			if os, ok := avp.Data.(datatype.UTF8String); ok {
+				return string(os)
+			}
+		}
+	}
+	return ""
 }
