@@ -59,6 +59,10 @@ type Config struct {
 	DiameterRealm         string // e.g. "operator.com"
 	DiameterHost          string // Origin-Host for CER (AAA Gateway identity)
 
+	// DiameterTransport selects the dial network for the persistent forwarder
+	// connection to AAA-S. "tcp" (default) or "sctp". Spec: RFC 6733 §3.
+	DiameterTransport string
+
 	// RADIUS client-initiated config:
 	// Required for Access-Request forwarding to AAA-S.
 	RadiusServerAddress string // e.g. "nss-aaa-server:1812"
@@ -143,12 +147,13 @@ func New(cfg Config) *Gateway {
 	// This maintains CER/CEA handshake and DWR/DWA watchdog to AAA-S.
 	g.diamForwarder = newDiamForwarder(
 		cfg.DiameterServerAddress,
-		"tcp",
+		cfg.DiameterTransport,
 		cfg.DiameterHost,
 		cfg.DiameterRealm,
 		cfg.DiameterServerAddress, // destHost: use server address as host identifier
 		cfg.DiameterRealm,         // destRealm
 		&diamForwarderConfig{
+			Transport:         cfg.DiameterTransport,
 			AuthRequestType:   cfg.DiameterAuthRequestType,
 			AuthApplicationID: cfg.DiameterAuthApplicationID,
 		},
