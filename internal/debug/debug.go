@@ -170,7 +170,3 @@ func (d *Debug) Emit(ctx context.Context, ev Event) {
 	}).Err()
 	_ = d.client.Expire(ctx2, key, d.ttl).Err()
 }
-
-// sanitize is a placeholder; the real implementation lives in sanitize.go (Task 2).
-// In Task 1, just JSON-marshal as-is.
-func sanitize(m map[string]any) map[string]any { return m }
