@@ -45,7 +45,7 @@ test/e2e/
 ├── harness.go                # Core: docker compose, DB/Redis, TLS, ResetState
 ├── driver.go                 # Driver interface + AMFDriver/AUSFDriver interfaces
 ├── container_driver.go       # ContainerDriver: routes to NRF/UDM containers
-├── e2e.go                  # TestMain: ContainerDriver + fullchain-dev.yaml
+├── e2e.go                  # TestMain: ContainerDriver + fullchain-dev-tcp.yaml
 ├── n58_flow_test.go        # NSSAA flows
 ├── n60_flow_test.go         # AIW flows
 ├── reauth_test.go           # Re-authentication flows
@@ -107,7 +107,7 @@ test/e2e/
 
 1. **test-fullchain**: Added `E2E_PROFILE=fullchain`, `FULLCHAIN_AAA_SIM_URL`, `FULLCHAIN_NRF_URL`, `FULLCHAIN_NRM_URL` env vars
 2. **test-fullchain**: Changed test path from `./test/e2e/fullchain/...` to `./test/e2e/...`
-3. **test-fullchain**: Switched from `compose/fullchain.yaml` to `compose/fullchain-dev.yaml`
+3. **test-fullchain**: Switched from `compose/fullchain.yaml` to `compose/fullchain-dev-tcp.yaml`
 4. **test-fullchain-fast**: Same updates as test-fullchain
 5. **test-fullchain-no-build**: Same updates as test-fullchain
 6. **test-e2e target**: Removed (suite now uses ContainerDriver exclusively)
@@ -289,13 +289,13 @@ Document new architecture, profiles, and coverage matrix.
 
 - [x] `go build -tags=e2e ./test/e2e/...` compiles
 - [x] `go build -tags=e2e ./test/mocks/...` compiles
-- [ ] `make test-fullchain` starts `fullchain-dev.yaml` and passes health checks
-- [ ] `make test-integration` starts `fullchain-dev.yaml` and runs integration tests
+- [ ] `make test-fullchain` starts `fullchain-dev-tcp.yaml` and passes health checks
+- [ ] `make test-integration` starts `fullchain-dev-tcp.yaml` and runs integration tests
 - [ ] NRM reachable at `http://localhost:8084/healthz`
 - [ ] NRF mock reachable at `http://localhost:8082`
 - [ ] UDM mock reachable at `http://localhost:8083`
 - [ ] Biz Pod health: `http://localhost:8080/healthz/live`
-- [ ] GitHub Actions `fullchain-tests` workflow passes with `fullchain-dev.yaml`
+- [ ] GitHub Actions `fullchain-tests` workflow passes with `fullchain-dev-tcp.yaml`
 - [x] `test/e2e/fullchain/` directory deleted
 - [x] `test/e2e/mock_driver.go` deleted
 - [x] No references to `compose/dev.yaml` or `compose/fullchain.yaml` in Go source files

@@ -18,7 +18,7 @@ Before executing, note these gaps between the spec and the current code (verifie
 |-----------|---------|---------------|
 | §3.1 Issue A (diamForwarder reconnect dead-code) | Already implemented in `internal/aaa/gateway/diameter_forward.go` lines 192-219 (`watchDisconnect`), 223-272 (`monitorConnection`), and 275-287 (`clearPending`). Tests exist at lines 426-512 of `diameter_forward_test.go`. | **Skip — no-op.** Task 0 only verifies with `go test`. |
 | §3.2 Issue B (delete `deploy/compose/aiw-tests/`) | Directory does not exist in this repo. | **Skip — no-op.** Task 0 verifies. |
-| §3.3 Issue C (delete `compose/mock_aaa_s.go`) | File exists at `compose/mock_aaa_s.go` (393 lines, 11.4K). `grep -r "compose/mock_aaa_s" .` confirms no references. `Dockerfile.mock-aaa-s:16` copies `bin/aaa-sim`, not this file. `compose/fullchain-dev.yaml` uses `Dockerfile.aaa-sim`. | **Implement Task 1.** |
+| §3.3 Issue C (delete `compose/mock_aaa_s.go`) | File exists at `compose/mock_aaa_s.go` (393 lines, 11.4K). `grep -r "compose/mock_aaa_s" .` confirms no references. `Dockerfile.mock-aaa-s:16` copies `bin/aaa-sim`, not this file. `compose/fullchain-dev-tcp.yaml` uses `Dockerfile.aaa-sim`. | **Implement Task 1.** |
 | §3.4 Issue D (fix stale roadmap doc) | `docs/roadmap/PHASE_Refactor_3Component.md` lines 531-532 reference `AAA_S_RADIUS_ADDR`/`AAA_S_DIAMETER_ADDR`. | **Implement Task 2.** |
 | §3.5 Issue E (architectural correction — remove Diameter listen) | Spec is right, code is wrong. `gateway.go:170` constructs `DiameterHandler` with its own `sm.StateMachine`, `gateway.go:206-214` opens TCP/SCTP listen, `diameter_handler.go:107-191` implements `Listen`/`listenTCP`/`listenTLS`/`listenSCTP`. | **Implement Tasks 3-7** (the bulk of the work). |
 | §3.5 RADIUS log-key rename | `cmd/aaa-gateway/main.go:39` logs `"radius_addr"` (cosmetic). | **Implement Task 8.** |
@@ -88,7 +88,7 @@ cd /home/tulm/naf3 && git commit -m "refactor: delete orphan compose/mock_aaa_s.
 
 This 393-line file duplicated test/aaa_sim/ but was never referenced.
 Dockerfile.mock-aaa-s copies bin/aaa-sim (the real binary), and
-compose/fullchain-dev.yaml uses Dockerfile.aaa-sim, not this file.
+compose/fullchain-dev-tcp.yaml uses Dockerfile.aaa-sim, not this file.
 
 Per docs/superpowers/specs/2026-07-11-aaa-gateway-aaa-sim-role-cleanup-design.md §3.3.
 Verified unreferenced: grep finds no callers in Go/YAML.

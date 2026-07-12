@@ -143,6 +143,17 @@ func (s *RadiusServer) handlePacket(clientAddr net.Addr, raw []byte) {
 }
 
 func (s *RadiusServer) sendResponse(clientAddr net.Addr, resp []byte) {
+	if len(resp) >= 20 {
+		code := resp[0]
+		switch code {
+		case radiusAccessAccept:
+			s.logger.Info("radius_access_accept", "client", clientAddr.String())
+		case radiusAccessReject:
+			s.logger.Info("radius_access_reject", "client", clientAddr.String())
+		case radiusAccessChallenge:
+			s.logger.Info("radius_access_challenge", "client", clientAddr.String())
+		}
+	}
 	_, err := s.ln.WriteTo(resp, clientAddr)
 	if err != nil {
 		s.logger.Error("failed to send RADIUS response", "error", err)

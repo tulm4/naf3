@@ -13,7 +13,6 @@ import (
 	"github.com/fiorix/go-diameter/v4/diam"
 	"github.com/fiorix/go-diameter/v4/diam/avp"
 	"github.com/fiorix/go-diameter/v4/diam/datatype"
-	"github.com/fiorix/go-diameter/v4/diam/dict"
 	"github.com/fiorix/go-diameter/v4/diam/sm"
 	"github.com/fiorix/go-diameter/v4/diam/sm/smpeer"
 )
@@ -92,7 +91,7 @@ func NewClient(cfg Config, logger *slog.Logger) (*Client, error) {
 	c.machine = sm.New(c.settings)
 
 	c.smClient = &sm.Client{
-		Dict:               dict.Default,
+		Dict:               Dict(),
 		Handler:            c.machine,
 		MaxRetransmits:     3,
 		RetransmitInterval: 5 * time.Second,

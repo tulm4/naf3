@@ -3,6 +3,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -59,4 +60,36 @@ func TestExpandEnv(t *testing.T) {
 
 	result := expandEnv("key=${TEST_VAR}")
 	assert.Equal(t, "key=test-value", result)
+}
+
+func TestAAAgwConfig_DiameterTransport_DefaultsToTCP(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "aaa-gateway.yaml")
+	yaml := `
+component: aaa-gateway
+version: "0.1.0"
+server:
+  addr: ":9090"
+redis:
+  addr: "localhost:6379"
+aaaGateway:
+  bizServiceUrl: "http://localhost:8080"
+crypto:
+  keyManager: "soft"
+  masterKeyHex: "0102030405060708091011121314151617181920212223242526272829303132"
+`
+	if err := os.WriteFile(cfgPath, []byte(yaml), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.AAAgw == nil {
+		t.Fatal("AAAgw is nil after Load")
+	}
+	if cfg.AAAgw.DiameterTransport != "tcp" {
+		t.Errorf("default DiameterTransport = %q; want %q", cfg.AAAgw.DiameterTransport, "tcp")
+	}
 }

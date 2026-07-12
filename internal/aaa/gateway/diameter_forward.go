@@ -14,7 +14,6 @@ import (
 	"github.com/fiorix/go-diameter/v4/diam"
 	"github.com/fiorix/go-diameter/v4/diam/avp"
 	"github.com/fiorix/go-diameter/v4/diam/datatype"
-	"github.com/fiorix/go-diameter/v4/diam/dict"
 	"github.com/fiorix/go-diameter/v4/diam/sm"
 	"github.com/fiorix/go-diameter/v4/diam/sm/smpeer"
 
@@ -44,6 +43,10 @@ type ConnectionStats struct {
 // diamForwarderConfig holds configuration for the Diameter forwarder.
 // Spec: RFC 6733, RFC 4072, TS 29.561 Ch.17
 type diamForwarderConfig struct {
+	// Transport is the dial network passed to sm.Client.DialNetwork.
+	// Valid values: "tcp" (default) or "sctp".
+	// Spec: RFC 6733 §3.
+	Transport string
 	// AuthRequestType is the AVP 406 value for DER messages.
 	// Default: 2 (AUTHORIZE_AUTHENTICATE)
 	// Spec: RFC 4072 §3.1
@@ -115,6 +118,9 @@ func newDiamForwarder(
 	registry *ServerInitiatedRegistry,
 ) *diamForwarder {
 	// Apply defaults for optional config fields (GAP-AAA-04, GAP-DIA-02, GAP-DIA-03)
+	if cfg.Transport == "" {
+		cfg.Transport = "tcp"
+	}
 	if cfg.AuthRequestType == 0 {
 		cfg.AuthRequestType = 2 // AUTHORIZE_AUTHENTICATE
 	}
@@ -141,12 +147,13 @@ func newDiamForwarder(
 		OriginRealm: datatype.DiameterIdentity(originRealm),
 		VendorID:    datatype.Unsigned32(VendorID3GPP),
 		ProductName: "NSSAAF-GW",
+		Dict:        diameter.Dict(),
 	}
 
 	df.machine = sm.New(df.settings)
 
 	df.smClient = &sm.Client{
-		Dict:               dict.Default,
+		Dict:               diameter.Dict(),
 		Handler:            df.machine,
 		MaxRetransmits:     3,
 		RetransmitInterval: 5 * time.Second,

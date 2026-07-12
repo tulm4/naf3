@@ -49,6 +49,7 @@ func main() {
 		DiameterServerAddress: cfg.AAAgw.DiameterServerAddress,
 		DiameterRealm:         cfg.AAAgw.DiameterRealm,
 		DiameterHost:          cfg.AAAgw.DiameterHost,
+		DiameterTransport:     cfg.AAAgw.DiameterTransport,
 		RadiusServerAddress:   cfg.AAAgw.RadiusServerAddress,
 		RadiusSharedSecret:    cfg.AAAgw.RadiusSharedSecret,
 		RedisMode:             cfg.AAAgw.RedisMode,

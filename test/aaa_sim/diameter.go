@@ -10,8 +10,9 @@ import (
 	"github.com/fiorix/go-diameter/v4/diam"
 	"github.com/fiorix/go-diameter/v4/diam/avp"
 	"github.com/fiorix/go-diameter/v4/diam/datatype"
-	"github.com/fiorix/go-diameter/v4/diam/dict"
 	"github.com/fiorix/go-diameter/v4/diam/sm"
+
+	"github.com/operator/nssAAF/internal/diameter"
 )
 
 // AppIDAAP is the Diameter EAP Application ID (RFC 4072).
@@ -58,17 +59,21 @@ func (s *DiameterServer) Run(ctx context.Context) error {
 		OriginRealm: datatype.DiameterIdentity("test.local"),
 		VendorID:    datatype.Unsigned32(vendor3GPP),
 		ProductName: "AAA-Simulator",
+		Dict:        diameter.Dict(),
 	}
 
 	machine := sm.New(settings)
 
 	machine.HandleFunc("DER", s.handleDER)
+	// Register DER at the EAP app index (AppID=5, Code=268) so PrepareSupportedApps
+	// advertises Diameter EAP (RFC 4072) as a supported auth application.
+	machine.HandleIdx(diam.CommandIndex{AppID: AppIDAAP, Code: 268, Request: true}, diam.HandlerFunc(s.handleDER))
 	// DWR is handled internally by sm.New (watchdogOK wrapper ensures peer passed CER/CEA).
 	// Do NOT register a handler here — would override sm's internal DWR handler.
 
 	errc := make(chan error, 1)
 	go func() {
-		errc <- diam.ListenAndServeNetwork(s.network, s.addr, machine, dict.Default)
+		errc <- diam.ListenAndServeNetwork(s.network, s.addr, machine, diameter.Dict())
 	}()
 
 	select {

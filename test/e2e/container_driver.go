@@ -4,17 +4,20 @@
 package e2e
 
 import (
+	"fmt"
 	"net/http/httptest"
 	"os"
+	"os/exec"
+	"path/filepath"
 
 	"github.com/operator/nssAAF/test/mocks"
 )
 
 // ContainerDriver routes to containerized NRF, UDM, and AAA-S services
-// from the fullchain docker compose stack (compose/fullchain-dev.yaml).
+// from the fullchain docker compose stack (compose/fullchain-dev-tcp.yaml).
 //
 // This driver is used when E2E_PROFILE=fullchain. The Biz Pod is configured
-// via environment variables in compose/fullchain-dev.yaml to point to the containerized
+// via environment variables in compose/fullchain-dev-tcp.yaml to point to the containerized
 // services:
 //
 //	NRF_URL=http://nrf-mock:8081
@@ -87,6 +90,48 @@ func (d *ContainerDriver) AAASimURL() string {
 	return d.aaaSimURL
 }
 
+// Logs returns the last `tail` lines of `docker compose logs <service>` for the
+// compose project identified by $E2E_COMPOSE_FILE (defaults to
+// compose/fullchain-dev-tcp.yaml when unset). The driver does NOT bring the
+// stack up or down — that is the Makefile's job.
+func (d *ContainerDriver) Logs(service string, tail int) (string, error) {
+	if d == nil {
+		return "", fmt.Errorf("Logs: nil ContainerDriver")
+	}
+	composeFile := os.Getenv("E2E_COMPOSE_FILE")
+	if composeFile == "" {
+		composeFile = "compose/fullchain-dev-tcp.yaml"
+	}
+	repoRoot, err := repoRootForE2E()
+	if err != nil {
+		return "", fmt.Errorf("locate repo root: %w", err)
+	}
+	args := []string{"compose", "-f", composeFile, "logs", "--tail", fmt.Sprintf("%d", tail), service}
+	cmd := exec.Command("docker", args...)
+	cmd.Dir = repoRoot
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("docker compose logs %s: %w (out=%q)", service, err, string(out))
+	}
+	return string(out), nil
+}
+
+// repoRootForE2E walks up from the current working directory to find the
+// repo root (where go.mod lives). Used by Logs() to run docker compose
+// from the right directory.
+func repoRootForE2E() (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	for dir := cwd; dir != "/"; dir = filepath.Dir(dir) {
+		if _, statErr := os.Stat(filepath.Join(dir, "go.mod")); statErr == nil {
+			return dir, nil
+		}
+	}
+	return "", fmt.Errorf("go.mod not found above %s", cwd)
+}
+
 // Close cleans up driver resources.
 // Containers are managed by docker compose, not by this driver.
 func (d *ContainerDriver) Close() {
@@ -103,7 +148,7 @@ func (d *ContainerDriver) Close() {
 // SetNRFServiceEndpoint configures a service endpoint in the containerized NRF mock.
 //
 // NOTE: The containerized NRF mock (nrf-mock) is configured via environment
-// variables at container startup (NRF_SERVICE_ENDPOINTS in compose/fullchain-dev.yaml).
+// variables at container startup (NRF_SERVICE_ENDPOINTS in compose/fullchain-dev-tcp.yaml).
 // This method is a stub for future admin API support.
 //
 // For programmatic per-test configuration, the NRF mock should expose an admin API:
@@ -121,7 +166,7 @@ func (d *ContainerDriver) SetNRFServiceEndpoint(nfType, serviceName, host string
 // SetUDMAuthSubscription configures auth subscription for a SUPI in the containerized UDM mock.
 //
 // NOTE: The containerized UDM mock (udm-mock) is configured via environment
-// variables at container startup (FULLCHAIN_UDM_AUTH_SUBSCRIPTIONS in compose/fullchain-dev.yaml).
+// variables at container startup (FULLCHAIN_UDM_AUTH_SUBSCRIPTIONS in compose/fullchain-dev-tcp.yaml).
 // This method is a stub for future admin API support.
 //
 // For programmatic per-test configuration, the UDM mock should expose an admin API:

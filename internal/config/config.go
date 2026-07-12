@@ -120,6 +120,11 @@ type AAAgwConfig struct {
 	DiameterRealm         string `yaml:"diameterRealm"`         // e.g. "operator.com"
 	DiameterHost          string `yaml:"diameterHost"`          // Origin-Host for CER
 
+	// DiameterTransport selects the dial network for the persistent forwarder
+	// connection to AAA-S. "tcp" (default) or "sctp".
+	// Spec: RFC 6733 §3; TS 29.561 §17.3.
+	DiameterTransport string `yaml:"diameterTransport"`
+
 	// RADIUS client-initiated config:
 	// Required for Access-Request forwarding to AAA-S.
 	RadiusServerAddress string `yaml:"radiusServerAddress"` // e.g. "nss-aaa-server:1812"
@@ -496,6 +501,9 @@ func applyDefaults(cfg *Config) {
 		}
 		if cfg.AAAgw.DiameterHost == "" {
 			cfg.AAAgw.DiameterHost = "nssaa-gw.operator.com"
+		}
+		if cfg.AAAgw.DiameterTransport == "" {
+			cfg.AAAgw.DiameterTransport = "tcp"
 		}
 		// RADIUS client config defaults — no required fields (disabled if RadiusServerAddress empty)
 

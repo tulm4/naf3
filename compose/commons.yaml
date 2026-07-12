@@ -1,0 +1,18 @@
+# compose/commons.yaml
+# Shared fragments for the fullchain-dev-{tcp,sctp} overlays.
+# Defines the default bridge network configuration consumed by
+# compose/fullchain-dev-base.yaml.
+# Per spec §4.1: subnet 172.0.3.0/24, gateway 172.0.3.1.
+#
+# This file is NOT used directly by `docker compose up`; the user runs
+# one of the variant overlays (fullchain-dev-tcp.yaml or fullchain-dev-sctp.yaml),
+# each of which renames the default network so both can coexist on the
+# same host without subnet collisions.
+
+networks:
+  default:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.0.3.0/24
+          gateway: 172.0.3.1

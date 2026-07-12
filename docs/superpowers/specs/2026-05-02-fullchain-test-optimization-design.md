@@ -66,7 +66,7 @@ test-fullchain: gen-certs build  ## Full E2E test (for CI)
 - Full rebuild ensures production-like behavior
 - Cache hit on subsequent runs (~30-60s vs ~2-5 min)
 
-### 3. New Compose File: `compose/fullchain-dev.yaml`
+### 3. New Compose File: `compose/fullchain-dev-tcp.yaml`
 
 Volume mount binaries from `bin/` into containers:
 
@@ -138,7 +138,7 @@ GitHub Actions workflow:
 |------|--------|
 | `Makefile` | Add `test-fullchain-fast`, `test-fullchain-no-build` targets |
 | `compose/fullchain.yaml` | No change |
-| `compose/fullchain-dev.yaml` | New: volume mounts for biz, http-gateway, aaa-gateway |
+| `compose/fullchain-dev-tcp.yaml` | New: volume mounts for biz, http-gateway, aaa-gateway |
 | `Dockerfile.biz` | No change (multi-stage build removed, binary only) |
 | `.github/workflows/e2e.yml` | Add BuildKit cache config |
 

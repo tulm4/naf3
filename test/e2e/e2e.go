@@ -29,7 +29,7 @@ var sharedDriver Driver
 // TestMain coordinates the shared lifecycle for the entire E2E test suite:
 //
 //  1. (if E2E_DOCKER_MANAGED not set) docker compose up — managed by Makefile
-//  2. select driver (ContainerDriver with compose/fullchain-dev.yaml)
+//  2. select driver (ContainerDriver with compose/fullchain-dev-tcp.yaml)
 //  3. connect to docker compose services (sharedHarness via NewHarnessFromDriver)
 //  4. each test: NewHarnessForTest() → run
 //  5. Close() sharedHarness (close DB/Redis connections and mocks)
@@ -41,21 +41,21 @@ var sharedDriver Driver
 // Supported environment variables:
 //
 //	E2E_DOCKER_MANAGED  if set, skip compose up/down (Makefile owns lifecycle)
-//	E2E_PROFILE         "fullchain" (default) — ContainerDriver + fullchain-dev.yaml
+//	E2E_PROFILE         "fullchain" (default) — ContainerDriver + fullchain-dev-tcp.yaml
 //	DOCKER_COMPOSE      additional flags for docker compose (e.g. "-f compose/other.yaml")
 func TestMain(m *testing.M) {
 	dockerManaged := os.Getenv("E2E_DOCKER_MANAGED") == "1"
 	profile := os.Getenv("E2E_PROFILE")
 
 	// Determine compose file and driver.
-	// Default: fullchain profile with ContainerDriver + compose/fullchain-dev.yaml.
+	// Default: fullchain profile with ContainerDriver + compose/fullchain-dev-tcp.yaml.
 	// E2E_PROFILE is retained for backward compatibility with skip logic in test files.
 	var composeFile string
 	if profile == "" {
 		profile = "fullchain"
 	}
 	if profile == "fullchain" {
-		composeFile = "-f compose/fullchain-dev.yaml"
+		composeFile = "-f compose/fullchain-dev-tcp.yaml"
 		sharedDriver = NewContainerDriver()
 		if sharedDriver == nil {
 			fmt.Fprintf(os.Stderr, "E2E_PROFILE=fullchain but FULLCHAIN_NRF_URL is not set\n")
@@ -117,7 +117,7 @@ func dockerComposeUp(ctx context.Context, composeFile string) error {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("compose up: %v\n%s", err, out)
 	}
-	// Wait for containers to be healthy (match fullchain-dev.yaml healthcheck intervals).
+	// Wait for containers to be healthy (match fullchain-dev-tcp.yaml healthcheck intervals).
 	time.Sleep(10 * time.Second)
 	return nil
 }

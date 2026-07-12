@@ -15,7 +15,7 @@ This mirrors production addressing where AAA-S has a known, routable IP and AAA-
 
 ## 2. Background
 
-Today's `compose/fullchain-dev.yaml` uses the default Docker bridge network and service-name DNS resolution. Service names like `aaa-sim`, `redis`, `biz` resolve correctly only on the default network, which couples tests to Docker's internal DNS and hides IP-layer behavior.
+Today's `compose/fullchain-dev-tcp.yaml` (the TCP overlay for the static-IP fullchain) uses a custom bridge network and static IPv4 addresses. Service names like `aaa-sim`, `redis`, `biz` resolve via Docker DNS only at the application layer; inter-service dialing now happens by IP. This is a deliberate change from the legacy service-name approach used in `compose/fullchain-dev.yaml` (which the rest of this document refers to as the "legacy dev variant" — see §5.1).
 
 `aaa-gateway`'s `diamForwarder` hardcodes `"tcp"` as the dial network because we deleted `DiameterProtocol` during the recent cleanup. To exercise SCTP end-to-end, the dial network must be configurable.
 
@@ -92,7 +92,7 @@ Because Docker assigns the static IP to `eth0` of the `aaa-gateway` container at
 | `compose/fullchain-dev-base.yaml` | **NEW** defines the 9 services under `services:`, each one wiring up `ipv4_address`, env, image via `<<: *common-fragment`. This file is included by both variants. |
 | `compose/fullchain-dev-tcp.yaml` | **NEW** minimal override layer: `include:` pulls `fullchain-dev-base.yaml`; adds `DIAMETER_TRANSPORT=tcp` env to `aaa-sim` and `aaa-gateway`; defines `nssaa_fullchain_tcp` network on top with `name: nssaa_fullchain_tcp`. |
 | `compose/fullchain-dev-sctp.yaml` | **NEW** minimal override layer: same as TCP variant but with `DIAMETER_TRANSPORT=sctp`, `cap_add: [NET_ADMIN]`, and `nssaa_fullchain_sctp` network name. Dockerfile build arg `INSTALL_SCTP=1`. |
-| `compose/fullchain-dev.yaml` | **DELETED.** Replaced by the three files above. The TCP variant becomes the new default for existing `make test-fullchain-fast` callers. |
+| `compose/fullchain-dev-tcp.yaml` | **DELETED.** Replaced by the three files above. The TCP variant becomes the new default for existing `make test-fullchain-fast` callers. |
 | `compose/configs/aaa-gateway.yaml` | `vipAddress: 172.0.3.15`, `diameterServerAddress: 172.0.3.14:3868`, `radiusServerAddress: 172.0.3.14:1812`, `diameterTransport: <tcp\|sctp>`. |
 | `compose/configs/biz.yaml` | `REDIS_ADDR=172.0.3.10:6379`, `POSTGRES_HOST=172.0.3.11`, `NRF_URL=http://172.0.3.12:8081`, `UDM_URL=http://172.0.3.13:8081`, `NRM_URL=http://172.0.3.18:8084`, `AAA_GW_URL=http://172.0.3.15:9090`. |
 | `internal/aaa/gateway/diameter_forward.go` | Add `DiameterTransport string` to `diamForwarderConfig`; pass to the dial helper. |
@@ -252,7 +252,7 @@ aaaGateway:
 | 4 | CER/CEA timing race | Test waits for aaa-sim container healthcheck plus an extra 2s `sleep`. aaa-sim `Run()` logs `"aaa-sim started"` after both servers are up. |
 | 5 | DWR/DWA not fired | `sm.Client` requires `WatchdogInterval` to be set. Test sets `WatchdogInterval=2s` to make DWRs happen within the 10s test timeout. |
 | 6 | RADIUS Response Authenticator mismatch | Test recomputes HMAC-MD5 over expected fields; if mismatch, fail with explicit comparison. |
-| 7 | Existing DNS-name tests broken | `compose/fullchain-dev.yaml` is updated to use IPs by default; existing `make test-fullchain-fast` callers either switch to IP-only paths or revert this file in a separate commit. |
+| 7 | Existing DNS-name tests broken | `compose/fullchain-dev-tcp.yaml` is updated to use IPs by default; existing `make test-fullchain-fast` callers either switch to IP-only paths or revert this file in a separate commit. |
 
 ### 7.1 Component Failure Behavior
 

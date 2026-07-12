@@ -1,31 +1,30 @@
-# compose/fullchain-dev.yaml
-# Dev variant: mounts pre-built binaries for fast iteration.
-# Use with: docker compose -f compose/fullchain-dev.yaml up
+# compose/fullchain-dev-base.yaml
+# Static-IP base layer for the fullchain dev environment.
+# Includes commons.yaml and defines all services with fixed IPv4 addresses
+# in the 172.0.3.0/24 subnet.
 #
-# Services that change frequently get volume mounts (biz, http-gateway, aaa-gateway).
-# Static services (nrf-mock, udm-mock, aaa-sim, redis, postgres) build normally.
-#
-# For fast dev loop: make test-fullchain-fast
-# For no-build mode: make test-fullchain-no-build
+# This file is NOT used directly by `docker compose up`; the user runs
+# one of the variant overlays (fullchain-dev-tcp.yaml or fullchain-dev-sctp.yaml)
+# which includes this base.
+
+include:
+  - path: commons.yaml
 
 services:
-  # ---------------------------------------------------------------------------
-  # Redis — shared session correlation store
-  # ---------------------------------------------------------------------------
+  # --- 172.0.3.10: redis ---
   redis:
     image: redis:7-alpine
     ports: ["6379:6379"]
     networks:
-      - default
+      default:
+        ipv4_address: 172.0.3.10
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
 
-  # ---------------------------------------------------------------------------
-  # PostgreSQL — session and audit data store
-  # ---------------------------------------------------------------------------
+  # --- 172.0.3.11: postgres ---
   postgres:
     image: postgres:16-alpine
     environment:
@@ -34,18 +33,17 @@ services:
       POSTGRES_DB: nssaa
     ports: ["5432:5432"]
     volumes:
-      - postgres_fullchain_dev_data:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql/data
     networks:
-      - default
+      default:
+        ipv4_address: 172.0.3.11
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U nssaa -d nssaa"]
       interval: 5s
       timeout: 3s
       retries: 5
 
-  # ---------------------------------------------------------------------------
-  # nrf-mock — NRF mock (static, rebuild only when code changes)
-  # ---------------------------------------------------------------------------
+  # --- 172.0.3.12: nrf-mock ---
   nrf-mock:
     build:
       context: ..
@@ -55,19 +53,18 @@ services:
     volumes:
       - ../bin/nrf-mock:/app/nrf-mock:ro
     environment:
-      NRF_NF_STATUS: "udm-001:REGISTERED,ausf-001:REGISTERED,aaa-gw-001:REGISTERED"
-      NRF_SERVICE_ENDPOINTS: "UDM:nudm-uem:udm-mock:8081,AUSF:nausf-auth:ausf-mock:8081"
+      NRF_NF_STATUS: "udm-001:REGISTERED,aaa-gw-001:REGISTERED"
+      NRF_SERVICE_ENDPOINTS: "UDM:nudm-uem:udm-mock:8081"
     networks:
-      - default
+      default:
+        ipv4_address: 172.0.3.12
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8081/nnrf-disc/v1/nf-instances || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 5
 
-  # ---------------------------------------------------------------------------
-  # udm-mock — UDM mock (static, rebuild only when code changes)
-  # ---------------------------------------------------------------------------
+  # --- 172.0.3.13: udm-mock ---
   udm-mock:
     build:
       context: ..
@@ -77,36 +74,39 @@ services:
     volumes:
       - ../bin/udm-mock:/app/udm-mock:ro
     networks:
-      - default
+      default:
+        ipv4_address: 172.0.3.13
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8081/nudm-uemm/v1/health || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 5
 
-  # ---------------------------------------------------------------------------
-  # aaa-sim — AAA Server simulator (static, rebuild only when code changes)
-  # ---------------------------------------------------------------------------
+  # --- 172.0.3.14: aaa-sim ---
   aaa-sim:
     build:
       context: ..
       dockerfile: Dockerfile.aaa-sim
+      args:
+        INSTALL_SCTP: "${INSTALL_SCTP:-0}"
     image: nssaaf-aaa-sim:latest
-    ports: ["18120:1812", "38680:3868"]
+    ports: ["18120:1812/udp", "38680:3868"]
     volumes:
       - ../bin/aaa-sim:/app/aaa-sim:ro
     environment:
       AAA_SIM_MODE: "${AAA_SIM_MODE:-EAP_TLS_SUCCESS}"
+      AAA_SIM_DIAMETER_TRANSPORT: "${DIAMETER_TRANSPORT:-tcp}"
     networks:
-      - default
+      default:
+        ipv4_address: 172.0.3.14
 
-  # ---------------------------------------------------------------------------
-  # AAA Gateway — with binary mount for fast iteration
-  # ---------------------------------------------------------------------------
+  # --- 172.0.3.15: aaa-gateway ---
   aaa-gateway:
     build:
       context: ..
       dockerfile: Dockerfile.aaa-gateway
+      args:
+        INSTALL_SCTP: "${INSTALL_SCTP:-0}"
     image: nssaaf-aaa-gw:latest
     depends_on:
       redis:
@@ -117,20 +117,20 @@ services:
       - ./configs/aaa-gateway.yaml:/etc/nssAAF/aaa-gateway.yaml:ro
       - ../bin/aaa-gateway:/app/aaa-gateway:ro
     environment:
-      REDIS_ADDR: "redis:6379"
-      BIZ_URL: "http://biz:8080"
+      REDIS_ADDR: "172.0.3.10:6379"
+      BIZ_URL: "http://172.0.3.16:8080"
+      DIAMETER_TRANSPORT: "${DIAMETER_TRANSPORT:-tcp}"
     ports: ["9090:9090", "18121:1812/udp", "38681:3868"]
     networks:
-      - default
+      default:
+        ipv4_address: 172.0.3.15
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:9090/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
 
-  # ---------------------------------------------------------------------------
-  # biz — with binary mount for fast iteration
-  # ---------------------------------------------------------------------------
+  # --- 172.0.3.16: biz ---
   biz:
     build:
       context: ..
@@ -154,16 +154,16 @@ services:
       - ../bin/biz:/app/biz:ro
     environment:
       MASTER_KEY_HEX: "${MASTER_KEY_HEX:-6767a7ad0416a19ea174608288761dde35dfabba2a8dda9602fc520b80e1af15}"
-      POSTGRES_HOST: "postgres"
-      REDIS_ADDR: "redis:6379"
-      NRF_URL: "http://nrf-mock:8081"
-      UDM_URL: "http://udm-mock:8081"
-      AUSF_URL: "http://biz:8080/n39x"
-      NRM_URL: "http://nrm:8084"
-      AAA_GW_URL: "http://aaa-gateway:9090"
+      POSTGRES_HOST: "172.0.3.11"
+      REDIS_ADDR: "172.0.3.10:6379"
+      NRF_URL: "http://172.0.3.12:8081"
+      UDM_URL: "http://172.0.3.13:8081"
+      NRM_URL: "http://172.0.3.18:8081"
+      AAA_GW_URL: "http://172.0.3.15:9090"
     ports: ["8080:8080"]
     networks:
-      - default
+      default:
+        ipv4_address: 172.0.3.16
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/healthz/live || exit 1"]
       interval: 10s
@@ -171,9 +171,7 @@ services:
       retries: 3
       start_period: 5s
 
-  # ---------------------------------------------------------------------------
-  # http-gateway — with binary mount for fast iteration
-  # ---------------------------------------------------------------------------
+  # --- 172.0.3.17: http-gateway ---
   http-gateway:
     build:
       context: ..
@@ -188,19 +186,18 @@ services:
       - ../bin/http-gateway:/app/http-gateway:ro
     environment:
       NAF3_AUTH_DISABLED: "1"
-      BIZ_URL: "http://biz:8080"
+      BIZ_URL: "http://172.0.3.16:8080"
     ports: ["8443:8443"]
     networks:
-      - default
+      default:
+        ipv4_address: 172.0.3.17
     healthcheck:
       test: ["CMD-SHELL", "curl -skf https://localhost:8443/healthz/ || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
 
-  # ---------------------------------------------------------------------------
-  # NRM — Network Resource Manager / RESTCONF server
-  # ---------------------------------------------------------------------------
+  # --- 172.0.3.18: nrm ---
   nrm:
     build:
       context: ..
@@ -213,16 +210,13 @@ services:
       - ./configs/nrm.yaml:/etc/nssAAF/nrm.yaml:ro
     ports: ["8084:8081"]
     networks:
-      - default
+      default:
+        ipv4_address: 172.0.3.18
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8081/healthz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
 
-networks:
-  default:
-    driver: bridge
-
 volumes:
-  postgres_fullchain_dev_data:
+  postgres-data:
