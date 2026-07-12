@@ -18,13 +18,12 @@ import (
 // AppIDAAP is the Diameter EAP Application ID (RFC 4072).
 const AppIDAAP = 5
 
-// Auth-Application-Id for NASREQ.
-const authAppNASREQ = 256
-
 // Vendor IDs (3GPP).
 const vendor3GPP = 10415
 
-// Diameter result codes.
+// Diameter result codes. Currently unused — handled inline in handleDER
+// via diam.Success / diam.Answer(). Kept for future modes that need to
+// override the result code (e.g. partial-auth challenges).
 const (
 	diameterSuccess      = 2001
 	diameterAuthRejected = 4003
@@ -64,9 +63,16 @@ func (s *DiameterServer) Run(ctx context.Context) error {
 
 	machine := sm.New(settings)
 
-	machine.HandleFunc("DER", s.handleDER)
-	// Register DER at the EAP app index (AppID=5, Code=268) so PrepareSupportedApps
-	// advertises Diameter EAP (RFC 4072) as a supported auth application.
+	machine.HandleFunc("ALL", func(c diam.Conn, m *diam.Message) {
+		s.logger.Warn("unhandled diameter message",
+			"cmd_code", m.Header.CommandCode,
+			"app_id", m.Header.ApplicationID,
+			"is_request", m.Header.CommandFlags&diam.RequestFlag == diam.RequestFlag,
+		)
+	})
+	// Register DER at the EAP app index (AppID=5, Code=268). With the EAP
+	// dict entry short="DE" (see internal/diameter/dict.go), go-diameter's
+	// ServeMux will derive cmd="DER" for requests and dispatch here.
 	machine.HandleIdx(diam.CommandIndex{AppID: AppIDAAP, Code: 268, Request: true}, diam.HandlerFunc(s.handleDER))
 	// DWR is handled internally by sm.New (watchdogOK wrapper ensures peer passed CER/CEA).
 	// Do NOT register a handler here — would override sm's internal DWR handler.
@@ -103,15 +109,23 @@ func (s *DiameterServer) handleDER(c diam.Conn, m *diam.Message) {
 	}
 
 	// Build DEA response using go-diameter's message builder.
+	// Note: m.Answer(diam.Success) already inserts a Result-Code AVP (2001).
 	a := m.Answer(diam.Success)
 	a.Header.HopByHopID = m.Header.HopByHopID
 	a.Header.EndToEndID = m.Header.EndToEndID
 
-	// Result-Code.
-	a.NewAVP(avp.ResultCode, avp.Mbit, 0, datatype.Unsigned32(resultCode))
+	// Override Result-Code only when the mode requires a non-Success code
+	// (e.g. EAP_TLS_CHALLENGE → 4002). Inserting a second Result-Code AVP
+	// when the value already matches diam.Success is invalid per RFC 6733
+	// and triggers the peer's parser to drop the message.
+	if resultCode != diam.Success {
+		a.NewAVP(avp.ResultCode, avp.Mbit, 0, datatype.Unsigned32(resultCode))
+	}
 
-	// Auth-Application-Id.
-	a.NewAVP(avp.AuthApplicationID, avp.Mbit, 0, datatype.Unsigned32(authAppNASREQ))
+	// Auth-Application-Id — must equal the client's AppID (Diameter EAP = 5)
+	// so that go-diameter's client-side parser matches the response to its
+	// pending request.
+	a.NewAVP(avp.AuthApplicationID, avp.Mbit, 0, datatype.Unsigned32(AppIDAAP))
 
 	// Session-ID — extract from DER or generate.
 	sessionID := s.extractSessionID(m)
@@ -120,9 +134,11 @@ func (s *DiameterServer) handleDER(c diam.Conn, m *diam.Message) {
 	// Auth-Request-Type (1 = Authorize_Auth).
 	a.NewAVP(avp.AuthRequestType, avp.Mbit, 0, datatype.Unsigned32(1))
 
-	// EAP-Payload AVP (1265) as top-level AVP per TS 29.561 §17.3.
+	// EAP-Payload AVP (code 209, RFC 4072 §4.2) — same AVP code the
+	// aaa-gateway DER builder uses (see internal/diameter.AVPCodeEAPPayload),
+	// so the DEA round-trips through the same dictionary entry.
 	if eapPayload != nil {
-		a.NewAVP(1265, avp.Mbit, vendor3GPP, datatype.OctetString(eapPayload))
+		a.NewAVP(209, avp.Mbit, 0, datatype.OctetString(eapPayload))
 	}
 
 	if _, err := a.WriteTo(c); err != nil {

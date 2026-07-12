@@ -105,7 +105,7 @@ func (rf *radiusForwarder) Forward(ctx context.Context, eapPayload []byte, sessi
 		attrs = append(attrs, radius.MakeAttribute(radius.AttrEAPMessage, frag))
 	}
 
-	rf.logger.Debug("radius_forward_request",
+	rf.logger.Info("radius_forward_request",
 		"session_id", sessionID,
 		"user_name", userName,
 		"eap_len", len(eapPayload),

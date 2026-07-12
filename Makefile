@@ -305,6 +305,7 @@ test-diameter-radius: gen-certs build ## Diameter TCP + RADIUS E2E (logs-only)
 	FULLCHAIN_AAA_SIM_URL=http://localhost:18120 \
 	FULLCHAIN_NRM_URL=http://localhost:8084 \
 	FULLCHAIN_HTTP_GW_URL=https://localhost:8443 \
+	FULLCHAIN_AAA_GW_URL=http://localhost:9090 \
 	$(GOTEST) -tags=e2e -run 'TestDiameter_TCP|TestRadius' -v -count=1 -timeout=10m ./test/e2e/... \
 	  || { docker compose -f compose/fullchain-dev-tcp.yaml down --remove-orphans; exit 1; }
 	@echo "$(YELLOW)Tearing down TCP stack...$(NC)"
@@ -326,6 +327,7 @@ test-diameter-radius-sctp: gen-certs build ## Diameter SCTP E2E (logs-only; skip
 	FULLCHAIN_AAA_SIM_URL=http://localhost:18120 \
 	FULLCHAIN_NRM_URL=http://localhost:8084 \
 	FULLCHAIN_HTTP_GW_URL=https://localhost:8443 \
+	FULLCHAIN_AAA_GW_URL=http://localhost:9090 \
 	$(GOTEST) -tags=e2e -run 'TestDiameter_SCTP' -v -count=1 -timeout=10m ./test/e2e/... \
 	  || { docker compose -f compose/fullchain-dev-sctp.yaml down --remove-orphans; exit 1; }
 	@echo "$(YELLOW)Tearing down SCTP stack...$(NC)"

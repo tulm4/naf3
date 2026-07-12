@@ -424,7 +424,11 @@ func (df *diamForwarder) Forward(ctx context.Context, eapPayload []byte, session
 
 	df.incrementMessagesSent()
 
-	df.logger.Debug("diameter_forward_der_sent",
+	// Log at Info (not Debug) so E2E tests at the default log level can verify
+	// that a DER was actually emitted. The size/number fields are diagnostic,
+	// not security-sensitive (EAP payload length and a session-id).
+	// Spec: RFC 4072 §3.1 (DER), RFC 6733 §8.8 (header).
+	df.logger.Info("diameter_forward_der_sent",
 		"session_id", sessionID,
 		"hop_by_hop", hopByHop,
 		"eap_len", len(eapPayload),

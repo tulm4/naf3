@@ -12,6 +12,8 @@
 package diameter
 
 import (
+	"log/slog"
+	"os"
 	"strings"
 	"sync"
 
@@ -20,11 +22,41 @@ import (
 
 // eapDictionaryXML is the minimum dictionary extension that registers the
 // Diameter EAP application (AppID=5, RFC 4072) and its DER/DEA command codes.
+//
+// IMPORTANT: go-diameter's dict parser indexes commands by (appID, code) —
+// declaring two <command code="268"> entries (one with short="DER" and one
+// with short="DEA") makes Load() return "Command: ... cannot be added:
+// index exists" and the application is rejected. The convention (used by
+// the go-diameter default dictionary) is a single entry whose .Short is the
+// common base, and go-diameter's mux dispatcher appends "R" / "A" to derive
+// the lookup key (server.go: cmd = dcmd.Short + "R"|"A"). With short="DE"
+// the request becomes "DER" and the answer becomes "DEA" — matching the
+// HandleFunc("DER", ...) registrations across the codebase.
 const eapDictionaryXML = `<?xml version="1.0" encoding="UTF-8"?>
 <diameter>
 	<application id="5" type="auth" name="Diameter EAP">
-		<command code="268" short="DER" name="Diameter-EAP-Request"/>
-		<command code="268" short="DEA" name="Diameter-EAP-Answer"/>
+		<command code="268" short="DE" name="Diameter-EAP-Request">
+			<request>
+				<rule avp="Session-Id" required="false" max="1"/>
+				<rule avp="Auth-Application-Id" required="true" max="1"/>
+				<rule avp="Auth-Request-Type" required="true" max="1"/>
+				<rule avp="Destination-Host" required="false" max="1"/>
+				<rule avp="Destination-Realm" required="true" max="1"/>
+				<rule avp="Origin-Host" required="true" max="1"/>
+				<rule avp="Origin-Realm" required="true" max="1"/>
+				<rule avp="User-Name" required="false" max="1"/>
+				<rule avp="EAP-Payload" required="false"/>
+				<rule avp="EAP-Master-Session-Key" required="false"/>
+			</request>
+			<answer>
+				<rule avp="Result-Code" required="true" max="1"/>
+				<rule avp="Session-Id" required="true" max="1"/>
+				<rule avp="Auth-Application-Id" required="true" max="1"/>
+				<rule avp="Auth-Request-Type" required="true" max="1"/>
+				<rule avp="User-Name" required="false" max="1"/>
+				<rule avp="EAP-Payload" required="false"/>
+			</answer>
+		</command>
 	</application>
 </diameter>
 `
@@ -42,11 +74,13 @@ func Dict() *dict.Parser {
 	dictOnce.Do(func() {
 		dictExt = dict.Default
 		if err := dictExt.Load(strings.NewReader(eapDictionaryXML)); err != nil {
-			// On error, fall back to the default parser; sm.PrepareSupportedApps
-			// will not include app 5, which means clients sending CER with
-			// Auth-Application-Id=5 will be rejected. We log nothing here
-			// because this package may be imported by tests that don't want
-			// to set up a logger; the failure is loud enough at runtime.
+			// Loud failure: previously silent — masked every DER/DEA round-trip
+			// in tests because FindCommand(5, 268) returned an error and the
+			// dispatch fell through to an "ALL" catch-all (or none at all),
+			// silently dropping DER messages on the server side.
+			slog.New(slog.NewJSONHandler(os.Stderr, nil)).
+				Error("diameter.Dict: failed to load EAP dictionary extension; EAP support is broken",
+					"error", err)
 			dictExt = dict.Default
 		}
 	})
