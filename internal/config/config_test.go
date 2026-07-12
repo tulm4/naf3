@@ -93,3 +93,69 @@ crypto:
 		t.Errorf("default DiameterTransport = %q; want %q", cfg.AAAgw.DiameterTransport, "tcp")
 	}
 }
+
+// TestDebugConfig_DefaultsOff verifies the per-UE debug subsystem configuration
+// is parsed and surfaced on cfg.Debug. When no debug section is present, the
+// zero value (Enabled=false) is expected.
+// Spec: docs/superpowers/specs/2026-07-12-nssAAF-per-ue-debug-tracing-design.md §6
+func TestDebugConfig_DefaultsOff(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "biz.yaml")
+	yamlData := `
+component: biz
+version: "0.1.0"
+biz:
+  aaaGatewayUrl: "http://localhost:9090"
+crypto:
+  keyManager: "soft"
+  masterKeyHex: "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+`
+	if err := os.WriteFile(cfgPath, []byte(yamlData), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Debug.Enabled {
+		t.Fatal("expected Debug.Enabled=false by default when section is absent")
+	}
+	if cfg.Debug.RedisAddr != "" {
+		t.Fatalf("expected empty Debug.RedisAddr when section is absent, got %q", cfg.Debug.RedisAddr)
+	}
+}
+
+// TestDebugConfig_EnabledAndRedisAddr verifies the per-UE debug subsystem
+// configuration parses the enabled flag and redis address fields.
+// Spec: docs/superpowers/specs/2026-07-12-nssAAF-per-ue-debug-tracing-design.md §6
+func TestDebugConfig_EnabledAndRedisAddr(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "biz.yaml")
+	yamlData := `
+component: biz
+version: "0.1.0"
+biz:
+  aaaGatewayUrl: "http://localhost:9090"
+debug:
+  enabled: true
+  redisAddr: "127.0.0.1:6379"
+crypto:
+  keyManager: "soft"
+  masterKeyHex: "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+`
+	if err := os.WriteFile(cfgPath, []byte(yamlData), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Debug.Enabled {
+		t.Fatal("expected Debug.Enabled=true")
+	}
+	if cfg.Debug.RedisAddr != "127.0.0.1:6379" {
+		t.Fatalf("unexpected redis addr: %s", cfg.Debug.RedisAddr)
+	}
+}
