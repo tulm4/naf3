@@ -432,12 +432,10 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
-// helper: start a one-shot in-process listener to capture the (impossible)
-// real Redis address — we use a stub client instead.
+// helper: returns a redis client that always errors on every command.
 func newFaultClient() *redis.Client {
-	// Returns a client that always errors on every command.
 	return redis.NewClient(&redis.Options{
-		Dialer: func(ctx context.Context) (net.Conn, error) {
+		Dialer: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			return nil, errors.New("test: no redis")
 		},
 		MaxRetries: -1,
