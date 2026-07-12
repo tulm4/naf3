@@ -6,11 +6,12 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"runtime/debug"
+	runtimedebug "runtime/debug"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	dbg "github.com/operator/nssAAF/internal/debug"
 	"github.com/operator/nssAAF/internal/metrics"
 )
 
@@ -75,7 +76,7 @@ func RecoveryMiddleware(next http.Handler) http.Handler {
 					"error", err,
 					"request_id", reqID,
 					"path", r.URL.Path,
-					"stack", string(debug.Stack()),
+					"stack", string(runtimedebug.Stack()),
 				)
 				problem := InternalServerProblem("An unexpected error occurred")
 				w.Header().Set(HeaderContentType, MediaTypeProblemJSON)
@@ -183,4 +184,42 @@ func WriteJSON(w http.ResponseWriter, status int, v any) error {
 	w.Header().Set(HeaderContentType, MediaTypeJSONVersion)
 	w.WriteHeader(status)
 	return json.NewEncoder(w).Encode(v)
+}
+
+// DebugMiddleware emits one debug event per HTTP request with method, path,
+// status, and duration. Safe to call with d == nil (no-op).
+// Spec: docs/superpowers/specs/2026-07-12-nssAAF-per-ue-debug-tracing-design.md §4.2
+func DebugMiddleware(d *dbg.Debug) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if d == nil || !d.Enabled() {
+				next.ServeHTTP(w, r)
+				return
+			}
+			start := time.Now()
+			wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+			next.ServeHTTP(wrapped, r)
+			d.Emit(r.Context(), dbg.Event{
+				Op:     "http.request",
+				Kind:   dbg.KindHTTP,
+				Detail: map[string]any{
+					"method":      r.Method,
+					"path":        stripAPIversion(r.URL.Path),
+					"status":      wrapped.statusCode,
+					"duration_ms": time.Since(start).Milliseconds(),
+					"client_ip":   clientIP(r),
+				},
+				Status: statusLabel(wrapped.statusCode),
+			})
+		})
+	}
+}
+
+// clientIP returns the best-effort client IP: X-Forwarded-For first, then
+// RemoteAddr. Used only for debug telemetry — never for auth.
+func clientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		return xff
+	}
+	return r.RemoteAddr
 }
