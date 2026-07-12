@@ -13,6 +13,7 @@ import (
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/operator/nssAAF/internal/amf"
 	"github.com/operator/nssAAF/internal/api/aiw"
@@ -23,6 +24,7 @@ import (
 	"github.com/operator/nssAAF/internal/cache/redis"
 	"github.com/operator/nssAAF/internal/config"
 	"github.com/operator/nssAAF/internal/crypto"
+	"github.com/operator/nssAAF/internal/debug"
 	"github.com/operator/nssAAF/internal/metrics"
 	"github.com/operator/nssAAF/internal/nfclient"
 	"github.com/operator/nssAAF/internal/nrf"
@@ -44,6 +46,7 @@ type BizPod struct {
 	DLQ       *redis.DLQ
 	AAAClient *httpAAAClient
 	Logger    *slog.Logger
+	Debug     *debug.Debug
 	HeartbeatCancel func() // cancels the podHeartbeat goroutine on shutdown
 }
 
@@ -218,6 +221,30 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 	dlqHTTPClient := &http.Client{Timeout: 10 * time.Second}
 	go dlq.Process(ctx, dlqHTTPClient)
 
+	// ─── Per-UE debug subsystem (optional; off by default) ─────────────
+	// Spec: docs/superpowers/specs/2026-07-12-nssAAF-per-ue-debug-tracing-design.md §6
+	var dbg *debug.Debug
+	if f.cfg.Debug.Enabled {
+		dbg, err = debug.New(ctx, debug.Config{
+			Enabled:   f.cfg.Debug.Enabled,
+			RedisAddr: f.cfg.Debug.RedisAddr,
+			Service:   "biz",
+			PodID:     f.podID,
+			TTL:       f.cfg.Debug.TTL,
+			MaxLen:    f.cfg.Debug.MaxLen,
+		})
+		if err != nil {
+			f.logger.Warn("debug subsystem init failed; continuing without debug", "error", err)
+			dbg = nil
+		} else {
+			prevCleanup := cleanup
+			cleanup = func() {
+				_ = dbg.Close()
+				prevCleanup()
+			}
+		}
+	}
+
 	// ─── Three isolated CB registries for blast-radius isolation ───────
 	// Internal NF registry (NRF, UDM, AUSF) — wired from canonical config path (CB-G1)
 	cbCfg := f.cfg.InternalComm.Native.CB
@@ -342,11 +369,12 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 	handler = common.MetricsMiddleware(handler)
 	handler = common.LoggingMiddleware(handler)
 	handler = common.CORSMiddleware(handler)
+	handler = common.DebugMiddleware(dbg)(handler)
 
 	// ─── HTTP server ───────────────────────────────────────────────────
 	srv := &http.Server{
 		Addr:         f.cfg.Server.Addr,
-		Handler:      handler,
+		Handler:      otelhttp.NewHandler(handler, "biz"),
 		ReadTimeout:  f.cfg.Server.ReadTimeout,
 		WriteTimeout: f.cfg.Server.WriteTimeout,
 		IdleTimeout:  f.cfg.Server.IdleTimeout,
@@ -367,6 +395,7 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 		DLQ:        dlq,
 		AAAClient:  aaaClient,
 		Logger:     f.logger,
+		Debug:      dbg,
 	}, cleanup, nil
 }
 
@@ -388,6 +417,9 @@ func (bp *BizPod) Close() {
 	}
 	if bp.AAAClient != nil {
 		_ = bp.AAAClient.Close()
+	}
+	if bp.Debug != nil {
+		_ = bp.Debug.Close()
 	}
 	if bp.Server != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
