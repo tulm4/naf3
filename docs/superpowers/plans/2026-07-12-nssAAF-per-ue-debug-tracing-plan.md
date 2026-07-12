@@ -145,7 +145,8 @@ const (
 type Event struct {
 	Op     string
 	Kind   Kind
-	GPSI   string         // raw GPSI; hashed internally; "" if unknown
+	GPSI   string         // raw GPSI (N58 flow); hashed internally; "" if unknown
+	SUPI   string         // raw SUPI (N60 AIW flow); hashed internally; "" if unknown
 	AuthID string         // auth_ctx_id, when known
 	Detail map[string]any // op-specific, JSON-encoded, sanitized
 	Status string         // "ok" | "error"
@@ -215,21 +216,30 @@ func (d *Debug) Emit(ctx context.Context, ev Event) {
 	if !span.IsValid() {
 		return
 	}
+	subHash, subKind := "", ""
 	gpsiHash := ""
-	if ev.GPSI != "" {
-		gpsiHash = logging.HashGPSI(ev.GPSI)
+	switch {
+	case ev.GPSI != "":
+		subHash = logging.HashGPSI(ev.GPSI)
+		subKind = "gpsi"
+		gpsiHash = subHash
+	case ev.SUPI != "":
+		subHash = logging.HashGPSI(ev.SUPI)
+		subKind = "supi"
 	}
 	fields := map[string]any{
-		"ts":     time.Now().UnixMilli(),
-		"pod":    d.podID,
-		"svc":    d.service,
-		"trace":  span.TraceID().String(),
-		"span":   span.SpanID().String(),
-		"gpsi_h": gpsiHash,
-		"auth":   ev.AuthID,
-		"op":     ev.Op,
-		"kind":   string(ev.Kind),
-		"status": ev.Status,
+		"ts":       time.Now().UnixMilli(),
+		"pod":      d.podID,
+		"svc":      d.service,
+		"trace":    span.TraceID().String(),
+		"span":     span.SpanID().String(),
+		"sub_h":    subHash,
+		"sub_kind": subKind,
+		"gpsi_h":   gpsiHash,
+		"auth":     ev.AuthID,
+		"op":       ev.Op,
+		"kind":     string(ev.Kind),
+		"status":   ev.Status,
 	}
 	if ev.Error != nil {
 		fields["err"] = ev.Error.Error()
@@ -241,9 +251,9 @@ func (d *Debug) Emit(ctx context.Context, ev Event) {
 		}
 		fields["detail"] = string(b)
 	}
-	key := "nssaa:debug:stream:" + gpsiHash
-	if gpsiHash == "" {
-		key = "nssaa:debug:stream:_no_gpsi"
+	key := "nssaa:debug:stream:" + subHash
+	if subHash == "" {
+		key = "nssaa:debug:stream:_no_sub"
 	}
 	ctx2, cancel := context.WithTimeout(ctx, 5*time.Millisecond)
 	defer cancel()
@@ -353,11 +363,12 @@ import "github.com/operator/nssAAF/internal/logging"
 
 // piiKeys is the set of map keys that must be replaced with a hash before
 // any debug event is written. Defense-in-depth: call sites should already
-// pass hashed values, but a stray raw GPSI in a Detail map must never reach
-// Redis.
+// pass hashed values, but a stray raw GPSI/SUPI in a Detail map must never
+// reach Redis.
 var piiKeys = map[string]struct{}{
 	"gpsi":               {},
 	"supi":               {},
+	"imsi":               {},
 	"msisdn":             {},
 	"user_name":          {},
 	"calling_station_id": {},
@@ -1529,6 +1540,43 @@ func TestCLI_Trace_EmptyStream(t *testing.T) {
 		t.Fatalf("expected empty-stream message, got: %s", buf.String())
 	}
 }
+
+func TestCLI_Trace_SUPIAlsoWorks(t *testing.T) {
+	s := miniredis.RunT(t)
+	defer s.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: s.Addr()})
+	defer rdb.Close()
+
+	var buf bytes.Buffer
+	if err := runTrace(&buf, traceOpts{
+		RedisAddr: s.Addr(),
+		SUPI:      "imsi-208046000000001",
+		Since:     1 * time.Hour,
+	}, rdb); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "no events") {
+		t.Fatalf("expected empty-stream message, got: %s", buf.String())
+	}
+}
+
+func TestCLI_Trace_RejectsBothGpsiAndSupi(t *testing.T) {
+	s := miniredis.RunT(t)
+	defer s.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: s.Addr()})
+	defer rdb.Close()
+
+	var buf bytes.Buffer
+	err := runTrace(&buf, traceOpts{
+		RedisAddr: s.Addr(),
+		GPSI:      "msisdn-1",
+		SUPI:      "imsi-1",
+		Since:     1 * time.Hour,
+	}, rdb)
+	if err == nil {
+		t.Fatal("expected error when both --gpsi and --supi are set")
+	}
+}
 ```
 
 Note: this test references `runTrace` and `traceOpts` which don't exist yet.
@@ -1550,6 +1598,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -1566,6 +1615,7 @@ import (
 type traceOpts struct {
 	RedisAddr string
 	GPSI      string
+	SUPI      string
 	Trace     string
 	Pod       string
 	Op        string
@@ -1592,29 +1642,31 @@ func main() {
 
 func usage() {
 	fmt.Fprintf(os.Stderr, `Usage:
-  nssAAF debug trace --redis ADDR --gpsi GPSI [--trace ID] [--pod ID] [--op PATTERN] [--since DUR]
-  nssAAF debug stream-list --redis ADDR --gpsi GPSI
-  nssAAF debug stream-clear --redis ADDR --gpsi GPSI
+  nssAAF debug trace --redis ADDR (--gpsi GPSI | --supi SUPI) [--trace ID] [--pod ID] [--op PATTERN] [--since DUR]
+  nssAAF debug stream-list --redis ADDR (--gpsi GPSI | --supi SUPI)
+  nssAAF debug stream-clear --redis ADDR (--gpsi GPSI | --supi SUPI)
 `)
 }
 
 func traceCmd(args []string) {
 	fs := flag.NewFlagSet("trace", flag.ExitOnError)
 	redisAddr := fs.String("redis", "127.0.0.1:6379", "Redis address")
-	gpsi := fs.String("gpsi", "", "GPSI (required)")
+	gpsi := fs.String("gpsi", "", "GPSI (N58 flow; mutually exclusive with --supi)")
+	supi := fs.String("supi", "", "SUPI (N60 AIW flow; mutually exclusive with --gpsi)")
 	traceID := fs.String("trace", "", "Filter to one trace_id")
 	pod := fs.String("pod", "", "Filter to one pod")
 	op := fs.String("op", "", "Filter ops (substring match)")
 	since := fs.Duration("since", 1*time.Hour, "Time window")
 	_ = fs.Parse(args)
-	if *gpsi == "" {
-		fmt.Fprintln(os.Stderr, "--gpsi is required")
+	if (*gpsi == "" && *supi == "") || (*gpsi != "" && *supi != "") {
+		fmt.Fprintln(os.Stderr, "exactly one of --gpsi or --supi is required")
 		os.Exit(1)
 	}
 	rdb := redis.NewClient(&redis.Options{Addr: *redisAddr})
 	defer rdb.Close()
 	if err := runTrace(os.Stdout, traceOpts{
-		RedisAddr: *redisAddr, GPSI: *gpsi, Trace: *traceID, Pod: *pod, Op: *op, Since: *since,
+		RedisAddr: *redisAddr, GPSI: *gpsi, SUPI: *supi,
+		Trace: *traceID, Pod: *pod, Op: *op, Since: *since,
 	}, rdb); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
@@ -1625,14 +1677,15 @@ func streamListCmd(args []string) {
 	fs := flag.NewFlagSet("stream-list", flag.ExitOnError)
 	redisAddr := fs.String("redis", "127.0.0.1:6379", "")
 	gpsi := fs.String("gpsi", "", "")
+	supi := fs.String("supi", "", "")
 	_ = fs.Parse(args)
-	if *gpsi == "" {
-		fmt.Fprintln(os.Stderr, "--gpsi is required")
+	hash, err := requireSubscriber(*gpsi, *supi)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	rdb := redis.NewClient(&redis.Options{Addr: *redisAddr})
 	defer rdb.Close()
-	hash := logging.HashGPSI(*gpsi)
 	key := "nssaa:debug:stream:" + hash
 	length, err := rdb.XLen(context.Background(), key).Result()
 	if err != nil {
@@ -1647,14 +1700,15 @@ func streamClearCmd(args []string) {
 	fs := flag.NewFlagSet("stream-clear", flag.ExitOnError)
 	redisAddr := fs.String("redis", "127.0.0.1:6379", "")
 	gpsi := fs.String("gpsi", "", "")
+	supi := fs.String("supi", "", "")
 	_ = fs.Parse(args)
-	if *gpsi == "" {
-		fmt.Fprintln(os.Stderr, "--gpsi is required")
+	hash, err := requireSubscriber(*gpsi, *supi)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	rdb := redis.NewClient(&redis.Options{Addr: *redisAddr})
 	defer rdb.Close()
-	hash := logging.HashGPSI(*gpsi)
 	key := "nssaa:debug:stream:" + hash
 	if err := rdb.Del(context.Background(), key).Err(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -1663,17 +1717,33 @@ func streamClearCmd(args []string) {
 	fmt.Println("cleared:", key)
 }
 
+func requireSubscriber(gpsi, supi string) (string, error) {
+	switch {
+	case gpsi != "" && supi != "":
+		return "", errors.New("--gpsi and --supi are mutually exclusive")
+	case gpsi == "" && supi == "":
+		return "", errors.New("one of --gpsi or --supi is required")
+	case gpsi != "":
+		return logging.HashGPSI(gpsi), nil
+	default:
+		return logging.HashGPSI(supi), nil
+	}
+}
+
 // runTrace is the testable inner function.
 func runTrace(w *os.File, opts traceOpts, rdb *redis.Client) error {
-	hash := logging.HashGPSI(opts.GPSI)
-	key := "nssaa:debug:stream:" + hash
+	subHash, err := requireSubscriber(opts.GPSI, opts.SUPI)
+	if err != nil {
+		return err
+	}
+	key := "nssaa:debug:stream:" + subHash
 	cutoff := time.Now().Add(-opts.Since).UnixMilli()
 	msgs, err := rdb.XRange(context.Background(), key, "-", "+").Result()
 	if err != nil {
 		return err
 	}
 	if len(msgs) == 0 {
-		fmt.Fprintln(w, "no events for this GPSI in the last", opts.Since)
+		fmt.Fprintln(w, "no events for this subscriber in the last", opts.Since)
 		return nil
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
@@ -2065,6 +2135,9 @@ func TestE2E_DebugTrace_FullRoundTrip(t *testing.T) {
 	if len(msgs) == 0 {
 		t.Fatal("no debug events recorded for the test GPSI")
 	}
+
+	// SUPI query path is exercised by a separate AIW E2E test (see
+	// test/e2e/aiw_debug_e2e_test.go, not part of this plan).
 
 	seen := map[string]bool{}
 	for _, m := range msgs {

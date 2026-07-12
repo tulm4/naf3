@@ -29,10 +29,10 @@ This spec introduces a per-UE debug subsystem that:
 
 ### Goals
 
-1. An operator can run `nssAAF debug trace --gpsi <gpsi>` and get a single chronological timeline of a UE's flow across HTTP Gateway → Biz Pod → AAA Gateway, including every storage/cache call and any error.
+1. An operator can run `nssAAF debug trace --gpsi <gpsi>` (N58 / NSSAA) or `nssAAF debug trace --supi <supi>` (N60 / AIW) and get a single chronological timeline of a UE's flow across HTTP Gateway → Biz Pod → AAA Gateway, including every storage/cache call and any error.
 2. Cross-component correlation uses the **W3C `traceparent` header**, so the same `trace_id` flows through all three processes.
 3. Debug mode is **off by default**. When off, overhead is one atomic load per event-emit point (<10ns).
-4. Debug events are persisted to a **Redis Stream** keyed by GPSI hash, with a 24-hour TTL and a per-stream cap of 10,000 events.
+4. Debug events are persisted to a **Redis Stream** keyed by subscriber hash (GPSI or SUPI, hashed with the same SHA-256-based function), with a 24-hour TTL and a per-stream cap of 10,000 events.
 5. Debug emission never breaks the request path. Emit failures are silently dropped; emit never returns an error.
 
 ### Non-goals
@@ -103,7 +103,7 @@ Every `debug.Emit` call:
 1. Skips immediately if `!d.enabled.Load()` (atomic check, ~1ns).
 2. Skips if there is no OTel span in context (nothing to correlate).
 3. Builds an `Event{Timestamp, PodID, Service, TraceID, SpanID, GPSI_hash, AuthCtxID, Op, Kind, Detail, Status, Error}`.
-4. Sanitizes `Detail` to replace any PII keys (`gpsi|supi|msisdn|user_name|calling_station_id`) with their `logging.HashGPSI` form.
+4. Sanitizes `Detail` to replace any PII keys (`gpsi|supi|imsi|msisdn|user_name|calling_station_id`) with their `logging.HashGPSI` form.
 5. Encodes to a flat field map and `XADD`s to `nssaa:debug:stream:<gpsi_hash>` with `MAXLEN ~ 10000`.
 6. Re-sets `EXPIRE nssaa:debug:stream:<gpsi_hash> 86400` (24h TTL).
 7. All operations are best-effort: a 5ms `context.WithTimeout` caps any wait, errors are dropped silently.
@@ -121,10 +121,11 @@ Every `debug.Emit` call:
 
 ### 4.1 Redis Stream
 
-**Key:** `nssaa:debug:stream:<gpsi_hash>` (e.g., `nssaa:debug:stream:7h3kF2a9...`).
-**Key (no GPSI context):** `nssaa:debug:stream:_no_gpsi` — for events emitted before a GPSI is known (e.g., the very first inbound hop at HTTP Gateway).
+**Key:** `nssaa:debug:stream:<sub_hash>` where `<sub_hash>` is the SHA-256 first-8-bytes base64url of either the GPSI (N58 flow) or the SUPI (N60 flow). The operator queries with whichever identifier the customer report quotes. GPSI-keyed and SUPI-keyed streams are distinct (they hash to different values) but the same CLI and same timeline format work for both.
+
+**Key (no subscriber context):** `nssaa:debug:stream:_no_sub` — for events emitted before a subscriber identifier is known (e.g., the very first inbound hop at HTTP Gateway when the request body hasn't been parsed yet).
 **TTL:** 24h via `EXPIRE` on every XADD.
-**Cap:** `MAXLEN ~ 10000` to bound memory per GPSI.
+**Cap:** `MAXLEN ~ 10000` to bound memory per subscriber.
 
 ### 4.2 Stream entry fields
 
@@ -137,7 +138,9 @@ Redis Stream values are flat key/value pairs:
 | `svc` | string | `"http-gw" \| "biz" \| "aaa-gw"` |
 | `trace` | string | OTel trace_id (32 hex chars) |
 | `span` | string | OTel span_id (16 hex chars) |
-| `gpsi_h` | string | `logging.HashGPSI(gpsi)` (only when GPSI is known) |
+| `sub_h` | string | `logging.HashGPSI(gpsi_or_supi)` (always when known) |
+| `sub_kind` | string | `"gpsi" \| "supi" \| ""` (which identifier populated `sub_h`) |
+| `gpsi_h` | string | `logging.HashGPSI(gpsi)` (only when GPSI is known; AIW events leave this empty) |
 | `auth` | string | auth_ctx_id (when known) |
 | `op` | string | e.g., `http.request`, `pg.session.save`, `redis.rate_limit.allow` |
 | `kind` | string | `http` \| `db` \| `cache` \| `protocol` \| `internal` |
@@ -146,9 +149,9 @@ Redis Stream values are flat key/value pairs:
 | `err` | string | error message (only when status=error) |
 | `detail` | string | JSON-encoded op-specific details (compact, ≤512 bytes; sanitized) |
 
-### 4.3 Why GPSI hash as the key (not auth_ctx_id)
+### 4.3 Why subscriber hash as the key (not auth_ctx_id)
 
-- A UE's GPSI is the stable identifier across multiple sessions (re-auth, revocation).
+- A subscriber's GPSI (or SUPI) is the stable identifier across multiple sessions (re-auth, revocation, AIW re-bootstrap).
 - auth_ctx_id changes per session, so it's a field, not a key.
 - Hashing avoids PII in Redis keys.
 
@@ -198,13 +201,16 @@ func (d *Debug) Emit(ctx context.Context, ev Event)
 type Event struct {
     Op     string
     Kind   string  // "http" | "db" | "cache" | "protocol" | "internal"
-    GPSI   string  // raw GPSI; hashed internally; "" if unknown
+    GPSI   string  // raw GPSI (N58 flow); hashed internally; "" if unknown
+    SUPI   string  // raw SUPI (N60 AIW flow); hashed internally; "" if unknown
     AuthID string
     Detail map[string]any  // op-specific, JSON-encoded, sanitized
     Status string          // "ok" | "error"
     Error  error
 }
 ```
+
+At most one of `GPSI` / `SUPI` is set per event. The Biz Pod's NSSAA handler sets `GPSI`; the AIW handler sets `SUPI`. The emitter derives the Redis Stream key from whichever is set (preferring `GPSI` when both are present, which is the common case). The `gpsi_h` field in the stream entry is set only when `GPSI` was the source; the `sub_h` field always carries the hash regardless of source.
 
 **Emit implementation outline:**
 
@@ -213,21 +219,30 @@ func (d *Debug) Emit(ctx context.Context, ev Event) {
     if d == nil || !d.enabled.Load() { return }
     span := trace.SpanFromContext(ctx).SpanContext()
     if !span.IsValid() { return }
+    subHash, subKind := "", ""
     gpsiHash := ""
-    if ev.GPSI != "" {
-        gpsiHash = logging.HashGPSI(ev.GPSI)
+    switch {
+    case ev.GPSI != "":
+        subHash = logging.HashGPSI(ev.GPSI)
+        subKind = "gpsi"
+        gpsiHash = subHash
+    case ev.SUPI != "":
+        subHash = logging.HashGPSI(ev.SUPI)
+        subKind = "supi"
     }
     fields := map[string]any{
-        "ts":   time.Now().UnixMilli(),
-        "pod":  d.podID,
-        "svc":  d.service,
-        "trace": span.TraceID().String(),
-        "span":  span.SpanID().String(),
-        "gpsi_h": gpsiHash,
-        "auth":   ev.AuthID,
-        "op":     ev.Op,
-        "kind":   ev.Kind,
-        "status": ev.Status,
+        "ts":       time.Now().UnixMilli(),
+        "pod":      d.podID,
+        "svc":      d.service,
+        "trace":    span.TraceID().String(),
+        "span":     span.SpanID().String(),
+        "sub_h":    subHash,
+        "sub_kind": subKind,
+        "gpsi_h":   gpsiHash,
+        "auth":     ev.AuthID,
+        "op":       ev.Op,
+        "kind":     ev.Kind,
+        "status":   ev.Status,
     }
     if ev.Error != nil {
         fields["err"] = ev.Error.Error()
@@ -237,9 +252,9 @@ func (d *Debug) Emit(ctx context.Context, ev Event) {
         if len(b) > 512 { b = b[:512] }
         fields["detail"] = string(b)
     }
-    key := "nssaa:debug:stream:" + gpsiHash
-    if gpsiHash == "" {
-        key = "nssaa:debug:stream:_no_gpsi"
+    key := "nssaa:debug:stream:" + subHash
+    if subHash == "" {
+        key = "nssaa:debug:stream:_no_sub"
     }
     ctx2, cancel := context.WithTimeout(ctx, 5*time.Millisecond)
     defer cancel()
@@ -284,14 +299,26 @@ After all six wirings, every HTTP request entering the system — including thos
 
 ### 5.5 CLI tool: `cmd/nssAAF-debug/main.go`
 
+The CLI accepts either a GPSI (for N58 / NSSAA flow) or a SUPI (for N60 / AIW flow). Internally both are hashed with the same `logging.HashGPSI` (SHA-256 first 8 bytes, base64url) into a single `subscriber_hash` that keys the Redis Stream. This works because both identifiers identify the same human subscriber; the operator can paste whichever identifier the customer report quoted.
+
 ```bash
+# Query by GPSI (N58 / NSSAA flow)
 $ nssAAF debug trace --gpsi msisdn-208046000000001 --since 1h
+# Query by SUPI (N60 / AIW flow)
+$ nssAAF debug trace --supi imsi-208046000000001 --since 1h
+# Filters (work with both --gpsi and --supi)
 $ nssAAF debug trace --gpsi <gpsi> --trace <trace_id>    # filter to one trace
 $ nssAAF debug trace --gpsi <gpsi> --op 'pg.*'           # filter to ops
 $ nssAAF debug trace --gpsi <gpsi> --pod biz-7d2a        # filter to pod
-$ nssAAF debug stream-list --gpsi <gpsi>                # list stream metadata only
-$ nssAAF debug stream-clear --gpsi <gpsi>               # manual cleanup
+$ nssAAF debug stream-list --gpsi <gpsi>                 # list stream metadata only
+$ nssAAF debug stream-clear --gpsi <gpsi>                # manual cleanup
 ```
+
+**Mutual exclusion:** `--gpsi` and `--supi` cannot be used together. The CLI rejects the call if both are set.
+
+**Storage key for the AIW path:** the Biz Pod's AIW handler (`internal/api/aiw/handler.go`) extracts the SUPI from the request body. When emitting a debug event, the Biz Pod calls `debug.Emit(ctx, Event{GPSI: "", SUPI: supi, AuthID: authCtxID, ...})`. The Redis Stream key becomes `nssaa:debug:stream:<hash(supi)>` — a separate stream from any GPSI-keyed stream for the same human subscriber (because GPSI and SUPI are different strings that hash differently). The `gpsi_h` field stays empty for AIW events; a new `sub_h` field carries the hashed subscriber identifier and `sub_kind` records which identifier produced it.
+
+In practice, the operator queries whichever identifier the customer report quotes. Both flows land in the same Redis instance and are queryable with the same CLI; the timeline shown is for whichever identifier the operator provided.
 
 **Output format** (aligned columns, color-coded by `svc`):
 
@@ -387,8 +414,8 @@ When disabled, the per-request overhead is ~10ns — well below the noise floor 
 
 ## 10. Security and privacy
 
-- GPSI / SUPI / MSISDN are always passed through `logging.HashGPSI` before any `XADD`.
-- The `sanitize(detail)` function in `internal/debug/sanitize.go` recurses through the detail map and replaces any value whose key matches `gpsi|supi|msisdn|user_name|calling_station_id` with its `logging.HashGPSI` form. This is defense-in-depth: call sites should already pass only hashed values, but a stray raw GPSI in a log line must never leak to Redis.
+- GPSI / SUPI / MSISDN are always passed through `logging.HashGPSI` before any `XADD`. The hash function is the same SHA-256-first-8-bytes-base64url used elsewhere; the field is named `sub_h` (subscriber hash) in the stream entry.
+- The `sanitize(detail)` function in `internal/debug/sanitize.go` recurses through the detail map and replaces any value whose key matches `gpsi|supi|imsi|msisdn|user_name|calling_station_id` with its `logging.HashGPSI` form. This is defense-in-depth: call sites should already pass only hashed values, but a stray raw GPSI or SUPI in a log line must never leak to Redis.
 - Debug events are stored only in Redis Streams. No local file, no PG.
 - The CLI does not touch PG. Only Redis. PG credentials are not at risk.
 - The CLI does not authenticate to Redis in this design. **For production**, the Redis instance should be access-controlled (firewall, ACL, or a read-replica with restricted scope). Documented in the rollout.
