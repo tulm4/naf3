@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/operator/nssAAF/internal/config"
+	"github.com/operator/nssAAF/internal/debug"
 )
 
 func TestNewRedisClient_Standalone(t *testing.T) {
@@ -109,4 +110,38 @@ func TestGateway_UsesConfigurableMaxRetries(t *testing.T) {
 	if fwdCfg.MaxRetries != 5 {
 		t.Errorf("expected MaxRetries 5, got %d", fwdCfg.MaxRetries)
 	}
+}
+
+// TestGateway_New_StoresDebugFromConfig proves Task 12 of the per-UE debug
+// plan: gateway.New must wire cfg.Debug into the Gateway struct so handlers,
+// forwarders, and writeSessionCorr can emit events via g.debug.Emit/Wrap*.
+func TestGateway_New_StoresDebugFromConfig(t *testing.T) {
+	dbg := &debug.Debug{}
+
+	cfg := Config{
+		Logger: slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		Debug:  dbg,
+	}
+	gw := New(cfg)
+
+	if gw.debug != dbg {
+		t.Fatalf("gw.debug = %p; want %p", gw.debug, dbg)
+	}
+}
+
+// TestGateway_New_AcceptsNilDebug is the nil-safety guard: callers that don't
+// configure the debug subsystem (production default off) must keep working.
+func TestGateway_New_AcceptsNilDebug(t *testing.T) {
+	cfg := Config{
+		Logger: slog.New(slog.NewTextHandler(os.Stdout, nil)),
+	}
+	gw := New(cfg)
+	if gw.debug != nil {
+		t.Fatalf("gw.debug should be nil when cfg.Debug is nil; got %p", gw.debug)
+	}
+	// Sanity: forwarders are still wired even without debug.
+	if gw.diamForwarder == nil {
+		t.Fatal("diamForwarder should be wired even without debug")
+	}
+	_ = context.Background() // keep import used regardless of test additions
 }

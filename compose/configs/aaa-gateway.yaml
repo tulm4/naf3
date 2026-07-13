@@ -39,6 +39,16 @@ metrics:
   enabled: true
   path: "/metrics"
 
+# Per-UE debug subsystem (optional; off by default).
+# When enabled, NSSAAF emits per-UE trace events to Redis streams so an
+# operator can pull a single UE's full HTTP/DB/cache/protocol/internal
+# timeline for forensics. See design spec §6.
+debug:
+  enabled: false
+  redisAddr: "${REDIS_ADDR:-172.0.3.10:6379}"
+  ttl: 24h
+  maxLen: 10000
+
 # Required by config.Validate() even though AAA Gateway doesn't use crypto.
 crypto:
   keyManager: "soft"

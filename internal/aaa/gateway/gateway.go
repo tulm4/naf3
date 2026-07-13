@@ -20,6 +20,7 @@ import (
 	"go.opentelemetry.io/otel"
 
 	"github.com/operator/nssAAF/internal/config"
+	"github.com/operator/nssAAF/internal/debug"
 	"github.com/operator/nssAAF/internal/proto"
 	"github.com/redis/go-redis/v9"
 )
@@ -86,16 +87,21 @@ type Config struct {
 
 	// DLQ holds Dead Letter Queue settings for server-initiated message processing.
 	DLQ config.DLQConfig
+
+	// Debug is the per-UE debug subsystem (optional; nil-safe). All Emit/Wrap*
+	// calls short-circuit when nil or disabled, so the request flow is unaffected.
+	Debug *debug.Debug
 }
 
 // Gateway is the AAA Gateway component. It runs in a separate process from Biz Pods.
 type Gateway struct {
 	cfg Config
 
-	redis         *redis.Client
-	bizHTTPClient *http.Client
-	version       string
-	logger        *slog.Logger
+	debug          *debug.Debug // optional; nil-safe — see internal/debug hooks
+	redis          *redis.Client
+	bizHTTPClient  *http.Client
+	version        string
+	logger         *slog.Logger
 
 	registry        *ServerInitiatedRegistry // tracks pending server-initiated requests
 	radiusHandler   *RadiusHandler
@@ -111,6 +117,7 @@ type Gateway struct {
 func New(cfg Config) *Gateway {
 	g := &Gateway{
 		cfg:     cfg,
+		debug:   cfg.Debug,
 		version: cfg.Version,
 		logger:  cfg.Logger,
 	}
