@@ -142,8 +142,14 @@ func TestSendRAR_RequestAuthenticatorNonZero(t *testing.T) {
 	t.Cleanup(func() { _ = ln.Close() })
 	srv := NewRadiusServer(ln, ModeEAP_TLS_SUCCESS, []byte(testRARSecret), testLogger())
 
-	p1 := srv.buildServerInitiatedPacket(radiusCoARequest, "s1")
-	p2 := srv.buildServerInitiatedPacket(radiusCoARequest, "s2")
+	p1, err := srv.buildServerInitiatedPacket(radiusCoARequest, "s1")
+	if err != nil {
+		t.Fatalf("build packet 1: %v", err)
+	}
+	p2, err := srv.buildServerInitiatedPacket(radiusCoARequest, "s2")
+	if err != nil {
+		t.Fatalf("build packet 2: %v", err)
+	}
 	if bytes.Equal(p1[4:20], p2[4:20]) {
 		t.Errorf("two consecutive Request Authenticators are identical (collision or non-random)")
 	}

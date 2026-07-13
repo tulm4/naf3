@@ -5,8 +5,10 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/md5"
+	crand "crypto/rand"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"log/slog"
 	"math/rand"
 	"net"
@@ -213,7 +215,10 @@ func (s *RadiusServer) SendServerInitiated(clientAddr net.Addr, code uint8, sess
 		return fmt.Errorf("unsupported server-initiated code: %d (want %d or %d)",
 			code, radiusCoARequest, radiusDisconnectRequest)
 	}
-	pkt := s.buildServerInitiatedPacket(code, sessionID)
+	pkt, err := s.buildServerInitiatedPacket(code, sessionID)
+	if err != nil {
+		return fmt.Errorf("build packet: %w", err)
+	}
 	s.sendResponse(clientAddr, pkt)
 	return nil
 }
@@ -221,7 +226,7 @@ func (s *RadiusServer) SendServerInitiated(clientAddr net.Addr, code uint8, sess
 // buildServerInitiatedPacket assembles a CoA-Request / Disconnect-Request
 // packet with a random Request Authenticator, State=sessionID, and a valid
 // Message-Authenticator (HMAC-MD5).
-func (s *RadiusServer) buildServerInitiatedPacket(code uint8, sessionID string) []byte {
+func (s *RadiusServer) buildServerInitiatedPacket(code uint8, sessionID string) ([]byte, error) {
 	attrs := buildStateAttr(sessionID)
 	maAttr := buildMessageAuthAttr()
 
@@ -232,7 +237,11 @@ func (s *RadiusServer) buildServerInitiatedPacket(code uint8, sessionID string) 
 	binary.BigEndian.PutUint16(pkt[2:4], uint16(totalLen))
 
 	// Random Request Authenticator (RFC 5176 §3 — must be unpredictable).
-	rand.Read(pkt[4:20])
+	// Use crypto/rand here even though math/rand is used elsewhere for session
+	// IDs (which are not security-sensitive).
+	if _, err := io.ReadFull(crand.Reader, pkt[4:20]); err != nil {
+		return nil, fmt.Errorf("read random authenticator: %w", err)
+	}
 
 	offset := 20
 	copy(pkt[offset:], attrs)
@@ -248,7 +257,7 @@ func (s *RadiusServer) buildServerInitiatedPacket(code uint8, sessionID string) 
 	ma := computeHMACMD5(pkt[:offset], s.sharedSecret)
 	copy(pkt[maValueOffset:maValueOffset+16], ma)
 
-	return pkt
+	return pkt, nil
 }
 
 func (s *RadiusServer) buildResponse(req []byte, replyCode uint8, sessionID string) []byte {
