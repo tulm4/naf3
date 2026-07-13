@@ -44,6 +44,12 @@ var sharedDriver Driver
 //	E2E_PROFILE         "fullchain" (default) — ContainerDriver + fullchain-dev-tcp.yaml
 //	DOCKER_COMPOSE      additional flags for docker compose (e.g. "-f compose/other.yaml")
 func TestMain(m *testing.M) {
+	// Individual E2E tests own the RUN_E2E skip decision. Avoid initializing
+	// the compose harness before those tests can report a clean skip.
+	if os.Getenv("RUN_E2E") != "1" && os.Getenv("E2E_DOCKER_MANAGED") != "1" {
+		os.Exit(m.Run())
+	}
+
 	dockerManaged := os.Getenv("E2E_DOCKER_MANAGED") == "1"
 	profile := os.Getenv("E2E_PROFILE")
 
