@@ -347,7 +347,7 @@ func TestIntegration_NSSAA_SessionInRedis(t *testing.T) {
 	require.NoError(t, err)
 	redisClient := openTestRedis(t)
 	defer redisClient.Close()
-	cache := cacheredis.NewSessionCache(redisClient, 5*time.Minute)
+	cache := cacheredis.NewSessionCache(redisClient, 5*time.Minute, nil)
 
 	store := &storeWithCache{
 		pg:    postgres.NewNssaaRepository(pool, enc),
@@ -542,7 +542,7 @@ func TestIntegration_NSSAA_SessionExpiry(t *testing.T) {
 	require.NoError(t, err)
 	redisClient := openTestRedis(t)
 	defer redisClient.Close()
-	cache := cacheredis.NewSessionCache(redisClient, 1*time.Second) // 1s TTL for fast expiry test
+	cache := cacheredis.NewSessionCache(redisClient, 1*time.Second, nil) // 1s TTL for fast expiry test
 
 	store := &storeWithCache{
 		pg:    postgres.NewNssaaRepository(pool, enc),

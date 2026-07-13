@@ -396,7 +396,7 @@ func TestAIWHandler_RateLimit_Returns429(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = pool.Close() }()
 
-	rl := rediscache.NewRateLimiter(pool.Client(), 1*time.Minute, 1)
+	rl := rediscache.NewRateLimiter(pool.Client(), 1*time.Minute, 1, nil)
 	ctx := context.Background()
 	for i := 0; i < 3; i++ {
 		_, err := rl.Allow(ctx, "aiw:supi:imsi-208046000000001")
@@ -458,7 +458,7 @@ func TestAIWHandler_Confirm_RateLimit_Limited_Returns429(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = pool.Close() }()
 
-	rl := rediscache.NewRateLimiter(pool.Client(), 1*time.Minute, 1)
+	rl := rediscache.NewRateLimiter(pool.Client(), 1*time.Minute, 1, nil)
 	ctx := context.Background()
 
 	// Pre-seed the store with an auth context.

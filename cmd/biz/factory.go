@@ -101,17 +101,19 @@ type rateLimiterSet struct {
 	gpsiRateLimiter *redis.RateLimiter
 }
 
-func (f *bizPodFactory) newRateLimiterSet(client goredis.Cmdable) rateLimiterSet {
+func (f *bizPodFactory) newRateLimiterSet(client goredis.Cmdable, dbg *debug.Debug) rateLimiterSet {
 	return rateLimiterSet{
 		amfRateLimiter: redis.NewRateLimiter(
 			client,
 			1*time.Second,
 			f.cfg.RateLimit.PerAmfPerSec,
+			dbg,
 		),
 		gpsiRateLimiter: redis.NewRateLimiter(
 			client,
 			1*time.Minute,
 			f.cfg.RateLimit.PerGpsiPerMin,
+			dbg,
 		),
 	}
 }
@@ -301,7 +303,7 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 	)
 
 	// ─── Rate limiters (RL-G1) ───────────────────────────────────────────
-	rateLimiters := f.newRateLimiterSet(redisPool.Client())
+	rateLimiters := f.newRateLimiterSet(redisPool.Client(), dbg)
 
 	// ─── HTTP AAA client ────────────────────────────────────────────────
 	if f.cfg.Biz.UseMTLS {

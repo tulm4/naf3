@@ -503,7 +503,7 @@ func TestNSSAAHandler_RateLimit_Returns429(t *testing.T) {
 
 	// AMF-scoped limiter (1-second window, limit=1).
 	// The create path now uses amfRateLimiter via WithAMFRateLimiter.
-	rl := redis.NewRateLimiter(pool.Client(), 1*time.Minute, 1)
+	rl := redis.NewRateLimiter(pool.Client(), 1*time.Minute, 1, nil)
 
 	// Exhaust the limit by making 2 requests (1 allowed, 1 denied).
 	ctx := context.Background()
@@ -549,7 +549,7 @@ func TestNSSAAHandler_RateLimit_ConfirmSliceAuthentication_Returns429(t *testing
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = pool.Close() })
 
-	rl := redis.NewRateLimiter(pool.Client(), 1*time.Minute, 1)
+	rl := redis.NewRateLimiter(pool.Client(), 1*time.Minute, 1, nil)
 
 	// Exhaust the limit for authctx:ctx-001.
 	ctx := context.Background()
@@ -620,7 +620,7 @@ func TestNSSAAHandler_RateLimit_Metrics_Allowed(t *testing.T) {
 	t.Cleanup(func() { _ = pool.Close() })
 
 	// Create rate limiter with limit=10 (high enough that first request is allowed).
-	rl := redis.NewRateLimiter(pool.Client(), 1*time.Minute, 10)
+	rl := redis.NewRateLimiter(pool.Client(), 1*time.Minute, 10, nil)
 
 	store := newMockStore()
 	h := NewHandler(store, WithRateLimiter(rl))
@@ -664,7 +664,7 @@ func TestNSSAAHandler_RateLimit_Metrics_Error(t *testing.T) {
 	_ = pool.Close()
 
 	// Create rate limiter with the closed pool - all operations will fail.
-	rl := redis.NewRateLimiter(pool2.Client(), 1*time.Minute, 10)
+	rl := redis.NewRateLimiter(pool2.Client(), 1*time.Minute, 10, nil)
 
 	store := newMockStore()
 	// Create path now uses WithAMFRateLimiter; with nil amfRateLimiter, no enforcement.
@@ -703,7 +703,7 @@ func TestNSSAAHandler_Create_RateLimit_AMFLimited_Returns429(t *testing.T) {
 
 	// AMF limiter: 1-second window, limit=1.
 	// This matches PerAmfPerSec policy intent (1 request per second per AMF).
-	rl := redis.NewRateLimiter(pool.Client(), 1*time.Second, 1)
+	rl := redis.NewRateLimiter(pool.Client(), 1*time.Second, 1, nil)
 
 	// Pre-exhaust the AMF limiter for amf-test-host.
 	ctx := context.Background()
@@ -769,7 +769,7 @@ func TestNSSAAHandler_Create_RateLimit_RedisError_FailsOpen(t *testing.T) {
 	_ = pool.Close()
 
 	// Create rate limiter with the closed pool - all operations will fail.
-	rl := redis.NewRateLimiter(pool2.Client(), 1*time.Minute, 1)
+	rl := redis.NewRateLimiter(pool2.Client(), 1*time.Minute, 1, nil)
 
 	store := newMockStore()
 	h := NewHandler(store, WithRateLimiter(rl))
@@ -809,7 +809,7 @@ func TestNSSAAHandler_Confirm_RateLimit_Limited_Returns429(t *testing.T) {
 	t.Cleanup(func() { _ = pool.Close() })
 
 	// Auth-context limiter: 1-minute window, limit=1 (per-minute policy).
-	rl := redis.NewRateLimiter(pool.Client(), 1*time.Minute, 1)
+	rl := redis.NewRateLimiter(pool.Client(), 1*time.Minute, 1, nil)
 
 	// Pre-exhaust the limiter for authctx:ctx-confirm-test.
 	ctx := context.Background()
