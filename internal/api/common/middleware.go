@@ -187,9 +187,11 @@ func WriteJSON(w http.ResponseWriter, status int, v any) error {
 	return json.NewEncoder(w).Encode(v)
 }
 
-// DebugMiddleware emits one debug event per HTTP request with method, path,
-// status, and duration. Safe to call with d == nil (no-op).
-// Spec: docs/superpowers/specs/2026-07-12-nssAAF-per-ue-debug-tracing-design.md §4.2
+// DebugMiddleware emits one http.request event before the handler runs and
+// one http.request.exit event after it returns. Both share the same trace_id
+// (since they run in the same request scope). Status and duration are captured
+// via a wrapped ResponseWriter. Safe to call with d == nil (no-op).
+// Spec: docs/superpowers/specs/2026-07-13-nssAAF-per-ue-debug-tracing-verification-spec.md §3
 func DebugMiddleware(d *dbg.Debug) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -210,9 +212,28 @@ func DebugMiddleware(d *dbg.Debug) func(http.Handler) http.Handler {
 			}
 			start := time.Now()
 			wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
-			next.ServeHTTP(wrapped, r)
+
+			// Entry event: emit BEFORE the handler runs. Same trace_id as
+			// the exit event because both run within the request span.
 			d.Emit(r.Context(), dbg.Event{
 				Op:   "http.request",
+				Kind: dbg.KindHTTP,
+				GPSI: gpsi,
+				SUPI: supi,
+				Detail: map[string]any{
+					"method":    r.Method,
+					"path":      stripAPIversion(r.URL.Path),
+					"client_ip": clientIP(r),
+				},
+			})
+
+			next.ServeHTTP(wrapped, r)
+
+			// Exit event: emit AFTER the handler returns, regardless of
+			// outcome (deferred in case the handler panics — RecoveryMiddleware
+			// catches the panic upstream but the deferred emit still fires).
+			d.Emit(r.Context(), dbg.Event{
+				Op:   "http.request.exit",
 				Kind: dbg.KindHTTP,
 				GPSI: gpsi,
 				SUPI: supi,
@@ -221,7 +242,6 @@ func DebugMiddleware(d *dbg.Debug) func(http.Handler) http.Handler {
 					"path":        stripAPIversion(r.URL.Path),
 					"status":      wrapped.statusCode,
 					"duration_ms": time.Since(start).Milliseconds(),
-					"client_ip":   clientIP(r),
 				},
 				Status: statusLabel(wrapped.statusCode),
 			})
