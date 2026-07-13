@@ -14,13 +14,27 @@ import (
 	"time"
 )
 
-// RADIUS codes. RFC 2865.
+// RADIUS codes. RFC 2865, RFC 5176.
 const (
 	radiusAccessRequest   = 1
 	radiusAccessAccept    = 2
 	radiusAccessReject    = 3
 	radiusAccessChallenge = 11
+	// RFC 5176 §3 — Change-of-Authorization (CoA-Request) and
+	// Disconnect-Request. 3GPP TS 29.561 §16.1.2 maps RAR (Re-Auth-Request)
+	// to CoA-Request (43) and ASR (Abort-Session-Request) to Disconnect-Request
+	// (44) when carried over RADIUS/Diameter.
+	radiusCoARequest     = 43 // RFC 5176 §3.1 — 3GPP TS 29.561: RAR
+	radiusDisconnectRequest = 44 // RFC 5176 §3.2 — 3GPP TS 29.561: ASR
 )
+
+// CodeReauthRequest is the RADIUS code for Re-Auth-Request (RFC 5176 CoA-Request).
+// Alias kept for callers that prefer the 3GPP naming.
+const CodeReauthRequest = radiusCoARequest
+
+// CodeAbortSessionRequest is the RADIUS code for Abort-Session-Request
+// (RFC 5176 Disconnect-Request).
+const CodeAbortSessionRequest = radiusDisconnectRequest
 
 // RADIUS attribute types. RFC 2865, RFC 3579.
 const (
@@ -152,12 +166,89 @@ func (s *RadiusServer) sendResponse(clientAddr net.Addr, resp []byte) {
 			s.logger.Info("radius_access_reject", "client", clientAddr.String())
 		case radiusAccessChallenge:
 			s.logger.Info("radius_access_challenge", "client", clientAddr.String())
+		case radiusCoARequest:
+			s.logger.Info("radius_coa_request", "client", clientAddr.String())
+		case radiusDisconnectRequest:
+			s.logger.Info("radius_disconnect_request", "client", clientAddr.String())
 		}
 	}
 	_, err := s.ln.WriteTo(resp, clientAddr)
 	if err != nil {
 		s.logger.Error("failed to send RADIUS response", "error", err)
 	}
+}
+
+// SendRAR sends a RADIUS Re-Auth-Request (RFC 5176 §3.1 CoA-Request, code 43)
+// to clientAddr. 3GPP TS 29.561 §16 maps AAA-S → AAA-Client RAR over RADIUS
+// onto the CoA-Request code.
+//
+// sessionID identifies the existing session to re-authenticate; it is
+// transmitted in the State attribute (RFC 2865 §5.24).
+func (s *RadiusServer) SendRAR(clientAddr net.Addr, sessionID string) error {
+	return s.SendServerInitiated(clientAddr, radiusCoARequest, sessionID)
+}
+
+// SendASR sends a RADIUS Abort-Session-Request (RFC 5176 §3.2 Disconnect-Request,
+// code 44) to clientAddr. 3GPP TS 29.561 §16 maps AAA-S → AAA-Client ASR
+// over RADIUS onto the Disconnect-Request code.
+//
+// sessionID identifies the existing session to abort; it is transmitted in
+// the State attribute.
+func (s *RadiusServer) SendASR(clientAddr net.Addr, sessionID string) error {
+	return s.SendServerInitiated(clientAddr, radiusDisconnectRequest, sessionID)
+}
+
+// SendServerInitiated builds and sends a server-initiated RADIUS packet
+// (CoA-Request / Disconnect-Request) to clientAddr. The packet carries a
+// fresh random Request Authenticator (RFC 5176 §3) and a State attribute
+// carrying sessionID so the receiver can correlate to the live session.
+//
+// Per RFC 5176 §3, server-initiated packets MUST contain a Message-Authenticator
+// attribute so the receiver can verify packet integrity before acting on it.
+func (s *RadiusServer) SendServerInitiated(clientAddr net.Addr, code uint8, sessionID string) error {
+	switch code {
+	case radiusCoARequest, radiusDisconnectRequest:
+		// ok
+	default:
+		return fmt.Errorf("unsupported server-initiated code: %d (want %d or %d)",
+			code, radiusCoARequest, radiusDisconnectRequest)
+	}
+	pkt := s.buildServerInitiatedPacket(code, sessionID)
+	s.sendResponse(clientAddr, pkt)
+	return nil
+}
+
+// buildServerInitiatedPacket assembles a CoA-Request / Disconnect-Request
+// packet with a random Request Authenticator, State=sessionID, and a valid
+// Message-Authenticator (HMAC-MD5).
+func (s *RadiusServer) buildServerInitiatedPacket(code uint8, sessionID string) []byte {
+	attrs := buildStateAttr(sessionID)
+	maAttr := buildMessageAuthAttr()
+
+	totalLen := 20 + len(attrs) + len(maAttr)
+	pkt := make([]byte, totalLen)
+	pkt[0] = code
+	pkt[1] = 0 // Identifier — unsolicited, receiver doesn't correlate by ID
+	binary.BigEndian.PutUint16(pkt[2:4], uint16(totalLen))
+
+	// Random Request Authenticator (RFC 5176 §3 — must be unpredictable).
+	rand.Read(pkt[4:20])
+
+	offset := 20
+	copy(pkt[offset:], attrs)
+	offset += len(attrs)
+	copy(pkt[offset:], maAttr)
+	offset += len(maAttr)
+
+	// Fill Message-Authenticator = HMAC-MD5(packet, secret) with MA value zeroed.
+	maValueOffset := offset - 16
+	for i := 0; i < 16; i++ {
+		pkt[maValueOffset+i] = 0
+	}
+	ma := computeHMACMD5(pkt[:offset], s.sharedSecret)
+	copy(pkt[maValueOffset:maValueOffset+16], ma)
+
+	return pkt
 }
 
 func (s *RadiusServer) buildResponse(req []byte, replyCode uint8, sessionID string) []byte {
