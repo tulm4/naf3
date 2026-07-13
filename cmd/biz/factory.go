@@ -217,7 +217,7 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 	}
 
 	// ─── Session stores ──────────────────────────────────────────────────
-	nssaaStore := postgres.NewNssaaRepository(pgPool, encryptor)
+	nssaaStore := postgres.NewNssaaRepository(pgPool, encryptor, dbg)
 	aiwStore := postgres.NewAiwRepository(pgPool, encryptor, dbg)
 
 	// ─── Redis pool + DLQ ───────────────────────────────────────────────

@@ -132,6 +132,7 @@ func New(cfg Config) *Gateway {
 	g.radiusHandler = &RadiusHandler{
 		logger:       cfg.Logger,
 		tracer:       otel.Tracer("aaa-gateway/radius"),
+		debug:        cfg.Debug,
 		forwardToBiz: g.forwardToBiz,
 		registry:     g.registry,
 		sharedSecret: cfg.RadiusSharedSecret,
@@ -518,6 +519,25 @@ func (g *Gateway) forwardToBiz(ctx context.Context, sessionID string, transportT
 		g.logger.Error("failed to marshal server-initiated request", "error", err)
 		return
 	}
+
+	// Spec: debug tracing verification spec §3, hop "aaa-gw server-initiated
+	// reception" — emit "http.request.out" once per outbound flow so an operator
+	// pulling a single UE's stream can see the egress before the response lands.
+	// GPSI is intentionally empty here (server-initiated ingress carries no GPSI
+	// in payload or DTO); this event lands in the _no_sub stream.
+	g.debug.Emit(ctx, debug.Event{
+		Op:     "http.request.out",
+		Kind:   debug.KindHTTP,
+		AuthID: entry.AuthCtxID,
+		Detail: map[string]any{
+			"method":       http.MethodPost,
+			"target":       "biz",
+			"session_id":   sessionID,
+			"transport":    transportType,
+			"message_type": messageType,
+		},
+		Status: "ok",
+	})
 
 	// 3. Retry loop
 	var lastErr error

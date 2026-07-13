@@ -15,6 +15,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/operator/nssAAF/internal/debug"
 	"github.com/operator/nssAAF/internal/radius"
 )
 
@@ -33,6 +34,7 @@ const (
 type RadiusHandler struct {
 	logger       *slog.Logger
 	tracer       trace.Tracer
+	debug        *debug.Debug // optional; nil-safe — see internal/debug hooks
 	forwardToBiz func(ctx context.Context, sessionID string, transportType string, messageType string, raw []byte)
 	registry     *ServerInitiatedRegistry
 	sharedSecret string // Shared secret for Message-Authenticator validation (RFC 5176 §3)
@@ -174,6 +176,23 @@ func (h *RadiusHandler) handleServerInitiated(ctx context.Context, raw []byte, t
 			),
 		)
 		defer span.End()
+
+		// Spec: debug tracing verification spec §3, hop "aaa-gw server-initiated
+		// reception" — emit "aaa.radius.recv" so an operator pulling a single UE's
+		// stream can see the inbound RADIUS packet before it is forwarded to biz.
+		// GPSI is intentionally empty here (server-initiated ingress carries no
+		// GPSI in payload or DTO); events for this hop land in the _no_sub stream.
+		h.debug.Emit(detachedCtx, debug.Event{
+			Op:     "aaa.radius.recv",
+			Kind:   debug.KindProtocol,
+			AuthID: sessionID,
+			Detail: map[string]any{
+				"code":        raw[0],
+				"transport":   transport,
+				"message_type": msgType,
+			},
+			Status: "ok",
+		})
 
 		// Forward to Biz Pod (non-blocking from caller's perspective).
 		h.forwardToBiz(detachedCtx, sessionID, transport, msgType, raw)
