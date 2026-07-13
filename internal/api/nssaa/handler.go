@@ -20,6 +20,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/operator/nssAAF/internal/api/common"
 	"github.com/operator/nssAAF/internal/cache/redis"
+	"github.com/operator/nssAAF/internal/debug"
 	"github.com/operator/nssAAF/internal/eap"
 	"github.com/operator/nssAAF/internal/logging"
 	"github.com/operator/nssAAF/internal/metrics"
@@ -216,6 +217,10 @@ func (h *Handler) CreateSliceAuthenticationContext(w http.ResponseWriter, r *htt
 		return
 	}
 
+	// Inject GPSI into context so downstream WrapDB/WrapRedis picks it up
+	// for per-UE debug event correlation.
+	r = r.WithContext(debug.WithSubscriber(r.Context(), string(body.Gpsi), ""))
+
 	sst := body.Snssai.Sst
 	sd := body.Snssai.Sd
 	if err := common.ValidateSnssai(int(sst), sd, !snssaiPresent); err != nil {
@@ -345,6 +350,10 @@ func (h *Handler) ConfirmSliceAuthentication(w http.ResponseWriter, r *http.Requ
 		}
 		return
 	}
+
+	// Inject GPSI into context so downstream WrapDB/WrapRedis picks it up
+	// for per-UE debug event correlation.
+	r = r.WithContext(debug.WithSubscriber(r.Context(), string(body.Gpsi), ""))
 
 	sst := body.Snssai.Sst
 	sd := body.Snssai.Sd
