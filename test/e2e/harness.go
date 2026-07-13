@@ -35,6 +35,7 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -442,6 +443,76 @@ func ParseAuthCtxIDFromResp(t *testing.T, resp *http.Response) string {
 	id, ok := ParseAuthCtxID(body)
 	require.True(t, ok, "authCtxId must be present in response")
 	return id
+}
+
+// ─── Debug tracing helpers ─────────────────────────────────────────────────
+
+// requireDebugEnabled checks whether debug mode is enabled in the running stack.
+// It returns true if E2E_DEBUG_ENABLED is set to "true", false otherwise.
+// When false, callers should skip debug-related tests.
+func (h *Harness) requireDebugEnabled() bool {
+	return os.Getenv("E2E_DEBUG_ENABLED") == "true"
+}
+
+// postNSSAA sends a POST /nnssaaf-nssaa/v1/slice-authentications request
+// via the HTTP Gateway and returns the response. The caller is responsible
+// for closing the response body.
+func (h *Harness) postNSSAA(t *testing.T, gpsi string, sst uint8, sd string) *http.Response {
+	t.Helper()
+	body := map[string]interface{}{
+		"gpsi":     gpsi,
+		"snssai":   map[string]interface{}{"sst": sst, "sd": sd},
+		"eapIdRsp": "dGVzdA==", // base64 "test"
+	}
+	payloadBytes, _ := json.Marshal(body)
+	req, err := http.NewRequest(http.MethodPost, h.HTTPGWURL()+"/nnssaaf-nssaa/v1/slice-authentications", strings.NewReader(string(payloadBytes))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Request-ID", "test-debug-req")
+	client := h.TLSClient()
+	resp, err := client.Do(req.WithContext(requireTestContext(t))
+	require.NoError(t, err)
+	return resp
+}
+
+// runCLITrace executes the debug CLI trace command against the harness Redis
+// instance for the given GPSI and returns the stdout output.
+func (h *Harness) runCLITrace(t *testing.T, gpsi string) string {
+	t.Helper()
+	addr := h.RedisAddr()
+	args := []string{
+		"run",
+		"./cmd/nssAAF-debug",
+		"trace",
+		"--redis=" + addr,
+		"--gpsi=" + gpsi,
+		"--since=24h",
+	}
+	cmd := exec.Command("go", args...)
+	var out strings.Builder
+	cmd.Dir = h.configInfraRoot()
+	cmd.Stdout = &out
+	cmd.Stderr = os.Stderr
+	err := cmd.Run()
+	if err != nil {
+		t.Logf("CLI trace failed (may be expected if debug is off): %v", err)
+	}
+	return out.String()
+}
+
+// configInfraRoot returns the project root directory (where go.mod lives).
+// Used to resolve relative paths for go run invocations.
+func (h *Harness) configInfraRoot() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	for dir := cwd; dir != "/"; dir = filepath.Dir(dir) {
+		if _, statErr := os.Stat(filepath.Join(dir, "go.mod")); statErr == nil {
+			return dir
+		}
+	}
+	return "."
 }
 
 // ─── Internal helpers ───────────────────────────────────────────────────────
