@@ -37,16 +37,16 @@ import (
 
 // BizPod holds all dependencies for the Biz Pod.
 type BizPod struct {
-	Server    *http.Server
-	NRFClient *nrf.Client
-	NssaaStore storage.NssaaStore
-	AiwStore   storage.AiwStore
-	Pool      *postgres.Pool
-	RedisPool *redis.Pool
-	DLQ       *redis.DLQ
-	AAAClient *httpAAAClient
-	Logger    *slog.Logger
-	Debug     *debug.Debug
+	Server          *http.Server
+	NRFClient       *nrf.Client
+	NssaaStore      storage.NssaaStore
+	AiwStore        storage.AiwStore
+	Pool            *postgres.Pool
+	RedisPool       *redis.Pool
+	DLQ             *redis.DLQ
+	AAAClient       *httpAAAClient
+	Logger          *slog.Logger
+	Debug           *debug.Debug
 	HeartbeatCancel func() // cancels the podHeartbeat goroutine on shutdown
 }
 
@@ -97,7 +97,7 @@ func (f *bizPodFactory) newNFRegistry() *resilience.Registry {
 
 // rateLimiterSet holds the explicit per-scope limiter wiring.
 type rateLimiterSet struct {
-	amfRateLimiter *redis.RateLimiter
+	amfRateLimiter  *redis.RateLimiter
 	gpsiRateLimiter *redis.RateLimiter
 }
 
@@ -332,6 +332,7 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 		f.cfg.Version,
 		commCfg,
 		f.logger,
+		dbg,
 	)
 
 	// Start VIP health check goroutine after pod initialization.
