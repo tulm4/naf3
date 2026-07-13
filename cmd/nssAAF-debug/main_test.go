@@ -249,7 +249,7 @@ func TestRunTrace_JSON(t *testing.T) {
 	_ = rdb.XAdd(context.Background(), &redis.XAddArgs{
 		Stream: stream,
 		Values: map[string]interface{}{
-			"ts": strconv.FormatInt(now-100, 10),
+			"ts":  strconv.FormatInt(now-100, 10),
 			"pod": "biz-1", "svc": "biz",
 			"trace": "traceForward", "span": "span-a",
 			"auth": "AUTH1", "gpsi_h": "abcdef0123",
@@ -260,7 +260,7 @@ func TestRunTrace_JSON(t *testing.T) {
 	_ = rdb.XAdd(context.Background(), &redis.XAddArgs{
 		Stream: stream,
 		Values: map[string]interface{}{
-			"ts": strconv.FormatInt(now-50, 10),
+			"ts":  strconv.FormatInt(now-50, 10),
 			"pod": "aaa-gw-1", "svc": "aaa-gw",
 			"trace": "traceForward", "span": "span-b",
 			"auth": "AUTH1", "gpsi_h": "abcdef0123",
@@ -273,7 +273,7 @@ func TestRunTrace_JSON(t *testing.T) {
 	_ = rdb.XAdd(context.Background(), &redis.XAddArgs{
 		Stream: stream,
 		Values: map[string]interface{}{
-			"ts": strconv.FormatInt(now, 10),
+			"ts":  strconv.FormatInt(now, 10),
 			"pod": "aaa-gw-1", "svc": "aaa-gw",
 			"trace": "traceCallback", "span": "span-c",
 			"auth": "AUTH1", "gpsi_h": "abcdef0123",
@@ -371,7 +371,7 @@ func TestRunTrace_TableGrouping(t *testing.T) {
 		_ = rdb.XAdd(context.Background(), &redis.XAddArgs{
 			Stream: stream,
 			Values: map[string]interface{}{
-				"ts": strconv.FormatInt(now+int64(i), 10),
+				"ts":  strconv.FormatInt(now+int64(i), 10),
 				"pod": "biz-1", "svc": "biz", "trace": trace,
 				"auth": "AUTH1", "gpsi_h": "deadbeef",
 				"op": "biz:http.request", "status": "ok", "dur": "1",
@@ -427,7 +427,7 @@ func TestCLI_Trace_LimitFilter(t *testing.T) {
 		_ = rdb.XAdd(context.Background(), &redis.XAddArgs{
 			Stream: stream,
 			Values: map[string]interface{}{
-				"ts": strconv.FormatInt(now+int64(i), 10),
+				"ts":  strconv.FormatInt(now+int64(i), 10),
 				"pod": "biz-1", "svc": "biz", "trace": "abc",
 				"op": fmt.Sprintf("op.%d", i), "status": "ok", "dur": "1",
 			},
