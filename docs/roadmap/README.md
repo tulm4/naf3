@@ -60,6 +60,7 @@ make run-aaa-gateway  # AAA GW on :9090
 | Phase 4: NF Integration & Observability | ✅ DONE | `internal/nrf/` (NRF client wired, startup registration, heartbeat), `internal/udm/` (Nudm_UECM_Get wired to N58 handler, UpdateAuthContext), `internal/amf/` (AMF notifier wired, Re-Auth/Revocation POSTs), `internal/ausf/` (AUSF N60 client, MSK forwarding), `internal/resilience/` (circuit breaker, retry), `internal/metrics/` (Prometheus metrics), `internal/logging/` (structured JSON logging), `internal/tracing/` (OpenTelemetry), `cmd/biz/main.go` (full NF wiring) |
 | Phase 5: Security & Crypto | ✅ DONE | `internal/auth/` (JWT validation, JWKS cache, scope enforcement), `internal/crypto/` (AES-256-GCM, KEK/DEK, KeyManager, VaultKeyManager, SoftHSMKeyManager, secret encryption) |
 | Phase 6: Integration Testing & NRM | ✅ DONE | `test/`, `internal/nrm/` (NRM RESTCONF + AlarmManager — COMPLETE, 15/15 UAT tests PASS) |
+| Phase 4.1: Per-UE Debug Tracing | ✅ DONE | `internal/debug/` (subsystem + Redis Streams + Emit/Hooks/sanitize), `cmd/nssAAF-debug/` (CLI: trace, stream-list, stream-clear), debug config wired into biz/http-gw/aaa-gw, cross-component OTel trace propagation |
 | Phase 7: Kubernetes Deployment | ⏳ PENDING | `deployments/helm/`, `deployments/kustomize/`, `deployments/argo/` |
 | Phase 7.1: Internal Comm Dual-Mode | ⏳ PENDING | `internal/httpclient/`, `internal/config/`, `cmd/*/` |
 | Phase 8: Performance & Load Testing | ⏳ PENDING | `test/load/`, chaos testing |
