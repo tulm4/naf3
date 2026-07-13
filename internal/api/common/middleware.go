@@ -4,6 +4,7 @@ package common
 
 import (
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	runtimedebug "runtime/debug"
@@ -196,12 +197,25 @@ func DebugMiddleware(d *dbg.Debug) func(http.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 				return
 			}
+			// Best-effort GPSI/SUPI extraction from request body so events
+			// land in the per-UE stream rather than _no_sub. Failure to
+			// parse is non-fatal — we still emit the event without a key.
+			var gpsi, supi string
+			if r.Body != nil && r.ContentLength != 0 {
+				body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+				if err == nil {
+					gpsi, supi = extractSubscriber(body)
+					r.Body = io.NopCloser(strings.NewReader(string(body)))
+				}
+			}
 			start := time.Now()
 			wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 			next.ServeHTTP(wrapped, r)
 			d.Emit(r.Context(), dbg.Event{
-				Op:     "http.request",
-				Kind:   dbg.KindHTTP,
+				Op:   "http.request",
+				Kind: dbg.KindHTTP,
+				GPSI: gpsi,
+				SUPI: supi,
 				Detail: map[string]any{
 					"method":      r.Method,
 					"path":        stripAPIversion(r.URL.Path),
@@ -213,6 +227,22 @@ func DebugMiddleware(d *dbg.Debug) func(http.Handler) http.Handler {
 			})
 		})
 	}
+}
+
+// extractSubscriber peeks at a JSON request body for known UE identity keys.
+// Returns (gpsi, supi). It is best-effort: any parse error yields empty strings.
+func extractSubscriber(body []byte) (string, string) {
+	var m map[string]any
+	if err := json.Unmarshal(body, &m); err != nil {
+		return "", ""
+	}
+	if v, ok := m["gpsi"].(string); ok {
+		return v, ""
+	}
+	if v, ok := m["supi"].(string); ok {
+		return "", v
+	}
+	return "", ""
 }
 
 // clientIP returns the best-effort client IP: X-Forwarded-For first, then

@@ -34,6 +34,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -62,6 +63,7 @@ type Harness struct {
 	bizURL    string
 	aaagwURL  string
 	nrmURL    string
+	redisAddr string
 
 	// driver provides mock/container backend for AMF and AUSF.
 	// Use Driver() to access it. Initialized by NewHarnessFromDriver().
@@ -216,13 +218,14 @@ func NewHarnessFromDriver(t *testing.T, driver Driver) *Harness {
 	}
 
 	h := &Harness{
-		t:         t,
-		config:    cfg,
-		driver:    driver,
-		httpGWURL: cfg.Services.HTTPGatewayUrl,
-		bizURL:    cfg.Services.BizPodUrl,
-		aaagwURL:  cfg.Services.AAAGatewayUrl,
-		nrmURL:    cfg.Services.NRMUrl,
+		t:          t,
+		config:     cfg,
+		driver:     driver,
+		httpGWURL:  cfg.Services.HTTPGatewayUrl,
+		bizURL:     cfg.Services.BizPodUrl,
+		aaagwURL:   cfg.Services.AAAGatewayUrl,
+		nrmURL:     cfg.Services.NRMUrl,
+		redisAddr:  extractHostPort(cfg.Infra.RedisUrl),
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -401,6 +404,9 @@ func (h *Harness) AAAGWURL() string { return h.aaagwURL }
 // NRMURL returns the NRM RESTCONF base URL.
 func (h *Harness) NRMURL() string { return h.nrmURL }
 
+// RedisAddr returns the Redis address from the harness config.
+func (h *Harness) RedisAddr() string { return h.redisAddr }
+
 // Driver returns the harness's driver (ContainerDriver).
 func (h *Harness) Driver() Driver {
 	return h.driver
@@ -465,12 +471,12 @@ func (h *Harness) postNSSAA(t *testing.T, gpsi string, sst uint8, sd string) *ht
 		"eapIdRsp": "dGVzdA==", // base64 "test"
 	}
 	payloadBytes, _ := json.Marshal(body)
-	req, err := http.NewRequest(http.MethodPost, h.HTTPGWURL()+"/nnssaaf-nssaa/v1/slice-authentications", strings.NewReader(string(payloadBytes))
+	req, err := http.NewRequest(http.MethodPost, h.HTTPGWURL()+"/nnssaaf-nssaa/v1/slice-authentications", strings.NewReader(string(payloadBytes)))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Request-ID", "test-debug-req")
 	client := h.TLSClient()
-	resp, err := client.Do(req.WithContext(requireTestContext(t))
+	resp, err := client.Do(req.WithContext(requireTestContext(t)))
 	require.NoError(t, err)
 	return resp
 }
@@ -600,4 +606,21 @@ func ofThisFile() string {
 		}
 	}
 	return "."
+}
+
+// extractHostPort converts a redis://host:port URL (or just host:port) into
+// host:port for use with redis.Options{Addr: ...}.
+func extractHostPort(raw string) string {
+	// Strip redis:// prefix if present.
+	raw = strings.TrimPrefix(raw, "redis://")
+	// If it's already host:port, return as-is.
+	if !strings.Contains(raw, "://") {
+		return raw
+	}
+	// Parse as URL to extract host:port.
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	return u.Host
 }

@@ -44,7 +44,7 @@ metrics:
 # operator can pull a single UE's full HTTP/DB/cache/protocol/internal
 # timeline for forensics. See design spec §6.
 debug:
-  enabled: false
+  enabled: true
   redisAddr: "${REDIS_ADDR:-172.0.3.10:6379}"
   ttl: 24h
   maxLen: 10000
