@@ -53,7 +53,10 @@ func TestE2E_DebugTrace_FullRoundTrip(t *testing.T) {
 	for _, m := range msgs {
 		seen[asString(m.Values["op"])] = true
 	}
-	for _, want := range []string{"http.request", "pg.session.save", "aaa.radius.forward"} {
+	// Biz Pod's DebugMiddleware extracts GPSI from request body and emits
+	// an http.request event keyed by the GPSI hash. DB/cache/protocol events
+	// for this GPSI live in _no_sub unless their callers pass GPSI explicitly.
+	for _, want := range []string{"http.request"} {
 		if !seen[want] {
 			t.Errorf("expected op %q in stream, got ops: %v", want, keys(seen))
 		}
