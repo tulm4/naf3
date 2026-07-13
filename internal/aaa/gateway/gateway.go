@@ -147,7 +147,7 @@ func New(cfg Config) *Gateway {
 			Timeout:        cfg.InternalComm.Native.Radius.Timeout,
 			MaxRetries:     cfg.InternalComm.Native.Radius.MaxRetries,
 			ResponseWindow: cfg.InternalComm.Native.Radius.ResponseWindow,
-		}, cfg.Logger)
+		}, cfg.Logger, cfg.Debug)
 	}
 
 	// Create the persistent Diameter forwarder for client-initiated path.
@@ -167,6 +167,7 @@ func New(cfg Config) *Gateway {
 		cfg.Logger,
 		g.forwardToBiz,
 		g.registry,
+		cfg.Debug,
 	)
 
 	return g
@@ -325,9 +326,23 @@ func (g *Gateway) HandleForward(w http.ResponseWriter, r *http.Request) {
 	resp, err := g.ForwardEAP(r.Context(), &req)
 	if err != nil {
 		g.logger.Error("ForwardEAP failed", "error", err)
+		g.debug.Emit(r.Context(), debug.Event{
+			Op:     "aaa.handle_forward",
+			Kind:   debug.KindInternal,
+			AuthID: req.AuthCtxID,
+			Status: "error",
+			Error:  err,
+		})
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	g.debug.Emit(r.Context(), debug.Event{
+		Op:     "aaa.handle_forward",
+		Kind:   debug.KindInternal,
+		AuthID: req.AuthCtxID,
+		Status: "ok",
+	})
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
@@ -379,7 +394,9 @@ func (g *Gateway) writeSessionCorr(ctx context.Context, sessionID string, entry 
 	if err != nil {
 		return err
 	}
-	return g.redis.Set(ctx, key, data, proto.DefaultPayloadTTL).Err()
+	return g.debug.WrapRedis(ctx, "redis.session_corr.write", key, func() error {
+		return g.redis.Set(ctx, key, data, proto.DefaultPayloadTTL).Err()
+	})
 }
 
 // getBizPodURL reads the BizPodEntry for a specific podID from Redis HASH.

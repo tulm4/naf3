@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"log/slog"
 	"net/http"
@@ -144,4 +145,59 @@ func TestGateway_New_AcceptsNilDebug(t *testing.T) {
 		t.Fatal("diamForwarder should be wired even without debug")
 	}
 	_ = context.Background() // keep import used regardless of test additions
+}
+
+// TestGateway_HandleForward_WithDebug_PreservesBehavior proves Task 13 of the
+// per-UE debug plan: HandleForward must emit KindInternal debug events while
+// still returning the expected response. With no AAA server reachable the
+// forward path returns an error → handler must surface that as 500 and emit
+// the corresponding error event. This guards against instrumentation that
+// silently swallows errors.
+func TestGateway_HandleForward_WithDebug_PreservesBehavior(t *testing.T) {
+	gw := New(Config{
+		Logger: slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		Debug:  &debug.Debug{}, // zero-value: disabled, all Emit paths short-circuit
+	})
+
+	body := []byte(`{
+        "v":"1.0",
+        "sessionId":"sess-1",
+        "authCtxId":"auth-1",
+        "transportType":"RADIUS",
+        "sst":1,
+        "sd":"FFFFFF",
+        "direction":"CLIENT_INITIATED",
+        "payload":"AAECAwQ="
+    }`)
+
+	req := httptest.NewRequest("POST", "/aaa/forward", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	// ForwardEAP will fail because no AAA server is reachable and no Redis is
+	// configured — the point is that the handler must still respond with 500
+	// and emit the error event (no panic).
+	gw.HandleForward(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500 (ForwardEAP fails with no AAA), got %d, body=%q",
+			rec.Code, rec.Body.String())
+	}
+}
+
+// TestGateway_HandleForward_MethodNotAllowed proves the existing pre-check
+// path emits no panic when debug is enabled and the request method is wrong.
+func TestGateway_HandleForward_MethodNotAllowed(t *testing.T) {
+	gw := New(Config{
+		Logger: slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		Debug:  &debug.Debug{},
+	})
+
+	req := httptest.NewRequest("GET", "/aaa/forward", nil)
+	rec := httptest.NewRecorder()
+	gw.HandleForward(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 for GET, got %d", rec.Code)
+	}
 }

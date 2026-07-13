@@ -17,6 +17,7 @@ import (
 	"github.com/fiorix/go-diameter/v4/diam/sm"
 	"github.com/fiorix/go-diameter/v4/diam/sm/smpeer"
 
+	"github.com/operator/nssAAF/internal/debug"
 	"github.com/operator/nssAAF/internal/diameter"
 )
 
@@ -75,6 +76,7 @@ type diamForwarder struct {
 	mu          sync.RWMutex
 	logger      *slog.Logger
 	connected   bool
+	debug       *debug.Debug // optional; nil-safe — see internal/debug hooks
 
 	// Server-initiated inbound (handlers live on df.machine, fire on the
 	// forwarder's outbound socket — TCP is bidirectional, RFC 6733 §5.6).
@@ -109,6 +111,7 @@ type diamForwarder struct {
 // forwardToBiz is the callback used by server-initiated inbound handlers (ASR/RAR/STR)
 // to deliver inbound Diameter server messages to the Biz Pod via the registry/HTTP path.
 // registry tracks pending server-initiated requests until Biz Pod acknowledges.
+// dbg is the per-UE debug subsystem; nil-safe.
 // Spec: RFC 6733 §5.3 (CER/CEA), RFC 4072 (DER/DEA), RFC 6733 §5.6 (TCP bidirectional)
 func newDiamForwarder(
 	addr, network, originHost, originRealm, destHost, destRealm string,
@@ -116,6 +119,7 @@ func newDiamForwarder(
 	logger *slog.Logger,
 	forwardToBiz func(ctx context.Context, sessionID string, transportType string, messageType string, raw []byte),
 	registry *ServerInitiatedRegistry,
+	dbg *debug.Debug,
 ) *diamForwarder {
 	// Apply defaults for optional config fields (GAP-AAA-04, GAP-DIA-02, GAP-DIA-03)
 	if cfg.Transport == "" {
@@ -137,6 +141,7 @@ func newDiamForwarder(
 		destRealm:    destRealm,
 		logger:       logger,
 		cfg:          cfg,
+		debug:        dbg,
 		pending:      make(map[uint32]chan *diam.Message),
 		forwardToBiz: forwardToBiz,
 		registry:     registry,
@@ -415,6 +420,25 @@ func (df *diamForwarder) Forward(ctx context.Context, eapPayload []byte, session
 			_ = dc.SetReadDeadline(deadline)
 		}
 	}
+
+	// Protocol-kind debug event before the wire write so an operator pulling a
+	// single UE's stream sees the DER with command code + peer + session before
+	// the corresponding response. The actual underlying send call is wrapped
+	// with WrapProtocol in Task 14 — this Emit is the higher-level "we are
+	// about to send DER" signal with request metadata.
+	df.debug.Emit(ctx, debug.Event{
+		Op:     "diameter.eap.send",
+		Kind:   debug.KindProtocol,
+		AuthID: sessionID,
+		Detail: map[string]any{
+			"command_code": 268, // DER per RFC 4072 §3.1
+			"peer":         df.addr,
+			"network":      df.network,
+			"hop_by_hop":   hopByHop,
+			"eap_len":      len(eapPayload),
+		},
+		Status: "ok",
+	})
 
 	_, err = m.WriteTo(conn)
 	if err != nil {

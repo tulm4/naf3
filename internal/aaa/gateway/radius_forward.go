@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/operator/nssAAF/internal/debug"
 	"github.com/operator/nssAAF/internal/radius"
 )
 
@@ -29,6 +30,7 @@ type radiusForwarder struct {
 	client *radius.Client
 	config RadiusForwarderConfig
 	logger *slog.Logger
+	debug  *debug.Debug // optional; nil-safe — see internal/debug hooks
 }
 
 // Config returns the RADIUS forwarder configuration.
@@ -37,10 +39,13 @@ func (rf *radiusForwarder) Config() RadiusForwarderConfig {
 }
 
 // newRadiusForwarder creates a RADIUS forwarder using the existing radius.Client.
-func newRadiusForwarder(cfg RadiusForwarderConfig, logger *slog.Logger) *radiusForwarder {
+// The *debug.Debug parameter is nil-safe: Emit/Wrap* short-circuit when nil or
+// disabled (see internal/debug/hooks.go).
+func newRadiusForwarder(cfg RadiusForwarderConfig, logger *slog.Logger, d *debug.Debug) *radiusForwarder {
 	r := &radiusForwarder{
 		config: cfg,
 		logger: logger,
+		debug:  d,
 	}
 	if cfg.ServerAddress == "" {
 		return r
@@ -111,6 +116,25 @@ func (rf *radiusForwarder) Forward(ctx context.Context, eapPayload []byte, sessi
 		"eap_len", len(eapPayload),
 		"fragments", len(eapFrags),
 	)
+
+	// Protocol-kind debug event: surfaces RADIUS Access-Request send + outcome.
+	// Detail includes RADIUS code (1 = Access-Request per RFC 2865 §3.1) and
+	// the resolved AAA-S peer address. The actual underlying send call is
+	// wrapped with WrapProtocol in Task 14 — this Emit is the higher-level
+	// "we are about to call RADIUS" signal with request metadata.
+	rf.debug.Emit(ctx, debug.Event{
+		Op:     "radius.eap.send",
+		Kind:   debug.KindProtocol,
+		AuthID: userName,
+		Detail: map[string]any{
+			"code":        radius.CodeAccessRequest,
+			"peer":        rf.config.ServerAddress,
+			"eap_len":     len(eapPayload),
+			"fragments":   len(eapFrags),
+			"session_id":  sessionID,
+		},
+		Status: "ok",
+	})
 
 	return rf.client.SendAccessRequest(ctx, attrs)
 }
