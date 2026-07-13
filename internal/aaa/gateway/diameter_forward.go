@@ -423,9 +423,8 @@ func (df *diamForwarder) Forward(ctx context.Context, eapPayload []byte, session
 
 	// Protocol-kind debug event before the wire write so an operator pulling a
 	// single UE's stream sees the DER with command code + peer + session before
-	// the corresponding response. The actual underlying send call is wrapped
-	// with WrapProtocol in Task 14 — this Emit is the higher-level "we are
-	// about to send DER" signal with request metadata.
+	// the corresponding response. This is the higher-level "we are about to
+	// send DER" signal with request metadata.
 	df.debug.Emit(ctx, debug.Event{
 		Op:     "diameter.eap.send",
 		Kind:   debug.KindProtocol,
@@ -440,10 +439,18 @@ func (df *diamForwarder) Forward(ctx context.Context, eapPayload []byte, session
 		Status: "ok",
 	})
 
-	_, err = m.WriteTo(conn)
-	if err != nil {
+	// WrapProtocol captures timing + outcome of the actual DER wire write.
+	// Emits "diameter.eap.forward" with duration_ms so an operator pulling a
+	// single UE's stream sees the wire-level send vs. the higher-level
+	// diameter.eap.send. WrapProtocol is nil-safe (short-circuits when debug
+	// is nil or disabled).
+	writeErr := df.debug.WrapProtocol(ctx, "diameter.eap.forward", func() error {
+		_, e := m.WriteTo(conn)
+		return e
+	})
+	if writeErr != nil {
 		df.removePending(hopByHop)
-		return nil, fmt.Errorf("diameter_forward: failed to send DER: %w", err)
+		return nil, fmt.Errorf("diameter_forward: failed to send DER: %w", writeErr)
 	}
 
 	df.incrementMessagesSent()

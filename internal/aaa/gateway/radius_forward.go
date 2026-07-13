@@ -127,16 +127,27 @@ func (rf *radiusForwarder) Forward(ctx context.Context, eapPayload []byte, sessi
 		Kind:   debug.KindProtocol,
 		AuthID: userName,
 		Detail: map[string]any{
-			"code":        radius.CodeAccessRequest,
-			"peer":        rf.config.ServerAddress,
-			"eap_len":     len(eapPayload),
-			"fragments":   len(eapFrags),
-			"session_id":  sessionID,
+			"code":       radius.CodeAccessRequest,
+			"peer":       rf.config.ServerAddress,
+			"eap_len":    len(eapPayload),
+			"fragments":  len(eapFrags),
+			"session_id": sessionID,
 		},
 		Status: "ok",
 	})
 
-	return rf.client.SendAccessRequest(ctx, attrs)
+	// WrapProtocol captures timing + outcome of the actual radius.Client.Send
+	// call. Emit "radius.eap.forward" with duration_ms so an operator pulling
+	// a single UE's stream sees the wire-level send vs. the higher-level
+	// radius.eap.send. WrapProtocol is nil-safe (short-circuits when debug is
+	// nil or disabled).
+	var response []byte
+	wrapErr := rf.debug.WrapProtocol(ctx, "radius.eap.forward", func() error {
+		var e error
+		response, e = rf.client.SendAccessRequest(ctx, attrs)
+		return e
+	})
+	return response, wrapErr
 }
 
 // Close shuts down the RADIUS client.
