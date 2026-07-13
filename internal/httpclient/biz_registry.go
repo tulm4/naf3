@@ -46,7 +46,11 @@ var _ proto.BizServiceClient = (*BizRegistry)(nil)
 // redisAddr: Redis server address for pod discovery
 // staticURL: fallback static URL when Redis has no live pods
 // cfg: NativeCommConfig for timeout, retry, and circuit breaker settings
-func NewBizRegistry(redisAddr, staticURL string, cfg config.NativeCommConfig) *BizRegistry {
+// transport: optional http.RoundTripper override for outbound HTTP. When nil,
+// the client builds a default pooled transport from cfg.Pool.
+//
+// Spec: docs/superpowers/specs/2026-07-12-nssAAF-per-ue-debug-tracing-design.md §5.4
+func NewBizRegistry(redisAddr, staticURL string, cfg config.NativeCommConfig, transport http.RoundTripper) *BizRegistry {
 	retryCfg := resilience.RetryConfig{
 		MaxAttempts: cfg.Retry.MaxAttempts,
 		BaseDelay:   cfg.Retry.BaseDelay,
@@ -73,10 +77,17 @@ func NewBizRegistry(redisAddr, staticURL string, cfg config.NativeCommConfig) *B
 		cbCfg.SuccessThreshold = 3
 	}
 
+	if transport == nil {
+		transport = &http.Transport{}
+	}
+
 	return &BizRegistry{
-		redisAddr:  redisAddr,
-		staticURL:  staticURL,
-		httpClient: &http.Client{Timeout: cfg.Timeout},
+		redisAddr: redisAddr,
+		staticURL: staticURL,
+		httpClient: &http.Client{
+			Transport: transport,
+			Timeout:   cfg.Timeout,
+		},
 		cbRegistry: resilience.NewRegistry(
 			cbCfg.FailureThreshold,
 			cbCfg.RecoveryTimeout,

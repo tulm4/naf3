@@ -19,7 +19,7 @@ func TestBizRegistry_ForwardsToLivePod(t *testing.T) {
 	registry := NewBizRegistry("localhost:9999", pod1.URL, config.NativeCommConfig{
 		Retry:   config.RetryConfig{MaxAttempts: 1},
 		Timeout: 5 * time.Second,
-	})
+	}, nil)
 
 	ctx := context.Background()
 	body, status, err := registry.ForwardRequest(ctx, "/test", "GET", nil, "req-1")
@@ -45,7 +45,7 @@ func TestBizRegistry_PropagatesRequestID(t *testing.T) {
 
 	registry := NewBizRegistry("localhost:9999", server.URL, config.NativeCommConfig{
 		Retry: config.RetryConfig{MaxAttempts: 1},
-	})
+	}, nil)
 
 	ctx := context.Background()
 	_, _, err := registry.ForwardRequest(ctx, "/test", "GET", nil, "my-request-id")

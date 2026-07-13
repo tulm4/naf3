@@ -2,8 +2,12 @@ package httpclient
 
 import (
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/operator/nssAAF/internal/config"
 	"github.com/operator/nssAAF/internal/proto"
@@ -258,5 +262,68 @@ func TestFactory_ModeMethod(t *testing.T) {
 				t.Errorf("got mode %v, want %v", factory.Mode(), tt.wantMode)
 			}
 		})
+	}
+}
+
+// countingTransport records that it was invoked so tests can assert the
+// factory-injected transport is actually used by the resulting client.
+type countingTransport struct {
+	calls atomic.Int64
+	base  http.RoundTripper
+}
+
+func (c *countingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	c.calls.Add(1)
+	if c.base == nil {
+		return http.DefaultTransport.RoundTrip(req)
+	}
+	return c.base.RoundTrip(req)
+}
+
+// TestFactory_NewBizServiceClient_UsesInjectedTransport verifies that when a
+// custom http.RoundTripper is supplied to the factory, outbound HTTP traffic
+// from the resulting BizServiceClient flows through that transport.
+//
+// Spec: docs/superpowers/specs/2026-07-12-nssAAF-per-ue-debug-tracing-design.md §5.4
+// The HTTP Gateway proxies requests to Biz Pod using an OTel-instrumented
+// transport so W3C traceparent headers propagate across the hop.
+func TestFactory_NewBizServiceClient_UsesInjectedTransport(t *testing.T) {
+	os.Unsetenv("ISTIO_MTLS")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	tr := &countingTransport{}
+	cfg := config.InternalCommConfig{
+		Mode: "native",
+		Native: config.NativeCommConfig{
+			Retry:   config.RetryConfig{MaxAttempts: 1},
+			Timeout: 5 * time.Second,
+		},
+	}
+
+	factory := NewFactory(cfg)
+	factory.SetTransport(tr)
+
+	client := factory.NewBizServiceClient(srv.URL, "localhost:9999")
+	if client == nil {
+		t.Fatal("expected non-nil client")
+	}
+
+	// Cast to *BizRegistry (native mode) so we can call ForwardRequest.
+	registry, ok := client.(*BizRegistry)
+	if !ok {
+		t.Fatalf("expected *BizRegistry in native mode, got %T", client)
+	}
+
+	_, _, err := registry.ForwardRequest(t.Context(), "/test", "GET", nil, "req-1")
+	if err != nil {
+		t.Fatalf("ForwardRequest: %v", err)
+	}
+
+	if got := tr.calls.Load(); got == 0 {
+		t.Errorf("expected injected transport to be called, got %d calls", got)
 	}
 }

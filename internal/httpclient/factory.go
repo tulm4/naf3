@@ -2,6 +2,7 @@ package httpclient
 
 import (
 	"log/slog"
+	"net/http"
 	"os"
 
 	"github.com/operator/nssAAF/internal/config"
@@ -18,8 +19,9 @@ const (
 
 // Factory creates HTTP clients based on mode.
 type Factory struct {
-	mode Mode
-	cfg  config.InternalCommConfig
+	mode      Mode
+	cfg       config.InternalCommConfig
+	transport http.RoundTripper // optional override applied to native clients
 }
 
 // NewFactory creates a new HTTP client factory.
@@ -39,13 +41,23 @@ func (f *Factory) Mode() Mode {
 	return f.mode
 }
 
+// SetTransport injects an http.RoundTripper used by native clients created
+// from this factory. Pass nil to clear the override.
+//
+// Spec: docs/superpowers/specs/2026-07-12-nssAAF-per-ue-debug-tracing-design.md §5.4
+// The HTTP Gateway uses this to wrap native clients with an OTel-instrumented
+// transport so W3C traceparent headers propagate to Biz Pod.
+func (f *Factory) SetTransport(t http.RoundTripper) {
+	f.transport = t
+}
+
 // NewBizServiceClient creates a BizServiceClient for HTTP GW -> Biz Pod.
 func (f *Factory) NewBizServiceClient(bizServiceURL string, redisAddr string) proto.BizServiceClient {
 	switch f.mode {
 	case ModeIstio:
 		return newIstioBizClient(bizServiceURL)
 	default:
-		return NewBizRegistry(redisAddr, bizServiceURL, f.cfg.Native)
+		return NewBizRegistry(redisAddr, bizServiceURL, f.cfg.Native, f.transport)
 	}
 }
 
