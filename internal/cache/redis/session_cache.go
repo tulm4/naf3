@@ -87,7 +87,7 @@ func (c *SessionCache) Set(ctx context.Context, authCtxID string, entry *Session
 		return fmt.Errorf("session cache marshal: %w", err)
 	}
 
-	return c.debug.WrapRedis(ctx, "redis.session_cache.set", key, func() error {
+	return c.debug.WrapRedis(ctx, "redis.session.set", key, func() error {
 		if err := c.client.Set(ctx, key, data, c.ttl).Err(); err != nil {
 			return fmt.Errorf("session cache set: %w", err)
 		}

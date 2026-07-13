@@ -76,7 +76,7 @@ func (r *AuditRepository) Append(ctx context.Context, e *AuditEntry) error {
 			client_ip, user_agent
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`
 
-	return r.debug.WrapDB(ctx, "pg.audit.append", "nssaa_audit_log", func() error {
+	return r.debug.WrapDB(ctx, "pg.audit.write", "nssaa_audit_log", func() error {
 		err := r.pool.Exec(ctx, sql,
 			e.AuthCtxID, e.GPSIHash, e.SnssaiSST, e.SnssaiSD,
 			e.AMFInstanceID, e.AMFIP,
