@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -228,6 +229,187 @@ func TestCLI_Trace_SinceFilter(t *testing.T) {
 	}
 	if !strings.Contains(out, "new.op") {
 		t.Fatalf("since filter dropped recent event: %s", out)
+	}
+}
+
+// TestRunTrace_JSON verifies that --json emits one JSON object per line
+// with all stream fields and that grouping by trace_id is preserved via
+// the "trace" field on each object.
+func TestRunTrace_JSON(t *testing.T) {
+	s := miniredis.RunT(t)
+	defer s.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: s.Addr()})
+	defer rdb.Close()
+
+	hash := logging.HashGPSI("msisdn-JSON")
+	stream := "nssaa:debug:stream:" + hash
+	now := time.Now().UnixMilli()
+
+	// Forward trace: two events sharing trace "traceForward"
+	_ = rdb.XAdd(context.Background(), &redis.XAddArgs{
+		Stream: stream,
+		Values: map[string]interface{}{
+			"ts": strconv.FormatInt(now-100, 10),
+			"pod": "biz-1", "svc": "biz",
+			"trace": "traceForward", "span": "span-a",
+			"auth": "AUTH1", "gpsi_h": "abcdef0123",
+			"op": "biz:http.request", "kind": "http", "status": "ok", "dur": "5",
+			"detail": `{"table":"sessions"}`,
+		},
+	}).Err()
+	_ = rdb.XAdd(context.Background(), &redis.XAddArgs{
+		Stream: stream,
+		Values: map[string]interface{}{
+			"ts": strconv.FormatInt(now-50, 10),
+			"pod": "aaa-gw-1", "svc": "aaa-gw",
+			"trace": "traceForward", "span": "span-b",
+			"auth": "AUTH1", "gpsi_h": "abcdef0123",
+			"op": "aaa-gw:aaa.radius.forward", "kind": "aaa", "status": "ok", "dur": "12",
+			"detail": `{"session_id":"abc"}`,
+		},
+	}).Err()
+
+	// Callback trace: one event with a different trace_id.
+	_ = rdb.XAdd(context.Background(), &redis.XAddArgs{
+		Stream: stream,
+		Values: map[string]interface{}{
+			"ts": strconv.FormatInt(now, 10),
+			"pod": "aaa-gw-1", "svc": "aaa-gw",
+			"trace": "traceCallback", "span": "span-c",
+			"auth": "AUTH1", "gpsi_h": "abcdef0123",
+			"op": "aaa-gw:aaa.radius.recv", "kind": "aaa", "status": "ok", "dur": "3",
+			"detail": `{"rar":true}`,
+		},
+	}).Err()
+
+	var buf bytes.Buffer
+	if err := runTrace(&buf, traceOpts{
+		RedisAddr: s.Addr(),
+		GPSI:      "msisdn-JSON",
+		Since:     1 * time.Hour,
+		JSON:      true,
+	}, rdb); err != nil {
+		t.Fatal(err)
+	}
+
+	out := strings.TrimRight(buf.String(), "\n")
+	if out == "" {
+		t.Fatal("expected JSON output, got empty")
+	}
+	lines := strings.Split(out, "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 JSON lines (one per event), got %d:\n%s", len(lines), out)
+	}
+
+	type rec struct {
+		TS     int64           `json:"ts"`
+		Pod    string          `json:"pod"`
+		Svc    string          `json:"svc"`
+		Trace  string          `json:"trace"`
+		Span   string          `json:"span"`
+		SubH   string          `json:"sub_h"`
+		GpsiH  string          `json:"gpsi_h"`
+		Auth   string          `json:"auth"`
+		Op     string          `json:"op"`
+		Kind   string          `json:"kind"`
+		Status string          `json:"status"`
+		Detail json.RawMessage `json:"detail"`
+	}
+	var records []rec
+	dec := json.NewDecoder(strings.NewReader(out))
+	for dec.More() {
+		var r rec
+		if err := dec.Decode(&r); err != nil {
+			t.Fatalf("decode JSON line: %v\nline was: %s", err, out)
+		}
+		records = append(records, r)
+	}
+	if len(records) != 3 {
+		t.Fatalf("expected 3 JSON records, got %d", len(records))
+	}
+
+	// Sorted ascending by ts: forward-100, forward-50, callback-now.
+	if !(records[0].TS < records[1].TS && records[1].TS < records[2].TS) {
+		t.Fatalf("expected ascending ts order, got %d, %d, %d",
+			records[0].TS, records[1].TS, records[2].TS)
+	}
+
+	// Grouping: trace_id must be carried on each record so post-processors
+	// can reconstruct the grouping the CLI used.
+	wantTraces := []string{"traceForward", "traceForward", "traceCallback"}
+	for i, want := range wantTraces {
+		if records[i].Trace != want {
+			t.Fatalf("record %d trace: want %q, got %q", i, want, records[i].Trace)
+		}
+	}
+
+	// Spot-check a non-trivial field.
+	if records[0].Auth != "AUTH1" {
+		t.Fatalf("record 0 auth: want AUTH1, got %q", records[0].Auth)
+	}
+	if records[0].GpsiH != "abcdef0123" {
+		t.Fatalf("record 0 gpsi_h: want abcdef0123, got %q", records[0].GpsiH)
+	}
+	if records[0].Op != "biz:http.request" {
+		t.Fatalf("record 0 op: want biz:http.request, got %q", records[0].Op)
+	}
+}
+
+// TestRunTrace_TableGrouping verifies that the table mode emits a blank
+// line between consecutive events whose trace_id changes.
+func TestRunTrace_TableGrouping(t *testing.T) {
+	s := miniredis.RunT(t)
+	defer s.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: s.Addr()})
+	defer rdb.Close()
+
+	hash := logging.HashGPSI("msisdn-Group")
+	stream := "nssaa:debug:stream:" + hash
+	now := time.Now().UnixMilli()
+
+	for i, trace := range []string{"traceA", "traceA", "traceB"} {
+		_ = rdb.XAdd(context.Background(), &redis.XAddArgs{
+			Stream: stream,
+			Values: map[string]interface{}{
+				"ts": strconv.FormatInt(now+int64(i), 10),
+				"pod": "biz-1", "svc": "biz", "trace": trace,
+				"auth": "AUTH1", "gpsi_h": "deadbeef",
+				"op": "biz:http.request", "status": "ok", "dur": "1",
+			},
+		}).Err()
+	}
+
+	var buf bytes.Buffer
+	if err := runTrace(&buf, traceOpts{
+		RedisAddr: s.Addr(),
+		GPSI:      "msisdn-Group",
+		Since:     1 * time.Hour,
+	}, rdb); err != nil {
+		t.Fatal(err)
+	}
+
+	out := buf.String()
+	// Header has AUTH and GPSI_H columns; tabwriter renders them as
+	// whitespace-aligned, so check for the literal column words.
+	if !strings.Contains(out, " AUTH ") && !strings.Contains(out, "\nAUTH\n") {
+		t.Fatalf("expected AUTH column in header, got: %s", out)
+	}
+	if !strings.Contains(out, "GPSI_H") {
+		t.Fatalf("expected GPSI_H column in header, got: %s", out)
+	}
+	if !strings.Contains(out, "deadbeef") {
+		t.Fatalf("expected full gpsi_h in body, got: %s", out)
+	}
+	// Count blank lines (lines containing only whitespace) — should be at
+	// least one between the two groups.
+	blankCount := 0
+	for _, line := range strings.Split(out, "\n") {
+		if strings.TrimSpace(line) == "" {
+			blankCount++
+		}
+	}
+	if blankCount < 1 {
+		t.Fatalf("expected at least one blank line between trace groups, got %d in:\n%s", blankCount, out)
 	}
 }
 

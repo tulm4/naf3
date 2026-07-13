@@ -4,11 +4,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -35,6 +37,7 @@ type traceOpts struct {
 	Op        string
 	Since     time.Duration
 	Limit     int
+	JSON      bool
 }
 
 func main() {
@@ -72,6 +75,7 @@ func traceCmd(args []string) {
 	op := fs.String("op", "", "Filter ops (substring match)")
 	since := fs.Duration("since", 1*time.Hour, "Time window")
 	limit := fs.Int("limit", 0, "Max events to show")
+	json := fs.Bool("json", false, "Emit one JSON object per line instead of a table")
 	_ = fs.Parse(args)
 
 	rdb := redis.NewClient(&redis.Options{Addr: *redisAddr})
@@ -79,7 +83,7 @@ func traceCmd(args []string) {
 
 	if err := runTrace(os.Stdout, traceOpts{
 		RedisAddr: *redisAddr, GPSI: *gpsi, SUPI: *supi,
-		Trace: *traceID, Pod: *pod, Op: *op, Since: *since, Limit: *limit,
+		Trace: *traceID, Pod: *pod, Op: *op, Since: *since, Limit: *limit, JSON: *json,
 	}, rdb); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
@@ -156,17 +160,13 @@ func runTrace(w io.Writer, opts traceOpts, rdb *redis.Client) error {
 	if err != nil {
 		return err
 	}
-	if len(msgs) == 0 {
-		fmt.Fprintln(w, "no events for this subscriber in the last", opts.Since)
-		return nil
-	}
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "TIME\tPOD\tSVC\tTRACE\tOP\tSTATUS\tDUR\tDETAIL")
-	count := 0
+
+	// Pre-filter so the JSON / table paths work on the same set.
+	filtered := make([]redis.XMessage, 0, len(msgs))
 	for _, m := range msgs {
 		ts, _ := m.Values["ts"].(string)
-		tsMs, _ := parseInt64(ts)
-		if tsMs < cutoff {
+		tsMs, ok := parseInt64(ts)
+		if !ok || tsMs < cutoff {
 			continue
 		}
 		if opts.Trace != "" && m.Values["trace"] != opts.Trace {
@@ -178,18 +178,116 @@ func runTrace(w io.Writer, opts traceOpts, rdb *redis.Client) error {
 		if opts.Op != "" && !strings.Contains(asString(m.Values["op"]), opts.Op) {
 			continue
 		}
-		if opts.Limit > 0 {
-			count++
-			if count > opts.Limit {
+		filtered = append(filtered, m)
+	}
+
+	// Stable sort by ts ascending so consecutive trace_ids appear in time order.
+	sort.SliceStable(filtered, func(i, j int) bool {
+		ti, _ := parseInt64(asString(filtered[i].Values["ts"]))
+		tj, _ := parseInt64(asString(filtered[j].Values["ts"]))
+		return ti < tj
+	})
+
+	// Apply --limit after sorting so the operator sees the earliest events.
+	if opts.Limit > 0 && len(filtered) > opts.Limit {
+		filtered = filtered[:opts.Limit]
+	}
+
+	if len(filtered) == 0 {
+		fmt.Fprintln(w, "no events for this subscriber in the last", opts.Since)
+		return nil
+	}
+
+	if opts.JSON {
+		return renderJSON(w, filtered)
+	}
+	return renderTable(w, filtered)
+}
+
+// renderJSON emits one JSON object per event, one per line. Grouping by
+// trace_id is preserved via the "trace" field; post-processors (jq) can
+// re-group as needed.
+func renderJSON(w io.Writer, events []redis.XMessage) error {
+	for _, m := range events {
+		tsStr := asString(m.Values["ts"])
+		tsMs, _ := parseInt64(tsStr)
+		row := map[string]interface{}{
+			"ts":     tsMs,
+			"pod":    asString(m.Values["pod"]),
+			"svc":    asString(m.Values["svc"]),
+			"trace":  asString(m.Values["trace"]),
+			"span":   asString(m.Values["span"]),
+			"sub_h":  asString(m.Values["sub_h"]),
+			"gpsi_h": asString(m.Values["gpsi_h"]),
+			"auth":   asString(m.Values["auth"]),
+			"op":     asString(m.Values["op"]),
+			"kind":   asString(m.Values["kind"]),
+			"status": asString(m.Values["status"]),
+			"dur":    asString(m.Values["dur"]),
+			"detail": parseDetail(asString(m.Values["detail"])),
+		}
+		// Trim empty string fields so output stays compact; keep zero values
+		// for ts so consumers can sort.
+		for k, v := range row {
+			if k == "ts" {
 				continue
 			}
+			if s, ok := v.(string); ok && s == "" {
+				delete(row, k)
+			}
 		}
-		t := time.UnixMilli(tsMs).Format("2006-01-02T15:04:05")
+		buf, err := json.Marshal(row)
+		if err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintln(w, string(buf)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// parseDetail returns the raw JSON object if detail is valid JSON, otherwise
+// the original string wrapped as {"raw": detail}.
+func parseDetail(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	var raw json.RawMessage
+	if err := json.Unmarshal([]byte(s), &raw); err != nil {
+		return map[string]string{"raw": s}
+	}
+	return raw
+}
+
+// renderTable emits a tabwriter-aligned table grouped by trace_id, with a
+// blank line between consecutive groups so the operator can scan related
+// events visually.
+func renderTable(w io.Writer, events []redis.XMessage) error {
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "TIME\tPOD\tSVC\tTRACE\tAUTH\tGPSI_H\tOP\tSTATUS\tDUR\tDETAIL")
+	var prevTrace string
+	for i, m := range events {
+		trace := asString(m.Values["trace"])
+		if i > 0 && trace != prevTrace {
+			fmt.Fprintln(tw)
+		}
+		ts, _ := parseInt64(asString(m.Values["ts"]))
+		t := time.UnixMilli(ts).Format("2006-01-02T15:04:05")
 		svc := colorSvc(m.Values["svc"])
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			t, asString(m.Values["pod"]), svc, shortTrace(m.Values["trace"]),
-			asString(m.Values["op"]), asString(m.Values["status"]), asString(m.Values["dur"]),
-			asString(m.Values["detail"]))
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			t,
+			asString(m.Values["pod"]),
+			svc,
+			shortTrace(m.Values["trace"]),
+			asString(m.Values["auth"]),
+			shortTrace(m.Values["gpsi_h"]),
+			asString(m.Values["op"]),
+			asString(m.Values["status"]),
+			asString(m.Values["dur"]),
+			asString(m.Values["detail"]),
+		)
+		prevTrace = trace
 	}
 	return tw.Flush()
 }
