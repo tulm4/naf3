@@ -4,26 +4,24 @@
 // Forward-direction integration tests for the per-UE debug tracing subsystem.
 //
 // These tests verify the end-to-end flow:
-//
-//	AMF → http-gw → biz → aaa-gw → AAA-S (RADIUS or Diameter)
+//   AMF → http-gw → biz → aaa-gw → AAA-S (RADIUS or Diameter)
 //
 // Per the verification spec (§3), all required debug events for the GPSI must
 // land in Redis (`nssaa:debug:stream:<gpsi_h>`) sharing a single trace_id.
 // The required events per spec are:
 //
-//	http-gw:  http.request, http.request.exit
-//	biz:      http.request, pg.session.create, redis.session.set,
-//	          pg.audit.write, http.request.out, http.request.exit
-//	aaa-gw:   http.request, aaa.radius.forward | aaa.diameter.forward,
-//	          http.request.exit
+//   http-gw:  http.request, http.request.exit
+//   biz:      http.request, pg.session.create, redis.session.set,
+//             pg.audit.write, http.request.out, http.request.exit
+//   aaa-gw:   http.request, aaa.radius.forward | aaa.diameter.forward,
+//             http.request.exit
 //
 // Skipping behavior: tests skip cleanly when RUN_E2E != "1" so that the
 // `-tags=e2e` build is safe to compile in CI without the compose stack.
 //
 // Compose stack lifecycle (Makefile-owned):
-//
-//	make test-debug-full-radius    (default: RADIUS over UDP 1812/1813)
-//	make test-debug-full-diameter  (DIAMETER_TRANSPORT=tcp → TCP 3868)
+//   make test-debug-full-radius    (default: RADIUS over UDP 1812/1813)
+//   make test-debug-full-diameter  (DIAMETER_TRANSPORT=tcp → TCP 3868)
 //
 // Spec: TS 29.526 §7.2 (NSSAA API), TS 29.561 §16/17 (RADIUS/Diameter),
 //
@@ -185,7 +183,7 @@ func TestDebugFullFlow_DIAMETER_Forward(t *testing.T) {
 			backoff = 800 * time.Millisecond
 		}
 	}
-	require.GreaterOrEqual(t, len(events), 11,
+	require.GreaterOrEqual(t, len(events), len(required),
 		"timed out waiting for Diameter events on stream %s (got %d events)", streamKey, len(events))
 
 	traceIDs := map[string]bool{}
