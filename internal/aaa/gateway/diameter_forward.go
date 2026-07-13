@@ -431,7 +431,7 @@ func (df *diamForwarder) Forward(ctx context.Context, eapPayload []byte, session
 	// the corresponding response. This is the higher-level "we are about to
 	// send DER" signal with request metadata.
 	df.debug.Emit(ctx, debug.Event{
-		Op:     "diameter.eap.send",
+		Op:     "aaa.diameter.forward",
 		Kind:   debug.KindProtocol,
 		AuthID: sessionID,
 		Detail: map[string]any{

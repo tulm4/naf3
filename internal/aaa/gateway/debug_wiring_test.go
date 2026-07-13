@@ -194,8 +194,8 @@ func TestRadiusForwarder_Forward_EmitsProtocolEventWithOp(t *testing.T) {
 	_, _ = rf.Forward(ctx, []byte{1, 2, 3}, "sess-1", 1, "FFFFFF")
 
 	// Miniredis is in-process; XAdd completes synchronously. No sleep needed.
-	if _, ok := findOpInStream(t, mr, "radius.eap.send"); !ok {
-		t.Fatal("expected radius.eap.send event in debug stream; Task 13 Emit not wired")
+	if _, ok := findOpInStream(t, mr, "aaa.radius.forward"); !ok {
+		t.Fatal("expected aaa.radius.forward event in debug stream; Task 13 Emit not wired")
 	}
 	if _, ok := findOpInStream(t, mr, "radius.eap.forward"); !ok {
 		t.Fatal("expected radius.eap.forward event in debug stream; Task 14 WrapProtocol not wired")
@@ -235,8 +235,8 @@ func TestDiamForwarder_Forward_EmitsProtocolEventWithOp(t *testing.T) {
 
 	_, _ = df.Forward(callCtx, []byte{1, 2, 3}, "sess-1", 1, "FFFFFF")
 
-	if _, ok := findOpInStream(t, mr, "diameter.eap.send"); !ok {
-		t.Fatal("expected diameter.eap.send event in debug stream; Task 13 Emit not wired")
+	if _, ok := findOpInStream(t, mr, "aaa.diameter.forward"); !ok {
+		t.Fatal("expected aaa.diameter.forward event in debug stream; Task 13 Emit not wired")
 	}
 	if _, ok := findOpInStream(t, mr, "diameter.eap.forward"); !ok {
 		t.Fatal("expected diameter.eap.forward event in debug stream; Task 14 WrapProtocol not wired")

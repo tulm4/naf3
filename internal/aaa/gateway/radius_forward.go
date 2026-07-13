@@ -123,7 +123,7 @@ func (rf *radiusForwarder) Forward(ctx context.Context, eapPayload []byte, sessi
 	// wrapped with WrapProtocol in Task 14 — this Emit is the higher-level
 	// "we are about to call RADIUS" signal with request metadata.
 	rf.debug.Emit(ctx, debug.Event{
-		Op:     "radius.eap.send",
+		Op:     "aaa.radius.forward",
 		Kind:   debug.KindProtocol,
 		AuthID: userName,
 		Detail: map[string]any{
