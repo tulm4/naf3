@@ -34,6 +34,7 @@ type traceOpts struct {
 	Pod       string
 	Op        string
 	Since     time.Duration
+	Limit     int
 }
 
 func main() {
@@ -56,7 +57,7 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, `Usage:
-  nssAAF-debug trace --redis ADDR (--gpsi GPSI | --supi SUPI) [--trace ID] [--pod ID] [--op PATTERN] [--since DUR]
+  nssAAF-debug trace --redis ADDR (--gpsi GPSI | --supi SUPI) [--trace ID] [--pod ID] [--op PATTERN] [--since DUR] [--limit N]
   nssAAF-debug stream-list --redis ADDR (--gpsi GPSI | --supi SUPI)
   nssAAF-debug stream-clear --redis ADDR (--gpsi GPSI | --supi SUPI)`)
 }
@@ -70,6 +71,7 @@ func traceCmd(args []string) {
 	pod := fs.String("pod", "", "Filter to one pod")
 	op := fs.String("op", "", "Filter ops (substring match)")
 	since := fs.Duration("since", 1*time.Hour, "Time window")
+	limit := fs.Int("limit", 0, "Max events to show")
 	_ = fs.Parse(args)
 
 	rdb := redis.NewClient(&redis.Options{Addr: *redisAddr})
@@ -77,7 +79,7 @@ func traceCmd(args []string) {
 
 	if err := runTrace(os.Stdout, traceOpts{
 		RedisAddr: *redisAddr, GPSI: *gpsi, SUPI: *supi,
-		Trace: *traceID, Pod: *pod, Op: *op, Since: *since,
+		Trace: *traceID, Pod: *pod, Op: *op, Since: *since, Limit: *limit,
 	}, rdb); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
@@ -160,6 +162,7 @@ func runTrace(w io.Writer, opts traceOpts, rdb *redis.Client) error {
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "TIME\tPOD\tSVC\tTRACE\tOP\tSTATUS\tDUR\tDETAIL")
+	count := 0
 	for _, m := range msgs {
 		ts, _ := m.Values["ts"].(string)
 		tsMs, _ := parseInt64(ts)
@@ -174,6 +177,12 @@ func runTrace(w io.Writer, opts traceOpts, rdb *redis.Client) error {
 		}
 		if opts.Op != "" && !strings.Contains(asString(m.Values["op"]), opts.Op) {
 			continue
+		}
+		if opts.Limit > 0 {
+			count++
+			if count > opts.Limit {
+				continue
+			}
 		}
 		t := time.UnixMilli(tsMs).Format("2006-01-02T15:04:05")
 		svc := colorSvc(m.Values["svc"])
