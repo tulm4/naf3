@@ -15,7 +15,7 @@ func TestWrapDB_UsesContextSubscriberWhenEventGPSIEmpty(t *testing.T) {
 	evCh := make(chan Event, 1)
 	oldEmit := emitCapture
 	emitCapture = func(_ *Debug, _ context.Context, ev Event) { evCh <- ev }
-	defer func() { emitCapture = oldEmit }()
+	t.Cleanup(func() { emitCapture = oldEmit })
 
 	d := &Debug{}
 	d.Set(true)
@@ -42,7 +42,7 @@ func TestWrapDB_SUPIFromContext(t *testing.T) {
 	evCh := make(chan Event, 1)
 	oldEmit := emitCapture
 	emitCapture = func(_ *Debug, _ context.Context, ev Event) { evCh <- ev }
-	defer func() { emitCapture = oldEmit }()
+	t.Cleanup(func() { emitCapture = oldEmit })
 
 	d := &Debug{}
 	d.Set(true)
