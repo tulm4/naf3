@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/operator/nssAAF/internal/debug"
 )
 
 // AuditAction represents an auditable action in the system.
@@ -51,12 +53,15 @@ type AuditEntry struct {
 
 // AuditRepository provides audit log persistence.
 type AuditRepository struct {
-	pool *Pool
+	pool  *Pool
+	debug *debug.Debug
 }
 
 // NewAuditRepository creates a new audit repository.
-func NewAuditRepository(pool *Pool) *AuditRepository {
-	return &AuditRepository{pool: pool}
+// The *debug.Debug parameter is nil-safe: WrapDB short-circuits when debug
+// is nil or disabled (see internal/debug/hooks.go).
+func NewAuditRepository(pool *Pool, d *debug.Debug) *AuditRepository {
+	return &AuditRepository{pool: pool, debug: d}
 }
 
 // Append inserts a new immutable audit entry.
@@ -71,18 +76,20 @@ func (r *AuditRepository) Append(ctx context.Context, e *AuditEntry) error {
 			client_ip, user_agent
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`
 
-	err := r.pool.Exec(ctx, sql,
-		e.AuthCtxID, e.GPSIHash, e.SnssaiSST, e.SnssaiSD,
-		e.AMFInstanceID, e.AMFIP,
-		e.Action, e.NssaaStatus,
-		e.ErrorCode, e.ErrorMessage,
-		e.RequestID, e.CorrelationID,
-		e.ClientIP, e.UserAgent,
-	)
-	if err != nil {
-		return fmt.Errorf("audit append: %w", err)
-	}
-	return nil
+	return r.debug.WrapDB(ctx, "pg.audit.append", "nssaa_audit_log", func() error {
+		err := r.pool.Exec(ctx, sql,
+			e.AuthCtxID, e.GPSIHash, e.SnssaiSST, e.SnssaiSD,
+			e.AMFInstanceID, e.AMFIP,
+			e.Action, e.NssaaStatus,
+			e.ErrorCode, e.ErrorMessage,
+			e.RequestID, e.CorrelationID,
+			e.ClientIP, e.UserAgent,
+		)
+		if err != nil {
+			return fmt.Errorf("audit append: %w", err)
+		}
+		return nil
+	})
 }
 
 // ListByAuthCtxID returns audit entries for a session.
@@ -105,21 +112,27 @@ func (r *AuditRepository) ListByAuthCtxID(ctx context.Context, authCtxID string,
 		ORDER BY created_at DESC
 		LIMIT $2`
 
-	rows, err := r.pool.Query(ctx, sql, authCtxID, limit)
-	if err != nil {
-		return nil, fmt.Errorf("audit list: %w", err)
-	}
-	defer rows.Close()
-
 	var entries []*AuditEntry
-	for rows.Next() {
-		e, err := r.scanEntry(rows)
+	wrapperErr := r.debug.WrapDB(ctx, "pg.audit.list_by_auth_ctx_id", "nssaa_audit_log", func() error {
+		rows, err := r.pool.Query(ctx, sql, authCtxID, limit)
 		if err != nil {
-			return nil, err
+			return fmt.Errorf("audit list: %w", err)
 		}
-		entries = append(entries, e)
+		defer rows.Close()
+
+		for rows.Next() {
+			e, err := r.scanEntry(rows)
+			if err != nil {
+				return err
+			}
+			entries = append(entries, e)
+		}
+		return rows.Err()
+	})
+	if wrapperErr != nil {
+		return nil, wrapperErr
 	}
-	return entries, rows.Err()
+	return entries, nil
 }
 
 // ListByGPSIHash returns audit entries for a GPSI (using hash for privacy).
@@ -142,21 +155,27 @@ func (r *AuditRepository) ListByGPSIHash(ctx context.Context, gpsiHash string, s
 		ORDER BY created_at DESC
 		LIMIT $3`
 
-	rows, err := r.pool.Query(ctx, sql, gpsiHash, since, limit)
-	if err != nil {
-		return nil, fmt.Errorf("audit list by gpsi: %w", err)
-	}
-	defer rows.Close()
-
 	var entries []*AuditEntry
-	for rows.Next() {
-		e, err := r.scanEntry(rows)
+	wrapperErr := r.debug.WrapDB(ctx, "pg.audit.list_by_gpsi_hash", "nssaa_audit_log", func() error {
+		rows, err := r.pool.Query(ctx, sql, gpsiHash, since, limit)
 		if err != nil {
-			return nil, err
+			return fmt.Errorf("audit list by gpsi: %w", err)
 		}
-		entries = append(entries, e)
+		defer rows.Close()
+
+		for rows.Next() {
+			e, err := r.scanEntry(rows)
+			if err != nil {
+				return err
+			}
+			entries = append(entries, e)
+		}
+		return rows.Err()
+	})
+	if wrapperErr != nil {
+		return nil, wrapperErr
 	}
-	return entries, rows.Err()
+	return entries, nil
 }
 
 func (r *AuditRepository) scanEntry(rows interface{ Scan(...any) error }) (*AuditEntry, error) {

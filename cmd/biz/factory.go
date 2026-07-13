@@ -191,9 +191,32 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 		return nil, nil, fmt.Errorf("session encryptor: %w", err)
 	}
 
+	// ─── Per-UE debug subsystem (optional; off by default) ─────────────
+	// Spec: docs/superpowers/specs/2026-07-12-nssAAF-per-ue-debug-tracing-design.md §6
+	// Initialized before session stores so they can receive *debug.Debug.
+	var dbg *debug.Debug
+	if f.cfg.Debug.Enabled {
+		dbg, err = debug.New(ctx, debug.Config{
+			Enabled:   f.cfg.Debug.Enabled,
+			RedisAddr: f.cfg.Debug.RedisAddr,
+			Service:   "biz",
+			PodID:     f.podID,
+			TTL:       f.cfg.Debug.TTL,
+			MaxLen:    f.cfg.Debug.MaxLen,
+		})
+		if err != nil {
+			f.logger.Warn("debug subsystem init failed; continuing without debug", "error", err)
+			dbg = nil
+		}
+	}
+	dbgCleanup := func() {}
+	if dbg != nil {
+		dbgCleanup = func() { _ = dbg.Close() }
+	}
+
 	// ─── Session stores ──────────────────────────────────────────────────
 	nssaaStore := postgres.NewNssaaRepository(pgPool, encryptor)
-	aiwStore := postgres.NewAiwRepository(pgPool, encryptor)
+	aiwStore := postgres.NewAiwRepository(pgPool, encryptor, dbg)
 
 	// ─── Redis pool + DLQ ───────────────────────────────────────────────
 	redisPool, err := redis.NewPool(ctx, redis.Config{
@@ -221,27 +244,14 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 	dlqHTTPClient := &http.Client{Timeout: 10 * time.Second}
 	go dlq.Process(ctx, dlqHTTPClient)
 
-	// ─── Per-UE debug subsystem (optional; off by default) ─────────────
-	// Spec: docs/superpowers/specs/2026-07-12-nssAAF-per-ue-debug-tracing-design.md §6
-	var dbg *debug.Debug
-	if f.cfg.Debug.Enabled {
-		dbg, err = debug.New(ctx, debug.Config{
-			Enabled:   f.cfg.Debug.Enabled,
-			RedisAddr: f.cfg.Debug.RedisAddr,
-			Service:   "biz",
-			PodID:     f.podID,
-			TTL:       f.cfg.Debug.TTL,
-			MaxLen:    f.cfg.Debug.MaxLen,
-		})
-		if err != nil {
-			f.logger.Warn("debug subsystem init failed; continuing without debug", "error", err)
-			dbg = nil
-		} else {
-			prevCleanup := cleanup
-			cleanup = func() {
-				_ = dbg.Close()
-				prevCleanup()
-			}
+	// Wire debug cleanup (dbg is initialized before session stores so they
+	// can receive *debug.Debug; the actual close happens here to keep
+	// cleanup ordering intact).
+	if dbg != nil {
+		prevCleanup := cleanup
+		cleanup = func() {
+			dbgCleanup()
+			prevCleanup()
 		}
 	}
 

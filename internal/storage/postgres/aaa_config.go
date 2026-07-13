@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/operator/nssAAF/internal/crypto"
+	"github.com/operator/nssAAF/internal/debug"
 )
 
 // AAAConfig represents an AAA server configuration.
@@ -38,12 +39,15 @@ type AAAConfig struct {
 
 // ConfigRepository provides AAA configuration persistence operations.
 type ConfigRepository struct {
-	pool *Pool
+	pool  *Pool
+	debug *debug.Debug
 }
 
 // NewConfigRepository creates a new AAA config repository.
-func NewConfigRepository(pool *Pool) *ConfigRepository {
-	return &ConfigRepository{pool: pool}
+// The *debug.Debug parameter is nil-safe: WrapDB short-circuits when debug
+// is nil or disabled (see internal/debug/hooks.go).
+func NewConfigRepository(pool *Pool, d *debug.Debug) *ConfigRepository {
+	return &ConfigRepository{pool: pool, debug: d}
 }
 
 // encryptSecret encrypts a shared secret using AES-256-GCM with a passphrase-derived key.
@@ -74,13 +78,26 @@ func (r *ConfigRepository) GetByID(ctx context.Context, id string) (*AAAConfig, 
 		FROM aaa_server_configs
 		WHERE id = $1 AND enabled = TRUE`
 
-	row := r.pool.QueryRow(ctx, sql, id)
-	c, err := r.scanConfig(row)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrConfigNotFound
+	var c *AAAConfig
+	var scanErr error
+	wrapperErr := r.debug.WrapDB(ctx, "pg.aaa_config.get_by_id", "aaa_server_configs", func() error {
+		row := r.pool.QueryRow(ctx, sql, id)
+		cfg, err := r.scanConfig(row)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				scanErr = ErrConfigNotFound
+				return nil
+			}
+			return err
 		}
-		return nil, err
+		c = cfg
+		return nil
+	})
+	if wrapperErr != nil {
+		return nil, wrapperErr
+	}
+	if scanErr != nil {
+		return nil, scanErr
 	}
 	return c, nil
 }
@@ -103,13 +120,26 @@ func (r *ConfigRepository) GetBySnssai(ctx context.Context, sst uint8, sd string
 		FROM get_aaa_config($1, $2)
 		WHERE id IS NOT NULL`
 
-	row := r.pool.QueryRow(ctx, sql, sst, sd)
-	c, err := r.scanConfig(row)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrConfigNotFound
+	var c *AAAConfig
+	var scanErr error
+	wrapperErr := r.debug.WrapDB(ctx, "pg.aaa_config.get_by_snssai", "aaa_server_configs", func() error {
+		row := r.pool.QueryRow(ctx, sql, sst, sd)
+		cfg, err := r.scanConfig(row)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				scanErr = ErrConfigNotFound
+				return nil
+			}
+			return err
 		}
-		return nil, err
+		c = cfg
+		return nil
+	})
+	if wrapperErr != nil {
+		return nil, wrapperErr
+	}
+	if scanErr != nil {
+		return nil, scanErr
 	}
 	return c, nil
 }
@@ -130,21 +160,27 @@ func (r *ConfigRepository) ListAll(ctx context.Context) ([]*AAAConfig, error) {
 		WHERE enabled = TRUE
 		ORDER BY priority ASC, weight DESC`
 
-	rows, err := r.pool.Query(ctx, sql)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
 	var configs []*AAAConfig
-	for rows.Next() {
-		c, err := r.scanConfigFromRows(rows)
+	wrapperErr := r.debug.WrapDB(ctx, "pg.aaa_config.list_all", "aaa_server_configs", func() error {
+		rows, err := r.pool.Query(ctx, sql)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		configs = append(configs, c)
+		defer rows.Close()
+
+		for rows.Next() {
+			c, err := r.scanConfigFromRows(rows)
+			if err != nil {
+				return err
+			}
+			configs = append(configs, c)
+		}
+		return rows.Err()
+	})
+	if wrapperErr != nil {
+		return nil, wrapperErr
 	}
-	return configs, rows.Err()
+	return configs, nil
 }
 
 // Upsert inserts or updates a configuration.
@@ -203,15 +239,16 @@ func (r *ConfigRepository) Upsert(ctx context.Context, c *AAAConfig, passphrase 
 		proxyPort = c.AAAProxyPort
 	}
 
-	err := r.pool.Exec(ctx, sql,
-		id, c.SnssaiSST, sd, c.Protocol,
-		c.AAAServerHost, c.AAAServerPort,
-		proxyHost, proxyPort,
-		secretB64,
-		c.AllowReauth, c.AllowRevoke,
-		c.Priority, c.Weight, c.Enabled, c.Description,
-	)
-	return err
+	return r.debug.WrapDB(ctx, "pg.aaa_config.upsert", "aaa_server_configs", func() error {
+		return r.pool.Exec(ctx, sql,
+			id, c.SnssaiSST, sd, c.Protocol,
+			c.AAAServerHost, c.AAAServerPort,
+			proxyHost, proxyPort,
+			secretB64,
+			c.AllowReauth, c.AllowRevoke,
+			c.Priority, c.Weight, c.Enabled, c.Description,
+		)
+	})
 }
 
 // ErrConfigNotFound is returned when no matching AAA config is found.
