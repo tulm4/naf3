@@ -18,6 +18,7 @@ package e2e
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"testing"
@@ -27,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/operator/nssAAF/internal/logging"
+	"github.com/operator/nssAAF/internal/proto"
 )
 
 const (
@@ -55,12 +57,20 @@ func TestDebugFullFlow_AMFCallback(t *testing.T) {
 	body := fmt.Sprintf(`{"gpsi":"%s","snssai":{"sst":1,"sd":"000001"},"eapIdRsp":"dGVzdA=="}`, callbackGPSI)
 	postNSSAAAuth(t, body)
 
+	// Look up the real session_id from Redis. Production generates session IDs
+	// server-side as "nssAAF;{unixnano};{authCtxID}" (per internal/biz/router.go)
+	// and stores them at nssaa:session:{sessionID} → SessionCorrEntry. The aaa-sim
+	// TriggerRAR must use the actual session_id from the seed, not a hardcoded
+	// one, otherwise aaa-gw's getSessionCorr lookup will miss.
+	realSessionID := lookupSessionIDForAuthCtx(t, rdb, callbackAuth)
+	require.NotEmpty(t, realSessionID, "no Redis session correlation entry found for authCtxID=%s", callbackAuth)
+
 	time.Sleep(500 * time.Millisecond)
 
 	preTraceIDs := snapshotTraceIDs(t, rdb, gpsiStream, noSubStream)
 
 	driver := NewAaaSimDriver("aaa-sim")
-	driver.TriggerRAR(t, callbackAuth, "172.0.3.15:1812")
+	driver.TriggerRAR(t, realSessionID, "172.0.3.15:1812")
 
 	required := []string{
 		"aaa-gw:aaa.radius.recv",
@@ -122,6 +132,50 @@ func TestDebugFullFlow_AMFCallback(t *testing.T) {
 	require.Equal(t, map[string]bool{newTraceID: true}, traceIDs,
 		"all RAR events must share the new trace_id")
 	require.False(t, preTraceIDs[newTraceID], "RAR trace_id must be distinct from the forward trace")
+}
+
+// lookupSessionIDForAuthCtx scans Redis for nssaa:session:* keys and returns
+// the session_id suffix (the part after the prefix) whose stored
+// SessionCorrEntry.AuthCtxID matches the given authCtxID.
+//
+// Returns the empty string if no matching entry is found within the timeout.
+// Production aaa-gw writes this entry during ForwardEAP; the forward POST
+// above drives that path.
+func lookupSessionIDForAuthCtx(t *testing.T, rdb *redis.Client, authCtxID string) string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		var cursor uint64
+		for {
+			keys, nextCursor, err := rdb.Scan(ctx, cursor, proto.SessionCorrKeyPrefix+"*", 100).Result()
+			if err != nil {
+				t.Logf("redis scan: %v", err)
+				break
+			}
+			for _, key := range keys {
+				data, err := rdb.Get(ctx, key).Bytes()
+				if err != nil {
+					continue
+				}
+				var entry proto.SessionCorrEntry
+				if err := json.Unmarshal(data, &entry); err != nil {
+					continue
+				}
+				if entry.AuthCtxID == authCtxID {
+					return key[len(proto.SessionCorrKeyPrefix):]
+				}
+			}
+			cursor = nextCursor
+			if cursor == 0 {
+				break
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return ""
 }
 
 // snapshotTraceIDs returns the trace IDs present before the RAR is triggered.
