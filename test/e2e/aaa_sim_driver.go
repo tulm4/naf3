@@ -79,24 +79,26 @@ func ComposeRunning(service string) error {
 	if err != nil {
 		return fmt.Errorf("getwd: %w", err)
 	}
-	var projDir string
+	var projDir, composeFile string
 	for dir := cwd; dir != "." && dir != "/"; dir = filepath.Dir(dir) {
 		candidate := filepath.Join(dir, "compose", "fullchain-dev-tcp.yaml")
 		if _, err := os.Stat(candidate); err == nil {
-			projDir = filepath.Join(dir, "compose")
+			composeFile = candidate
+			projDir = dir
 			break
 		}
 	}
-	if projDir == "" {
+	if composeFile == "" {
 		// Last resort: try E2E_COMPOSE_FILE relative to CWD.
-		composeFile := os.Getenv("E2E_COMPOSE_FILE")
-		if composeFile == "" {
-			composeFile = "compose/fullchain-dev-tcp.yaml"
+		cf := os.Getenv("E2E_COMPOSE_FILE")
+		if cf == "" {
+			cf = "compose/fullchain-dev-tcp.yaml"
 		}
-		projDir, _ = filepath.Abs(filepath.Dir(composeFile))
+		composeFile, _ = filepath.Abs(cf)
+		projDir = filepath.Dir(composeFile)
 	}
 	projDir, _ = filepath.Abs(projDir)
-	args := []string{"compose", "ps", "--format", "json"}
+	args := []string{"compose", "-f", composeFile, "ps", "--format", "json"}
 	cmd := exec.Command("docker", args...)
 	cmd.Dir = projDir
 	out, err := cmd.Output()
