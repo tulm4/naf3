@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -109,10 +110,23 @@ func ComposeRunning(service string) error {
 		Service string `json:"Service"`
 		State   string `json:"State"`
 	}
-	if err := json.Unmarshal(out, &services); err != nil {
-		if len(out) > 0 {
-			return fmt.Errorf("parse docker compose ps json: %w output=%s", err, string(out))
+	// docker compose ps --format json outputs one JSON object per line, not an array.
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || line == "{}" {
+			continue
 		}
+		var s struct {
+			Service string `json:"Service"`
+			State   string `json:"State"`
+		}
+		if err := json.Unmarshal([]byte(line), &s); err != nil {
+			continue
+		}
+		services = append(services, s)
+	}
+	if len(services) == 0 && len(strings.TrimSpace(string(out))) > 0 {
+		return fmt.Errorf("no services found parsing compose output: %s", strings.TrimSpace(string(out))[:min(200, len(out))])
 	}
 	for _, s := range services {
 		if s.Service == service && (s.State == "running" || s.State == "Up") {
