@@ -98,6 +98,9 @@ func ComposeRunning(service string) error {
 	if projDir == "" && composeFile != "" {
 		projDir = filepath.Dir(composeFile)
 	}
+	if projDir != "" {
+		projDir, _ = filepath.Abs(projDir)
+	}
 	args := []string{"compose", "ps", "--format", "json"}
 	cmd := exec.Command("docker", args...)
 	cmd.Dir = projDir
