@@ -302,7 +302,7 @@ test-debug-full-radius: ## Run per-UE debug RADIUS full-flow tests (RUN_E2E=1 re
 	FULLCHAIN_AAA_SIM_URL=http://localhost:18120 \
 	FULLCHAIN_NRM_URL=http://localhost:8084 \
 	RUN_E2E=1 \
-	$(GOTEST) -tags=e2e -v -count=1 -timeout=10m \
+	$(GOTEST) -C .worktrees/feature-per-ue-debug -tags=e2e -v -count=1 -timeout=10m \
 		-run 'TestDebugFullFlow_(RADIUS_Forward|AMFCallback)' \
 		./test/e2e/... \
 		|| { docker compose -f compose/fullchain-dev-tcp.yaml down --remove-orphans; exit 1; }
@@ -327,7 +327,7 @@ test-debug-full-diameter: ## Run per-UE debug Diameter full-flow tests (RUN_E2E=
 	FULLCHAIN_NRM_URL=http://localhost:8084 \
 	RUN_E2E=1 \
 	DIAMETER_TRANSPORT=tcp \
-	$(GOTEST) -tags=e2e -v -count=1 -timeout=10m \
+	$(GOTEST) -C .worktrees/feature-per-ue-debug -tags=e2e -v -count=1 -timeout=10m \
 		-run 'TestDebugFullFlow_DIAMETER_Forward' \
 		./test/e2e/... \
 		|| { DIAMETER_TRANSPORT=tcp docker compose -f compose/fullchain-dev-tcp.yaml down --remove-orphans; exit 1; }
