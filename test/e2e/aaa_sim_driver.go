@@ -67,40 +67,35 @@ func (d *AaaSimDriver) trigger(t *testing.T, cmd, sessionID, targetAddr string) 
 
 // ComposeRunning reports whether the named compose service is running.
 //
-// It runs `docker compose ps` from the test binary's working directory so it
-// works regardless of the compose project prefix (e.g. "compose-" in CI).
+// It runs `docker compose ps` from a directory containing the compose file so
+// it works regardless of the compose project prefix (e.g. "compose-" in CI).
 func ComposeRunning(service string) error {
 	if service == "" {
 		service = "aaa-sim"
 	}
-	// Use os.Executable() to find the test binary's directory, then walk up
-	// to find the compose file. This is more robust than parsing E2E_COMPOSE_FILE
-	// because the working directory of `go test -C <dir>` is <dir>.
-	execPath, err := os.Executable()
+	// Walk up from CWD looking for a compose file. This works because
+	// `go test -C <worktree>` sets the working directory to <worktree>.
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("getwd: %w", err)
+	}
 	var projDir string
-	if err == nil {
-		// Try to find a compose file by walking up from the test binary.
-		// The binary is in <worktree>/bin/ or similar; the compose file
-		// should be in <worktree>/compose/.
-		for dir := filepath.Dir(execPath); dir != "." && dir != "/"; dir = filepath.Dir(dir) {
-			candidate := filepath.Join(dir, "compose", "fullchain-dev-tcp.yaml")
-			if _, err := os.Stat(candidate); err == nil {
-				projDir = filepath.Join(dir, "compose")
-				break
-			}
+	for dir := cwd; dir != "." && dir != "/"; dir = filepath.Dir(dir) {
+		candidate := filepath.Join(dir, "compose", "fullchain-dev-tcp.yaml")
+		if _, err := os.Stat(candidate); err == nil {
+			projDir = filepath.Join(dir, "compose")
+			break
 		}
 	}
-	// Fallback to E2E_COMPOSE_FILE env var if directory detection failed.
-	composeFile := os.Getenv("E2E_COMPOSE_FILE")
-	if composeFile == "" {
-		composeFile = "compose/fullchain-dev-tcp.yaml"
+	if projDir == "" {
+		// Last resort: try E2E_COMPOSE_FILE relative to CWD.
+		composeFile := os.Getenv("E2E_COMPOSE_FILE")
+		if composeFile == "" {
+			composeFile = "compose/fullchain-dev-tcp.yaml"
+		}
+		projDir, _ = filepath.Abs(filepath.Dir(composeFile))
 	}
-	if projDir == "" && composeFile != "" {
-		projDir = filepath.Dir(composeFile)
-	}
-	if projDir != "" {
-		projDir, _ = filepath.Abs(projDir)
-	}
+	projDir, _ = filepath.Abs(projDir)
 	args := []string{"compose", "ps", "--format", "json"}
 	cmd := exec.Command("docker", args...)
 	cmd.Dir = projDir
