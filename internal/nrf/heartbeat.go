@@ -16,8 +16,9 @@ import (
 //
 // Spec: TS 29.510 §6.4.2 (NFHeartBeat), §6.4.1 (NFRegistration).
 type HeartbeatManager struct {
-	client HeartbeatClient
-	cfg    config.HeartbeatConfig
+	client     HeartbeatClient
+	cfg        config.HeartbeatConfig
+	instanceID string
 
 	mu                  sync.RWMutex
 	registered          bool
@@ -45,6 +46,7 @@ func NewHeartbeatManager(client HeartbeatClient, instanceID string, cfg config.H
 		client:            client,
 		cfg:               cfg,
 		heartbeatInterval: cfg.InitialInterval,
+		instanceID:        instanceID,
 		stopCh:            make(chan struct{}),
 	}
 }
@@ -102,7 +104,7 @@ func (m *HeartbeatManager) run(ctx context.Context) {
 // register performs NF registration with NRF and updates internal state.
 func (m *HeartbeatManager) register(ctx context.Context) error {
 	profile := &NFProfile{
-		NFInstanceID:   "default",
+		NFInstanceID:   m.instanceID,
 		NFType:         NFTypeNSSAAF,
 		NFStatus:       NFStatusRegistered,
 		HeartBeatTimer: int(m.cfg.InitialInterval.Seconds()),
@@ -135,7 +137,7 @@ func (m *HeartbeatManager) heartbeat(ctx context.Context) error {
 	etag := m.etag
 	m.mu.RUnlock()
 
-	newEtag, err := m.client.Heartbeat(ctx, "default", etag)
+	newEtag, err := m.client.Heartbeat(ctx, m.instanceID, etag)
 	if err != nil {
 		return err
 	}
@@ -214,7 +216,7 @@ func (m *HeartbeatManager) deregister(ctx context.Context) {
 		return
 	}
 
-	if err := m.client.Deregister(ctx, "default"); err != nil {
+	if err := m.client.Deregister(ctx, m.instanceID); err != nil {
 		slog.Warn("nrf deregistration failed", "error", err)
 		return
 	}
