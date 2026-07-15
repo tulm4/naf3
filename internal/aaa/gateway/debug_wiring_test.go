@@ -24,7 +24,7 @@ func TestRadiusForwarder_Forward_NoClientConfigured_DoesNotPanic(t *testing.T) {
 		logger: slog.New(slog.NewTextHandler(os.Stdout, nil)),
 		debug:  &debug.Debug{}, // disabled — Emit is a no-op
 	}
-	_, err := rf.Forward(context.Background(), []byte{1, 2, 3}, "sess-1", 1, "FFFFFF")
+	_, err := rf.Forward(context.Background(), []byte{1, 2, 3}, "sess-1", 1, "FFFFFF", "")
 	if err == nil {
 		t.Fatal("expected error when client is nil")
 	}
@@ -191,7 +191,7 @@ func TestRadiusForwarder_Forward_EmitsProtocolEventWithOp(t *testing.T) {
 	// even after the underlying send fails. The SendAccessRequest call uses
 	// the same ctx; it will fail because nothing listens, but the Emit must
 	// still publish to miniredis.
-	_, _ = rf.Forward(ctx, []byte{1, 2, 3}, "sess-1", 1, "FFFFFF")
+	_, _ = rf.Forward(ctx, []byte{1, 2, 3}, "sess-1", 1, "FFFFFF", "")
 
 	// Miniredis is in-process; XAdd completes synchronously. No sleep needed.
 	if _, ok := findOpInStream(t, mr, "aaa.radius.forward"); !ok {

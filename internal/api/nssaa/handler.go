@@ -283,10 +283,15 @@ func (h *Handler) CreateSliceAuthenticationContext(w http.ResponseWriter, r *htt
 	eapSession := eap.NewSession(authCtxID, string(body.Gpsi)).
 		WithSnssai(fmt.Sprintf("%d:%s", body.Snssai.Sst, body.Snssai.Sd))
 	var nextEapBytes []byte
-	nextEapBytes, err = h.aaa.SendEAP(r.Context(), eapSession, h.aaa.RoutingContext(eapSession), authCtx.EapPayload)
-	if err != nil {
-		slog.Warn("forward to AAA failed, falling back to echo",
-			"auth_ctx_id", authCtxID, "error", err)
+	if h.aaa != nil {
+		nextEapBytes, err = h.aaa.SendEAP(r.Context(), eapSession, h.aaa.RoutingContext(eapSession), authCtx.EapPayload)
+		if err != nil {
+			slog.Warn("forward to AAA failed, falling back to echo",
+				"auth_ctx_id", authCtxID, "error", err)
+			nextEapBytes = authCtx.EapPayload
+		}
+	} else {
+		// No AAA router configured; echo the EAP payload for testing scenarios.
 		nextEapBytes = authCtx.EapPayload
 	}
 	nextEapStr := base64.StdEncoding.EncodeToString(nextEapBytes)
@@ -419,12 +424,27 @@ func (h *Handler) ConfirmSliceAuthentication(w http.ResponseWriter, r *http.Requ
 	eapSession := eap.NewSession(authCtxId, string(body.Gpsi)).
 		WithSnssai(fmt.Sprintf("%d:%s", domSession.SnssaiSST, domSession.SnssaiSD))
 	var nextEapBytes []byte
-	nextEapBytes, err = h.aaa.SendEAP(r.Context(), eapSession, h.aaa.RoutingContext(eapSession), eapPayload)
-	if err != nil {
-		slog.Warn("forward to AAA failed in confirm, falling back to echo",
-			"auth_ctx_id", authCtxId, "error", err)
+	if h.aaa != nil {
+		nextEapBytes, err = h.aaa.SendEAP(r.Context(), eapSession, h.aaa.RoutingContext(eapSession), eapPayload)
+		if err != nil {
+			slog.Warn("forward to AAA failed in confirm, falling back to echo",
+				"auth_ctx_id", authCtxId, "error", err)
+			nextEapBytes = eapPayload
+		}
+	} else {
+		// No AAA router configured; echo the EAP payload for testing scenarios.
 		nextEapBytes = eapPayload
 	}
+
+	// Update session state to mark confirmation complete.
+	domSession.EapPayload = nextEapBytes
+	domSession.Status = "CONFIRMED"
+	if err := h.store.Save(r.Context(), domSession); err != nil {
+		common.WriteProblem(w, common.InternalServerProblem(
+			fmt.Sprintf("failed to update auth context: %s", err)))
+		return
+	}
+
 	nextEapStr := base64.StdEncoding.EncodeToString(nextEapBytes)
 
 	resp := nssaanats.SliceAuthConfirmationResponse{

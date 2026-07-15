@@ -22,7 +22,7 @@ func TestBuildForwardRequest_RADIUS(t *testing.T) {
 		},
 	}, tLogger())
 
-	req, err := r.BuildForwardRequest("auth-ctx-001", []byte{1, 2, 3}, 1, "01A2B3")
+	req, err := r.BuildForwardRequest("auth-ctx-001", "gpsi-test@example.com", []byte{1, 2, 3}, 1, "01A2B3")
 
 	require.NoError(t, err)
 	require.NotNil(t, req)
@@ -48,7 +48,7 @@ func TestBuildForwardRequest_DIAMETER(t *testing.T) {
 		},
 	}, tLogger())
 
-	req, err := r.BuildForwardRequest("auth-ctx-002", []byte{4, 5, 6}, 2, "")
+	req, err := r.BuildForwardRequest("auth-ctx-002", "gpsi-test@example.com", []byte{4, 5, 6}, 2, "")
 
 	require.NoError(t, err)
 	require.NotNil(t, req)
@@ -65,7 +65,7 @@ func TestBuildForwardRequest_DIAMETER(t *testing.T) {
 func TestBuildForwardRequest_NoRouteConfigured(t *testing.T) {
 	r := NewRouter(SnssaiConfig{}, tLogger())
 
-	req, err := r.BuildForwardRequest("auth-ctx-003", []byte{7, 8, 9}, 255, "FFFFFF")
+	req, err := r.BuildForwardRequest("auth-ctx-003", "gpsi-test@example.com", []byte{7, 8, 9}, 255, "FFFFFF")
 
 	assert.Error(t, err)
 	assert.Nil(t, req)
@@ -87,7 +87,7 @@ func TestBuildForwardRequest_3LevelLookup_exactMatch(t *testing.T) {
 		},
 	}, tLogger())
 
-	req, err := r.BuildForwardRequest("auth-ctx-004", []byte{1}, 1, "01A2B3")
+	req, err := r.BuildForwardRequest("auth-ctx-004", "gpsi-test@example.com", []byte{1}, 1, "01A2B3")
 
 	require.NoError(t, err)
 	assert.Equal(t, proto.TransportRADIUS, req.TransportType)
@@ -108,7 +108,7 @@ func TestBuildForwardRequest_3LevelLookup_sstOnly(t *testing.T) {
 		},
 	}, tLogger())
 
-	req, err := r.BuildForwardRequest("auth-ctx-005", []byte{2}, 3, "FFFFFF")
+	req, err := r.BuildForwardRequest("auth-ctx-005", "gpsi-test@example.com", []byte{2}, 3, "FFFFFF")
 
 	require.NoError(t, err)
 	assert.Equal(t, proto.TransportDIAMETER, req.TransportType)

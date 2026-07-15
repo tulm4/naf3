@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -16,8 +17,8 @@ import (
 	"github.com/operator/nssAAF/internal/api/common"
 	"github.com/operator/nssAAF/internal/api/nssaa"
 	"github.com/operator/nssAAF/internal/storage"
-	nssaanats "github.com/operator/nssAAF/oapi-gen/gen/nssaa"
 	aiwnats "github.com/operator/nssAAF/oapi-gen/gen/aiw"
+	nssaanats "github.com/operator/nssAAF/oapi-gen/gen/nssaa"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -25,6 +26,7 @@ import (
 
 // nssaaMockStore implements nssaa.NssaaStore (alias of storage.NssaaStore).
 type nssaaMockStore struct {
+	mu      sync.RWMutex
 	data    map[string]*storage.NssaaSession
 	loadErr error
 	saveErr error
@@ -36,6 +38,8 @@ func newNssaaMockStore() *nssaaMockStore {
 }
 
 func (s *nssaaMockStore) Load(_ context.Context, id string) (*storage.NssaaSession, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if s.loadErr != nil {
 		return nil, s.loadErr
 	}
@@ -46,6 +50,8 @@ func (s *nssaaMockStore) Load(_ context.Context, id string) (*storage.NssaaSessi
 }
 
 func (s *nssaaMockStore) Save(_ context.Context, ctx *storage.NssaaSession) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.saveErr != nil {
 		return s.saveErr
 	}
@@ -54,6 +60,8 @@ func (s *nssaaMockStore) Save(_ context.Context, ctx *storage.NssaaSession) erro
 }
 
 func (s *nssaaMockStore) Delete(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.delErr != nil {
 		return s.delErr
 	}

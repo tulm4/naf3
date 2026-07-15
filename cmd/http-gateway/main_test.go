@@ -23,7 +23,7 @@ type bizServiceClient struct {
 	forwardCalled     bool
 }
 
-func (b *bizServiceClient) ForwardRequest(ctx context.Context, path, method string, body []byte, requestID string) ([]byte, int, error) {
+func (b *bizServiceClient) ForwardRequest(ctx context.Context, path, method string, body []byte, requestID, gpsi, supi string) ([]byte, int, error) {
 	b.forwardCalled = true
 	b.forwardPath = path
 	b.forwardMethod = method
@@ -114,7 +114,7 @@ func TestHttpGateway_BuildHandler_AuthDisabledReachesBiz(t *testing.T) {
 // errBizClient lets tests exercise the error path without a real biz pod.
 type errBizClient struct{}
 
-func (errBizClient) ForwardRequest(ctx context.Context, path, method string, body []byte, requestID string) ([]byte, int, error) {
+func (errBizClient) ForwardRequest(ctx context.Context, path, method string, body []byte, requestID, gpsi, supi string) ([]byte, int, error) {
 	return nil, 0, errors.New("biz unavailable")
 }
 
@@ -181,6 +181,8 @@ func TestHttpGateway_ForwardRequest_Success(t *testing.T) {
 		"POST",
 		[]byte(`{"key":"value"}`),
 		"",
+		"",
+		"",
 	)
 
 	assert.NoError(t, err)
@@ -201,6 +203,8 @@ func TestHttpGateway_ForwardRequest_502OnBizError(t *testing.T) {
 		"/test",
 		"GET",
 		nil,
+		"",
+		"",
 		"",
 	)
 
@@ -224,6 +228,8 @@ func TestHttpGateway_ForwardRequest_503OnTimeout(t *testing.T) {
 		"/test",
 		"GET",
 		nil,
+		"",
+		"",
 		"",
 	)
 
@@ -249,7 +255,7 @@ func TestHttpGateway_SetsXVersionHeader(t *testing.T) {
 		forwardRespStatus: http.StatusOK,
 	}
 
-	_, _, err := client.ForwardRequest(context.Background(), "/path", "GET", nil, "")
+	_, _, err := client.ForwardRequest(context.Background(), "/path", "GET", nil, "", "", "")
 
 	assert.NoError(t, err)
 	assert.Equal(t, "", receivedVersion)
