@@ -144,10 +144,46 @@ func (rf *radiusForwarder) Forward(ctx context.Context, eapPayload []byte, sessi
 	// radius.eap.send. WrapProtocol is nil-safe (short-circuits when debug is
 	// nil or disabled).
 	var response []byte
-	wrapErr := rf.debug.WrapProtocol(ctx, "radius.eap.forward", func() error {
+	var wrapErr error
+	rf.debug.WrapProtocol(ctx, "radius.eap.forward", func() error {
 		var e error
 		response, e = rf.client.SendAccessRequest(ctx, attrs)
-		return e
+		if e != nil {
+			wrapErr = e
+			return e
+		}
+
+		// Emit RADIUS response received event with response code.
+		if len(response) > 0 {
+			respCode := response[0]
+			var respStatus string
+			switch respCode {
+			case radius.CodeAccessAccept:
+				respStatus = "Access-Accept"
+			case radius.CodeAccessReject:
+				respStatus = "Access-Reject"
+			case radius.CodeAccessChallenge:
+				respStatus = "Access-Challenge"
+			default:
+				respStatus = fmt.Sprintf("code-%d", respCode)
+			}
+
+			rf.debug.Emit(ctx, debug.Event{
+				Op:     "aaa.radius.response_received",
+				Kind:   debug.KindProtocol,
+				AuthID: userName,
+				GPSI:   gpsi,
+				Detail: map[string]any{
+					"code":        respCode,
+					"status":      respStatus,
+					"peer":        rf.config.ServerAddress,
+					"eap_len":     len(response),
+					"session_id":  sessionID,
+				},
+				Status: respStatus,
+			})
+		}
+		return nil
 	})
 	return response, wrapErr
 }
