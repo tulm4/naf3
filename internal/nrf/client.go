@@ -75,16 +75,6 @@ func (c *NRFDiscoveryCache) Set(key string, data interface{}) {
 	}
 }
 
-// NFProfile is the NSSAAF NF profile for NRF registration.
-// Spec: TS 29.510 §6 — fields from docs/design/05_nf_profile.md §2.2.
-type NFProfile struct {
-	NFInstanceID   string `json:"nfInstanceId"`
-	NFType         string `json:"nfType"` // "NSSAAF"
-	NFStatus       string `json:"nfStatus"`
-	HeartBeatTimer int    `json:"heartBeatTimer"`
-	Load           int    `json:"load"`
-}
-
 // NewClient creates a new NRF client.
 func NewClient(cfg config.NRFConfig, factory *nfclient.Factory) *Client {
 	cacheTTL := cfg.CacheTTL
