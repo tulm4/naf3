@@ -157,6 +157,9 @@ func TestGateway_HandleForward_WithDebug_PreservesBehavior(t *testing.T) {
 	gw := New(Config{
 		Logger: slog.New(slog.NewTextHandler(os.Stdout, nil)),
 		Debug:  &debug.Debug{}, // zero-value: disabled, all Emit paths short-circuit
+		// RadiusServerAddress must be non-empty for radiusForwarder to be created.
+		// The connection will fail (no server listening), producing the expected 500.
+		RadiusServerAddress: "localhost:9999",
 	})
 
 	body := []byte(`{
