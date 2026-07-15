@@ -282,8 +282,28 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 	// ─── NF clients with circuit breakers (CB-G1) ─────────────────────
 	nrfFactory := nfclient.NewFactory(internalNFRegistry)
 	nrfClient := nrf.NewClient(f.cfg.NRF, nrfFactory)
-	go nrfClient.RegisterAsync(ctx)
-	go nrfClient.StartHeartbeat(ctx)
+
+	// Load the NF profile YAML (if configured) before starting the heartbeat
+	// loop. SetProfilePath initializes the HeartbeatManager which StartHeartbeat
+	// depends on; without it StartHeartbeat returns "not initialized".
+	if f.cfg.NRF.ProfilePath != "" {
+		if err := nrfClient.SetProfilePath(f.cfg.NRF.ProfilePath, f.cfg.NRF.Heartbeat); err != nil {
+			f.logger.Warn("failed to load NFProfile; continuing without profile-based registration",
+				"path", f.cfg.NRF.ProfilePath,
+				"error", err,
+			)
+		}
+	}
+
+	// StartHeartbeat performs the initial PUT registration synchronously and
+	// then runs the PATCH heartbeat loop, so a separate RegisterAsync would
+	// issue a duplicate PUT. Failures are non-fatal: StartHeartbeat returns
+	// nil when the manager handles background retries on its own.
+	if err := nrfClient.StartHeartbeat(ctx); err != nil {
+		f.logger.Warn("nrf heartbeat start failed; NRF registration will retry in background",
+			"error", err,
+		)
+	}
 
 	udmClient := udm.NewClient(f.cfg.UDM, nrfFactory, nrfClient)
 	ausfClient := ausf.NewClient(f.cfg.AUSF, nrfFactory)

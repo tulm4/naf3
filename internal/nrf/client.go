@@ -88,12 +88,14 @@ type ProfileBuilder struct {
 }
 
 // LoadFromYAML loads and builds NFProfile from YAML config.
-func (pb *ProfileBuilder) LoadFromYAML() (*NFProfile, error) {
+// heartbeatTimer is the value (in seconds) used for NFProfile.heartBeatTimer.
+// Pass 0 to leave the field unset and rely on NRF negotiation at registration.
+func (pb *ProfileBuilder) LoadFromYAML(heartbeatTimer int) (*NFProfile, error) {
 	yamlProfile, err := LoadProfileFromYAML(pb.yamlPath)
 	if err != nil {
 		return nil, err
 	}
-	return BuildNFProfile(yamlProfile, 300), nil
+	return BuildNFProfile(yamlProfile, heartbeatTimer), nil
 }
 
 // NewClient creates a new NRF client.

@@ -247,6 +247,11 @@ type NRFConfig struct {
 	// on NRF register/update. Required for self-registration against NRF.
 	InstanceID string `yaml:"instanceId"`
 
+	// ProfilePath is the filesystem path to the NFProfile YAML config.
+	// When set, SetProfilePath is called on the NRF client at startup to load
+	// the profile and initialize the HeartbeatManager before StartHeartbeat.
+	ProfilePath string `yaml:"profilePath"`
+
 	// AccessToken holds OAuth2 client credential settings for Nnrf access.
 	AccessToken TokenConfig `yaml:"accessToken"`
 
