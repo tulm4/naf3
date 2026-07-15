@@ -42,8 +42,8 @@ nfServices:
 	}
 	defer os.Remove(tmp.Name())
 
-	if _, err := tmp.WriteString(content); err != nil {
-		t.Fatal(err)
+	if _, werr := tmp.WriteString(content); werr != nil {
+		t.Fatal(werr)
 	}
 	tmp.Close()
 

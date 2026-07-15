@@ -9,32 +9,32 @@ import (
 
 // YAMLProfile represents the NFProfile configuration in YAML format.
 type YAMLProfile struct {
-	InstanceID    string                  `yaml:"instanceId"`
-	InstanceName  string                  `yaml:"instanceName"`
-	FQDN          string                  `yaml:"fqdn"`
-	Locality      string                  `yaml:"locality"`
-	NFSetID       string                  `yaml:"nfSetId"`
-	IPv4Addresses []string                `yaml:"ipv4Addresses"`
-	PLMNList      []PLMN                  `yaml:"plmnList"`
-	SNSSAIList    []Snssai                `yaml:"snssais"`
-	NSSAAServices map[string]YAMLService  `yaml:"nfServices"`
-	NSSAAFInfo    *YAMLNSSAAFInfo         `yaml:"nssaafInfo"`
-	CustomInfo    *CustomInfo             `yaml:"customInfo"`
+	InstanceID    string                 `yaml:"instanceId"`
+	InstanceName  string                 `yaml:"instanceName"`
+	FQDN          string                 `yaml:"fqdn"`
+	Locality      string                 `yaml:"locality"`
+	NFSetID       string                 `yaml:"nfSetId"`
+	IPv4Addresses []string               `yaml:"ipv4Addresses"`
+	PLMNList      []PLMN                 `yaml:"plmnList"`
+	SNSSAIList    []Snssai               `yaml:"snssais"`
+	NSSAAServices map[string]YAMLService `yaml:"nfServices"`
+	NSSAAFInfo    *YAMLNSSAAFInfo        `yaml:"nssaafInfo"`
+	CustomInfo    *CustomInfo            `yaml:"customInfo"`
 }
 
 // YAMLService represents a service configuration in YAML.
 type YAMLService struct {
-	ServiceInstanceID  string   `yaml:"serviceInstanceId"`
-	APIPrefix          string   `yaml:"apiPrefix"`
-	AllowedNfTypes     []string `yaml:"allowedNfTypes"`
-	Capacity           int      `yaml:"capacity"`
-	Priority           int      `yaml:"priority"`
-	SupportedFeatures  string   `yaml:"supportedFeatures"`
+	ServiceInstanceID string   `yaml:"serviceInstanceId"`
+	APIPrefix         string   `yaml:"apiPrefix"`
+	AllowedNfTypes    []string `yaml:"allowedNfTypes"`
+	Capacity          int      `yaml:"capacity"`
+	Priority          int      `yaml:"priority"`
+	SupportedFeatures string   `yaml:"supportedFeatures"`
 }
 
 // YAMLNSSAAFInfo represents NSSAAF-specific info in YAML.
 type YAMLNSSAAFInfo struct {
-	SupiRanges                    []SupiRange            `yaml:"supiRanges"`
+	SupiRanges                     []SupiRange            `yaml:"supiRanges"`
 	InternalGroupIdentifiersRanges []InternalGroupIdRange `yaml:"internalGroupIdentifiersRanges"`
 }
 
