@@ -242,7 +242,7 @@ nfServices:
 	}
 
 	pb := &ProfileBuilder{yamlPath: yamlPath}
-	profile, err := pb.LoadFromYAML()
+	profile, err := pb.LoadFromYAML(90)
 	if err != nil {
 		t.Fatalf("LoadFromYAML failed: %v", err)
 	}
@@ -250,8 +250,8 @@ nfServices:
 	if profile.NFInstanceID != "test-id-001" {
 		t.Errorf("NFInstanceID = %q", profile.NFInstanceID)
 	}
-	if profile.HeartBeatTimer != 300 {
-		t.Errorf("HeartBeatTimer = %d, want 300", profile.HeartBeatTimer)
+	if profile.HeartBeatTimer != 90 {
+		t.Errorf("HeartBeatTimer = %d, want 90", profile.HeartBeatTimer)
 	}
 	if len(profile.NfServices) != 2 {
 		t.Errorf("NfServices count = %d, want 2", len(profile.NfServices))

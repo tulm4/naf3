@@ -17,6 +17,7 @@ nrf:
   discoverTimeout: 10s
   cacheTtl: 5m
   instanceId: "550e8400-e29b-41d4-a716-446655440000"
+  profilePath: "/etc/nssAAF/nf-profile.yaml"
   accessToken:
     enabled: true
     authServer: "https://nrf.operator.com/oauth2/token"
@@ -50,6 +51,10 @@ nrf:
 	// Check extended NRFConfig fields
 	if cfg.NRF.InstanceID != "550e8400-e29b-41d4-a716-446655440000" {
 		t.Errorf("InstanceID mismatch: got %s", cfg.NRF.InstanceID)
+	}
+
+	if cfg.NRF.ProfilePath != "/etc/nssAAF/nf-profile.yaml" {
+		t.Errorf("ProfilePath mismatch: got %s", cfg.NRF.ProfilePath)
 	}
 
 	if !cfg.NRF.AccessToken.Enabled {

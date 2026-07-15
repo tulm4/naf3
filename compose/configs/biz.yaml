@@ -56,6 +56,9 @@ metrics:
 nrf:
   baseURL: "${NRF_URL:-http://172.0.3.12:8081}"
   discoverTimeout: 5s
+  # Path to NFProfile YAML. Loaded via nrf.SetProfilePath before StartHeartbeat.
+  # Example file at config/nf-profile.yaml; set to empty string to skip.
+  profilePath: "${NSSAF_NF_PROFILE_PATH:-}"
 
 # UDM integration — REQ-04, REQ-05
 udm:
