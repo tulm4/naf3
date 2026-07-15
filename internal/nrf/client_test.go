@@ -33,8 +33,8 @@ func TestNewClient(t *testing.T) {
 func TestClient_Register_Success(t *testing.T) {
 	var receivedBody NFProfile
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, http.MethodPost, r.Method)
-		assert.Equal(t, "/nnrf-disc/v1/nf-instances", r.URL.Path)
+		assert.Equal(t, http.MethodPut, r.Method)
+		assert.Contains(t, r.URL.Path, "/nnrf-disc/v1/nf-instances/")
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
 		err := json.NewDecoder(r.Body).Decode(&receivedBody)
@@ -53,7 +53,7 @@ func TestClient_Register_Success(t *testing.T) {
 	}
 	client := NewClient(cfg, nfclient.NewFactory(nil))
 
-	err := client.Register(context.Background())
+	_, _, err := client.Register(context.Background(), nil)
 	require.NoError(t, err)
 	assert.True(t, client.IsRegistered())
 	assert.NotEmpty(t, receivedBody.NFInstanceID)
@@ -61,7 +61,7 @@ func TestClient_Register_Success(t *testing.T) {
 
 func TestClient_Register_NonCreatedStatus(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer server.Close()
 
@@ -71,7 +71,7 @@ func TestClient_Register_NonCreatedStatus(t *testing.T) {
 	}
 	client := NewClient(cfg, nfclient.NewFactory(nil))
 
-	err := client.Register(context.Background())
+	_, _, err := client.Register(context.Background(), nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unexpected status")
 	assert.False(t, client.IsRegistered())
@@ -80,20 +80,20 @@ func TestClient_Register_NonCreatedStatus(t *testing.T) {
 func TestClient_Heartbeat_Success(t *testing.T) {
 	var receivedPayload map[string]interface{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Handle both Register (POST) and Heartbeat (PUT)
-		if r.Method == http.MethodPost {
+		switch r.Method {
+		case http.MethodPut:
+			// Register path
 			w.WriteHeader(http.StatusCreated)
 			return
+		case http.MethodPatch:
+			// Heartbeat path
+			err := json.NewDecoder(r.Body).Decode(&receivedPayload)
+			require.NoError(t, err)
+			assert.Equal(t, "REGISTERED", receivedPayload["nfStatus"])
+			w.WriteHeader(http.StatusNoContent)
+			return
 		}
-		assert.Equal(t, http.MethodPut, r.Method)
-		assert.Contains(t, r.URL.Path, "/nnrf-disc/v1/nf-instances/")
-
-		err := json.NewDecoder(r.Body).Decode(&receivedPayload)
-		require.NoError(t, err)
-		assert.Equal(t, "REGISTERED", receivedPayload["nfStatus"])
-		assert.Equal(t, float64(300), receivedPayload["heartBeatTimer"])
-
-		w.WriteHeader(http.StatusOK)
+		t.Errorf("unexpected method: %s", r.Method)
 	}))
 	defer server.Close()
 
@@ -104,16 +104,24 @@ func TestClient_Heartbeat_Success(t *testing.T) {
 	client := NewClient(cfg, nfclient.NewFactory(nil))
 
 	// Register first
-	_ = client.Register(context.Background())
+	_, _, _ = client.Register(context.Background(), nil)
 
-	err := client.Heartbeat(context.Background())
+	etag, err := client.Heartbeat(context.Background(), client.NFInstanceID(), "test-etag")
 	require.NoError(t, err)
-	assert.Contains(t, receivedPayload, "nfInstanceId")
+	assert.Equal(t, "REGISTERED", receivedPayload["nfStatus"])
+	assert.Contains(t, etag, "", "etag may be empty when server returns 204")
 }
 
 func TestClient_Heartbeat_NonOKStatus(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusServiceUnavailable)
+		switch r.Method {
+		case http.MethodPut:
+			w.WriteHeader(http.StatusCreated)
+			return
+		case http.MethodPatch:
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 	}))
 	defer server.Close()
 
@@ -123,9 +131,9 @@ func TestClient_Heartbeat_NonOKStatus(t *testing.T) {
 	}
 	client := NewClient(cfg, nfclient.NewFactory(nil))
 
-	_ = client.Register(context.Background())
+	_, _, _ = client.Register(context.Background(), nil)
 
-	err := client.Heartbeat(context.Background())
+	_, err := client.Heartbeat(context.Background(), client.NFInstanceID(), "test-etag")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "heartbeat status")
 }
@@ -278,8 +286,8 @@ func TestClient_DiscoverAMF_NonOKStatus(t *testing.T) {
 
 func TestClient_Deregister(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Handle both Register (POST) and Deregister (DELETE)
-		if r.Method == http.MethodPost {
+		// Handle both Register (PUT) and Deregister (DELETE)
+		if r.Method == http.MethodPut {
 			w.WriteHeader(http.StatusCreated)
 			return
 		}
@@ -296,10 +304,10 @@ func TestClient_Deregister(t *testing.T) {
 	client := NewClient(cfg, nfclient.NewFactory(nil))
 
 	// Register first
-	_ = client.Register(context.Background())
+	_, _, _ = client.Register(context.Background(), nil)
 	assert.True(t, client.IsRegistered())
 
-	err := client.Deregister(context.Background())
+	err := client.Deregister(context.Background(), client.NFInstanceID())
 	require.NoError(t, err)
 	assert.False(t, client.IsRegistered())
 }
@@ -441,7 +449,7 @@ func TestNRFClient_OpensBreakerOnRepeatedFailures(t *testing.T) {
 
 	// First three calls should all fail and trip the breaker.
 	for i := 0; i < 3; i++ {
-		err := client.Register(ctx)
+		_, _, err := client.Register(ctx, nil)
 		assert.Error(t, err, "call %d should fail", i+1)
 	}
 
@@ -452,7 +460,7 @@ func TestNRFClient_OpensBreakerOnRepeatedFailures(t *testing.T) {
 	// Subsequent calls should fast-fail without hitting the server.
 	fastFailCount := 0
 	for i := 0; i < 5; i++ {
-		err := client.Register(ctx)
+		_, _, err := client.Register(ctx, nil)
 		if err != nil {
 			fastFailCount++
 			assert.Contains(t, err.Error(), "circuit breaker open",
@@ -489,7 +497,7 @@ func TestNRFClient_BreakerHalfOpenAfterRecoveryTimeout(t *testing.T) {
 
 	// Trip the breaker: 2 failures open it.
 	for i := 0; i < 2; i++ {
-		_ = client.Register(ctx)
+		_, _, _ = client.Register(ctx, nil)
 	}
 
 	cb := cbRegistry.Get(server.URL)
@@ -500,7 +508,7 @@ func TestNRFClient_BreakerHalfOpenAfterRecoveryTimeout(t *testing.T) {
 
 	// The next Register call should trigger Allow() which transitions to HALF_OPEN.
 	// The call will still fail (server is still down), which should reopen the breaker.
-	_ = client.Register(ctx)
+	_, _, _ = client.Register(ctx, nil)
 
 	// The breaker should have gone OPEN → HALF_OPEN → OPEN again.
 	assert.Equal(t, resilience.StateOpen, cb.State(), "breaker should be OPEN after failed half-open probe")

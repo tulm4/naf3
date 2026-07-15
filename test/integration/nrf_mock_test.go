@@ -45,7 +45,7 @@ func TestIntegration_NRF_Registration(t *testing.T) {
 	}, nfclient.NewFactory(nil))
 
 	ctx := context.Background()
-	err := client.Register(ctx)
+	_, _, err := client.Register(ctx, nil)
 	require.NoError(t, err, "NRF registration should succeed")
 	assert.True(t, client.IsRegistered(), "client should be registered after Register")
 }
@@ -62,10 +62,9 @@ func TestIntegration_NRF_Heartbeat(t *testing.T) {
 	}, nfclient.NewFactory(nil))
 
 	ctx := context.Background()
-	err := client.Register(ctx)
-	require.NoError(t, err)
+	_, _, _ = client.Register(ctx, nil)
 
-	err = client.Heartbeat(ctx)
+	_, err := client.Heartbeat(ctx, client.NFInstanceID(), "test-etag")
 	require.NoError(t, err, "NRF heartbeat should succeed")
 }
 

@@ -1,9 +1,11 @@
 package nrf
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -24,6 +26,11 @@ type Client struct {
 	cache        *NRFDiscoveryCache
 	registered   atomic.Bool
 	factory      *nfclient.Factory
+
+	// Integrated components from Task 6.
+	tokenCache       *TokenCache
+	profileBuilder   *ProfileBuilder
+	heartbeatManager *HeartbeatManager
 }
 
 // NRFDiscoveryCache holds cached NF discovery results with 5-min TTL.
@@ -75,25 +82,149 @@ func (c *NRFDiscoveryCache) Set(key string, data interface{}) {
 	}
 }
 
+// ProfileBuilder wraps YAML profile loading and building.
+type ProfileBuilder struct {
+	yamlPath string
+}
+
+// LoadFromYAML loads and builds NFProfile from YAML config.
+func (pb *ProfileBuilder) LoadFromYAML() (*NFProfile, error) {
+	yamlProfile, err := LoadProfileFromYAML(pb.yamlPath)
+	if err != nil {
+		return nil, err
+	}
+	return BuildNFProfile(yamlProfile, 300), nil
+}
+
 // NewClient creates a new NRF client.
 func NewClient(cfg config.NRFConfig, factory *nfclient.Factory) *Client {
+	return NewClientWithConfig(cfg, factory)
+}
+
+// NewClientWithConfig creates a new NRF client with full configuration.
+func NewClientWithConfig(cfg config.NRFConfig, factory *nfclient.Factory) *Client {
 	cacheTTL := cfg.CacheTTL
 	if cacheTTL == 0 {
 		cacheTTL = 5 * time.Minute
 	}
-	return &Client{
+
+	instanceID := cfg.InstanceID
+	if instanceID == "" {
+		instanceID = fmt.Sprintf("nssAAF-instance-%d", time.Now().UnixNano())
+	}
+
+	client := &Client{
 		baseURL:      cfg.BaseURL,
-		nfInstanceID: fmt.Sprintf("nssAAF-instance-%d", time.Now().UnixNano()),
+		nfInstanceID: instanceID,
 		cache: &NRFDiscoveryCache{
 			ttl: cacheTTL,
 		},
 		factory: factory,
+	}
+
+	// Initialize token cache if enabled.
+	if cfg.AccessToken.Enabled {
+		client.tokenCache = NewTokenCache(cfg.AccessToken)
+	}
+
+	return client
+}
+
+// TokenCache returns the OAuth2 token cache.
+func (c *Client) TokenCache() *TokenCache {
+	return c.tokenCache
+}
+
+// HeartbeatManager returns the heartbeat manager.
+func (c *Client) HeartbeatManager() *HeartbeatManager {
+	return c.heartbeatManager
+}
+
+// NFInstanceID returns the NF instance ID used in NRF paths.
+func (c *Client) NFInstanceID() string {
+	return c.nfInstanceID
+}
+
+// SetProfilePath sets the NFProfile YAML path and initializes components.
+func (c *Client) SetProfilePath(yamlPath string, heartbeatCfg config.HeartbeatConfig) error {
+	// Load profile.
+	yamlProfile, err := LoadProfileFromYAML(yamlPath)
+	if err != nil {
+		return fmt.Errorf("loading profile: %w", err)
+	}
+
+	// Update instance ID if not already set by config.
+	if yamlProfile.InstanceID != "" {
+		c.nfInstanceID = yamlProfile.InstanceID
+	}
+
+	// Create heartbeat manager wired to this client.
+	hbCfg := config.HeartbeatConfig{
+		InitialInterval:          heartbeatCfg.InitialInterval,
+		AcceptNegotiatedInterval: heartbeatCfg.AcceptNegotiatedInterval,
+		MaxConsecutiveFailures:   heartbeatCfg.MaxConsecutiveFailures,
+	}
+	c.heartbeatManager = NewHeartbeatManager(c, c.nfInstanceID, hbCfg)
+
+	// Also remember the profile builder for ad-hoc loads.
+	c.profileBuilder = &ProfileBuilder{yamlPath: yamlPath}
+
+	return nil
+}
+
+// StartHeartbeat begins the heartbeat loop with initial registration.
+// Returns an error only if the heartbeat manager was not initialized via
+// SetProfilePath first.
+func (c *Client) StartHeartbeat(ctx context.Context) error {
+	if c.heartbeatManager == nil {
+		return fmt.Errorf("heartbeat manager not initialized, call SetProfilePath first")
+	}
+	return c.heartbeatManager.Start(ctx)
+}
+
+// StopHeartbeat halts the heartbeat manager.
+func (c *Client) StopHeartbeat() {
+	if c.heartbeatManager != nil {
+		c.heartbeatManager.Stop()
 	}
 }
 
 // doRequest executes an HTTP request using the factory.
 func (c *Client) doRequest(ctx context.Context, method, path string, body []byte) (int, []byte, error) {
 	return c.factory.Do(ctx, c.baseURL, method, path, body)
+}
+
+// doRequestWithHeaders executes a request with custom headers.
+// Used for PATCH/heartbeat which requires If-Match and Content-Type overrides.
+func (c *Client) doRequestWithHeaders(ctx context.Context, method, path string, body []byte, headers map[string]string) (int, []byte, error) {
+	url := c.baseURL + path
+	var bodyReader io.Reader
+	if body != nil {
+		bodyReader = bytes.NewReader(body)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, url, bodyReader)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, nil, fmt.Errorf("nrf: request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, nil, fmt.Errorf("nrf: read body: %w", err)
+	}
+
+	return resp.StatusCode, respBody, nil
 }
 
 // RegisterAsync registers the NSSAAF profile with NRF in a background goroutine.
@@ -108,7 +239,8 @@ func (c *Client) RegisterAsync(ctx context.Context) {
 			default:
 			}
 
-			if err := c.Register(ctx); err != nil {
+			interval, etag, err := c.Register(ctx, nil)
+			if err != nil {
 				slog.Warn("nrf registration failed, retrying",
 					"error", err,
 					"backoff", backoff,
@@ -126,6 +258,8 @@ func (c *Client) RegisterAsync(ctx context.Context) {
 
 			slog.Info("nrf registration successful",
 				"nf_instance_id", c.nfInstanceID,
+				"heartbeat_interval", interval,
+				"etag", etag,
 			)
 			c.registered.Store(true)
 			return
@@ -134,68 +268,75 @@ func (c *Client) RegisterAsync(ctx context.Context) {
 }
 
 // Register sends Nnrf_NFRegistration to the NRF.
-// REQ-01: POST /nnrf-disc/v1/nf-instances with NFProfile.
-func (c *Client) Register(ctx context.Context) error {
-	profile := NFProfile{
-		NFInstanceID:   c.nfInstanceID,
-		NFType:         "NSSAAF",
-		NFStatus:       "REGISTERED",
-		HeartBeatTimer: 300,
-		Load:           0,
+// Uses PUT /nnrf-disc/v1/nf-instances/{id} per TS 29.510 §5.2.2.2.
+// If profile is nil, a minimal default profile is constructed from c.nfInstanceID.
+// Returns (negotiatedHeartbeatInterval, etag, error).
+func (c *Client) Register(ctx context.Context, profile *NFProfile) (time.Duration, string, error) {
+	if profile == nil {
+		profile = &NFProfile{
+			NFInstanceID:   c.nfInstanceID,
+			NFType:         NFTypeNSSAAF,
+			NFStatus:       NFStatusRegistered,
+			HeartBeatTimer: 300,
+		}
 	}
+
 	body, err := json.Marshal(profile)
 	if err != nil {
-		return fmt.Errorf("nrf: marshal profile: %w", err)
+		return 0, "", fmt.Errorf("nrf: marshal profile: %w", err)
 	}
-	status, respBody, err := c.doRequest(ctx, http.MethodPost, "/nnrf-disc/v1/nf-instances", body)
-	if err != nil {
-		return fmt.Errorf("nrf: register: %w", err)
-	}
-	if status != http.StatusCreated {
-		return fmt.Errorf("nrf: unexpected status %d: %s", status, respBody)
-	}
-	c.registered.Store(true)
-	return nil
-}
 
-// Heartbeat sends Nnrf_NFHeartBeat every 5 minutes.
-// REQ-02: PUT /nnrf-disc/v1/nf-instances/{id} with nfStatus="REGISTERED", heartBeatTimer=300, load=0-100.
-func (c *Client) Heartbeat(ctx context.Context) error {
-	payload := map[string]interface{}{
-		"nfInstanceId":   c.nfInstanceID,
-		"nfStatus":       "REGISTERED",
-		"heartBeatTimer": 300,
-		"load":           0,
-	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("nrf: marshal heartbeat: %w", err)
-	}
 	path := fmt.Sprintf("/nnrf-disc/v1/nf-instances/%s", c.nfInstanceID)
 	status, respBody, err := c.doRequest(ctx, http.MethodPut, path, body)
 	if err != nil {
-		return fmt.Errorf("nrf: heartbeat: %w", err)
+		return 0, "", fmt.Errorf("nrf: register: %w", err)
 	}
-	if status != http.StatusOK {
-		return fmt.Errorf("nrf: heartbeat status %d: %s", status, respBody)
+
+	if status != http.StatusCreated && status != http.StatusOK {
+		return 0, "", fmt.Errorf("nrf: unexpected status %d: %s", status, respBody)
 	}
-	return nil
+
+	interval := parseHeartbeatInterval(respBody)
+	etag := parseETag(respBody)
+
+	c.registered.Store(true)
+	return interval, etag, nil
 }
 
-// StartHeartbeat runs the heartbeat goroutine every 5 minutes.
-func (c *Client) StartHeartbeat(ctx context.Context) {
-	ticker := time.NewTicker(5 * time.Minute)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if err := c.Heartbeat(ctx); err != nil {
-				slog.Warn("nrf heartbeat failed", "error", err)
-			}
-		}
+// Heartbeat sends PATCH to keep registration alive.
+// Uses PATCH /nnrf-disc/v1/nf-instances/{id} per TS 29.510 §5.2.2.3.1B.
+// Returns the new etag from the response.
+func (c *Client) Heartbeat(ctx context.Context, instanceID, etag string) (string, error) {
+	patch := `{"nfStatus":"REGISTERED"}`
+
+	path := fmt.Sprintf("/nnrf-disc/v1/nf-instances/%s", instanceID)
+	status, respBody, err := c.doRequestWithHeaders(ctx, http.MethodPatch, path, []byte(patch), map[string]string{
+		"Content-Type": "application/json-patch+json",
+		"If-Match":     etag,
+	})
+	if err != nil {
+		return "", fmt.Errorf("nrf: heartbeat: %w", err)
 	}
+
+	if status != http.StatusNoContent {
+		return "", fmt.Errorf("nrf: heartbeat status %d: %s", status, respBody)
+	}
+
+	return parseETag(respBody), nil
+}
+
+// Deregister sends Nnrf_NFDeregistration to remove the NF profile.
+func (c *Client) Deregister(ctx context.Context, instanceID string) error {
+	path := fmt.Sprintf("/nnrf-disc/v1/nf-instances/%s", instanceID)
+	status, respBody, err := c.doRequest(ctx, http.MethodDelete, path, nil)
+	if err != nil {
+		return fmt.Errorf("nrf: deregister: %w", err)
+	}
+	if status != http.StatusNoContent && status != http.StatusOK {
+		return fmt.Errorf("nrf: deregister status %d: %s", status, respBody)
+	}
+	c.registered.Store(false)
+	return nil
 }
 
 // DiscoverUDM discovers a UDM that exposes the nudm-uem service.
@@ -264,20 +405,6 @@ func (c *Client) DiscoverAMF(ctx context.Context, amfID string) (string, error) 
 	}
 	c.cache.Set(key, amf.NFInstanceID)
 	return amf.NFInstanceID, nil
-}
-
-// Deregister sends Nnrf_NFDeregistration to remove the NF profile.
-func (c *Client) Deregister(ctx context.Context) error {
-	path := fmt.Sprintf("/nnrf-disc/v1/nf-instances/%s", c.nfInstanceID)
-	status, respBody, err := c.doRequest(ctx, http.MethodDelete, path, nil)
-	if err != nil {
-		return fmt.Errorf("nrf: deregister: %w", err)
-	}
-	if status != http.StatusNoContent && status != http.StatusOK {
-		return fmt.Errorf("nrf: deregister status %d: %s", status, respBody)
-	}
-	c.registered.Store(false)
-	return nil
 }
 
 // IsRegistered returns true if NRF registration succeeded.

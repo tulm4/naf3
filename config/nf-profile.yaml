@@ -1,0 +1,48 @@
+# Example NFProfile configuration for NSSAAF deployment.
+# Copy to your deployment config directory and customize.
+# Schema is consumed by internal/nrf/profile.go (LoadProfileFromYAML).
+
+instanceId: "550e8400-e29b-41d4-a716-446655440000"
+instanceName: "nssAAF-gw-001"
+fqdn: "nssAAF.operator.com"
+locality: "dc-1"
+nfSetId: "nssAAF-set-001"
+
+ipv4Addresses:
+  - "10.0.1.50"
+  - "10.0.2.50"
+
+plmnList:
+  - mcc: "208"
+    mnc: "001"
+
+snssais:
+  - sst: 1
+    sd: "000001"
+  - sst: 2
+
+nssaafInfo:
+  supiRanges:
+    - start: "imsi-208010000000001"
+      end: "imsi-208019999999999"
+      pattern: "^imsi-20801[0-9]{8}$"
+      size: "LARGE"
+
+nfServices:
+  nnssaaf-nssaa:
+    serviceInstanceId: "nnssaaf-nssaa-001"
+    apiPrefix: "/nnssaaf-nssaa/v1"
+    allowedNfTypes: ["AMF"]
+    capacity: 1000
+    priority: 100
+  nnssaaf-aiw:
+    serviceInstanceId: "nnssaaf-aiw-001"
+    apiPrefix: "/nnssaaf-aiw/v1"
+    allowedNfTypes: ["AUSF"]
+    capacity: 1000
+    priority: 100
+
+customInfo:
+  supportedAaaProtocols: ["RADIUS", "DIAMETER"]
+  maxEapRounds: 20
+  eapTimeoutSeconds: 30

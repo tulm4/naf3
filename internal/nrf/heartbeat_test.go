@@ -57,8 +57,8 @@ func TestHeartbeatManagerStart(t *testing.T) {
 	}
 
 	cfg := config.HeartbeatConfig{
-		InitialInterval:         50 * time.Millisecond,
-		MaxConsecutiveFailures:  3,
+		InitialInterval:        50 * time.Millisecond,
+		MaxConsecutiveFailures: 3,
 	}
 
 	mgr := NewHeartbeatManager(client, "test-id", cfg)

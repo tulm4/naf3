@@ -429,7 +429,7 @@ func (bp *BizPod) Close() {
 	if bp.NRFClient != nil {
 		nrfCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = bp.NRFClient.Deregister(nrfCtx)
+		_ = bp.NRFClient.Deregister(nrfCtx, bp.NRFClient.NFInstanceID())
 	}
 	if bp.RedisPool != nil {
 		_ = bp.RedisPool.Close()

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 )
 
 // ServiceEndpointConfig holds the endpoint configuration for a service.
@@ -115,7 +116,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // handleNfInstancesDisc dispatches Nnrf_NFDiscovery calls.
 // GET → discovery (query params) or instance lookup
 // POST → registration
-// PUT → heartbeat
+// PUT → update/heartbeat
+// PATCH → patch update / heartbeat (TS 29.510 §5.2.2.3.1B)
 func (s *Server) handleNfInstancesDisc(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/nnrf-disc/v1/nf-instances")
 	path = strings.TrimSuffix(path, "/")
@@ -133,6 +135,9 @@ func (s *Server) handleNfInstancesDisc(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPut:
 		id := strings.TrimPrefix(path, "/")
 		s.handlePutInstance(w, r, id)
+	case http.MethodPatch:
+		id := strings.TrimPrefix(path, "/")
+		s.handlePatchInstance(w, r, id)
 	default:
 		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, `{"cause":"METHOD_NOT_ALLOWED"}`, http.StatusMethodNotAllowed)
@@ -157,6 +162,9 @@ func (s *Server) handleNfInstancesNfm(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPut:
 		id := strings.TrimPrefix(path, "/")
 		s.handlePutInstance(w, r, id)
+	case http.MethodPatch:
+		id := strings.TrimPrefix(path, "/")
+		s.handlePatchInstance(w, r, id)
 	default:
 		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, `{"cause":"METHOD_NOT_ALLOWED"}`, http.StatusMethodNotAllowed)
@@ -298,6 +306,29 @@ func (s *Server) handlePutInstance(w http.ResponseWriter, r *http.Request, id st
 	w.WriteHeader(http.StatusOK)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(payload)
+}
+
+// handlePatchInstance handles PATCH /nnrf-disc/v1/nf-instances/{id} — TS 29.510 §5.2.2.3.1B.
+// Real NRF returns 204 No Content with a fresh ETag header on successful patch.
+func (s *Server) handlePatchInstance(w http.ResponseWriter, r *http.Request, id string) {
+	if id == "" {
+		w.Header().Set("Content-Type", "application/json")
+		http.Error(w, `{"cause":"NF_INSTANCE_NOT_FOUND"}`, http.StatusNotFound)
+		return
+	}
+	var payload map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		http.Error(w, `{"cause":"INVALID_FORMAT"}`, http.StatusBadRequest)
+		return
+	}
+	s.mu.Lock()
+	if status, ok := payload["nfStatus"].(string); ok {
+		s.nfStatus[id] = status
+	}
+	s.mu.Unlock()
+	w.Header().Set("ETag", fmt.Sprintf(`"etag-%d"`, time.Now().UnixNano()))
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // handlePostInstance handles POST /nnrf-disc/v1/nf-instances — Nnrf_NFRegistration.

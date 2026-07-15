@@ -194,7 +194,7 @@ func TestIntegration_ProtectedClientUsesBreaker(t *testing.T) {
 	// Step 3: Call 3 times — each returns an error, trips the breaker.
 	// Client is created once, factory is reused, so failures accumulate.
 	for i := 0; i < 3; i++ {
-		err := client.Register(ctx)
+		_, _, err := client.Register(ctx, nil)
 		assert.Error(t, err, "call %d should fail", i+1)
 	}
 
@@ -204,7 +204,7 @@ func TestIntegration_ProtectedClientUsesBreaker(t *testing.T) {
 	assert.Equal(t, resilience.StateOpen, cbRegistry.Get(server.URL).State())
 
 	// Step 5: Call again — should fast-fail without calling the server.
-	err := client.Register(ctx)
+	_, _, err := client.Register(ctx, nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "circuit breaker open",
 		"call should fast-fail when breaker is OPEN")
@@ -218,7 +218,7 @@ func TestIntegration_ProtectedClientUsesBreaker(t *testing.T) {
 
 	// Next Allow() triggers the transition OPEN → HALF_OPEN.
 	// The call goes through (server returns 503), failure recorded → HALF_OPEN → OPEN.
-	err = client.Register(ctx)
+	_, _, err = client.Register(ctx, nil)
 	assert.Error(t, err)
 	// HALF_OPEN probe gets a real server response (503), not a circuit breaker error.
 	assert.NotContains(t, err.Error(), "circuit breaker open",
@@ -233,12 +233,12 @@ func TestIntegration_ProtectedClientUsesBreaker(t *testing.T) {
 
 	// Next call should trigger another HALF_OPEN probe.
 	// Allow() transitions OPEN → HALF_OPEN, call goes through → 503 → OPEN.
-	_ = client.Register(ctx)
+	_, _, _ = client.Register(ctx, nil)
 	assert.Equal(t, resilience.StateOpen, factory.BreakerState(server.URL),
 		"breaker should be OPEN after second HALF_OPEN failure")
 
 	// Step 8: Verify subsequent calls fast-fail (breaker is still OPEN).
-	err = client.Register(ctx)
+	_, _, err = client.Register(ctx, nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "circuit breaker open",
 		"call should fast-fail when breaker is OPEN after HALF_OPEN failure")
