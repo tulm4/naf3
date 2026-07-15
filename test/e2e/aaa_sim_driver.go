@@ -54,16 +54,58 @@ func (d *AaaSimDriver) TriggerASR(t *testing.T, sessionID, targetAddr string) {
 
 func (d *AaaSimDriver) trigger(t *testing.T, cmd, sessionID, targetAddr string) {
 	t.Helper()
-	out, err := exec.Command(
-		"docker", "exec", d.Container, "aaa-sim", cmd,
+	// Find the actual container name using docker compose ps.
+	containerName := d.findContainer(t)
+	args := []string{"exec", containerName, "/app/aaa-sim", cmd,
 		"--target", targetAddr,
 		"--session-id", sessionID,
-	).CombinedOutput()
+	}
+	out, err := exec.Command("docker", args...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("aaa-sim %s failed: %v\noutput: %s", cmd, err, out)
 	}
 	t.Logf("aaa-sim %s ok (target=%s session-id=%s): %s",
 		cmd, targetAddr, sessionID, out)
+}
+
+// findContainer looks up the actual Docker container name for the service.
+func (d *AaaSimDriver) findContainer(t *testing.T) string {
+	t.Helper()
+	// Find the compose file and project directory (same logic as ComposeRunning).
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	var projDir, composeFile string
+	for dir := cwd; dir != "." && dir != "/"; dir = filepath.Dir(dir) {
+		candidate := filepath.Join(dir, "compose", "fullchain-dev-tcp.yaml")
+		if _, err := os.Stat(candidate); err == nil {
+			composeFile = candidate
+			projDir = dir
+			break
+		}
+	}
+	if composeFile == "" {
+		cf := os.Getenv("E2E_COMPOSE_FILE")
+		if cf == "" {
+			cf = "compose/fullchain-dev-tcp.yaml"
+		}
+		composeFile, _ = filepath.Abs(cf)
+		projDir = filepath.Dir(composeFile)
+	}
+
+	// Use docker compose ps to find the container name.
+	cmd := exec.Command("docker", "compose", "-f", composeFile, "ps", "--format", "{{.Name}}", d.Container)
+	cmd.Dir = projDir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("docker compose ps %s: %v", d.Container, err)
+	}
+	name := strings.TrimSpace(string(out))
+	if name == "" {
+		t.Fatalf("no container found for service %s", d.Container)
+	}
+	return name
 }
 
 // ComposeRunning reports whether the named compose service is running.

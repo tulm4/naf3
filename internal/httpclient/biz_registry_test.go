@@ -22,7 +22,7 @@ func TestBizRegistry_ForwardsToLivePod(t *testing.T) {
 	}, nil)
 
 	ctx := context.Background()
-	body, status, err := registry.ForwardRequest(ctx, "/test", "GET", nil, "req-1")
+	body, status, err := registry.ForwardRequest(ctx, "/test", "GET", nil, "req-1", "", "")
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -48,7 +48,7 @@ func TestBizRegistry_PropagatesRequestID(t *testing.T) {
 	}, nil)
 
 	ctx := context.Background()
-	_, _, err := registry.ForwardRequest(ctx, "/test", "GET", nil, "my-request-id")
+	_, _, err := registry.ForwardRequest(ctx, "/test", "GET", nil, "my-request-id", "", "")
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

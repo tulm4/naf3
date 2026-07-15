@@ -72,7 +72,7 @@ func newRadiusForwarder(cfg RadiusForwarderConfig, logger *slog.Logger, d *debug
 // Spec: RFC 2865 §3, RFC 3579 §3.2 (EAP-Message + Message-Authenticator)
 // The eapPayload is wrapped in EAP-Message attributes and sent as an Access-Request.
 // User-Name is derived from the sessionID (format: "nssAAF;{nano};{authCtxID}").
-func (rf *radiusForwarder) Forward(ctx context.Context, eapPayload []byte, sessionID string, sst uint8, sd string) ([]byte, error) {
+func (rf *radiusForwarder) Forward(ctx context.Context, eapPayload []byte, sessionID string, sst uint8, sd string, gpsi string) ([]byte, error) {
 	if rf.client == nil {
 		return nil, fmt.Errorf("radius_forward: client not configured")
 	}
@@ -115,6 +115,7 @@ func (rf *radiusForwarder) Forward(ctx context.Context, eapPayload []byte, sessi
 		"user_name", userName,
 		"eap_len", len(eapPayload),
 		"fragments", len(eapFrags),
+		"gpsi", gpsi,
 	)
 
 	// Protocol-kind debug event: surfaces RADIUS Access-Request send + outcome.
@@ -126,6 +127,7 @@ func (rf *radiusForwarder) Forward(ctx context.Context, eapPayload []byte, sessi
 		Op:     "aaa.radius.forward",
 		Kind:   debug.KindProtocol,
 		AuthID: userName,
+		GPSI:   gpsi,
 		Detail: map[string]any{
 			"code":       radius.CodeAccessRequest,
 			"peer":       rf.config.ServerAddress,

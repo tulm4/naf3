@@ -45,14 +45,15 @@ const (
 // AAA Gateway forwards raw RADIUS/Diameter transport bytes without modification.
 // Spec: docs/design/01_service_model.md §5.4.3
 type AaaForwardRequest struct {
-	Version       string        `json:"v"`             // Schema version, e.g. "1.0"
-	SessionID     string        `json:"sessionId"`     // Unique per EAP round-trip
-	AuthCtxID     string        `json:"authCtxId"`     // NSSAAF auth context ID
-	TransportType TransportType `json:"transportType"` // RADIUS or DIAMETER
-	Sst           uint8         `json:"sst"`           // S-NSSAI SST (0-255)
-	Sd            string        `json:"sd"`            // S-NSSAI SD (6 hex, "FFFFFF" if none)
-	Direction     Direction     `json:"direction"`     // CLIENT_INITIATED or SERVER_INITIATED
-	Payload       []byte        `json:"payload"`       // Raw EAP bytes (already-encoded RADIUS/Diameter)
+	Version       string        `json:"v"`              // Schema version, e.g. "1.0"
+	SessionID     string        `json:"sessionId"`      // Unique per EAP round-trip
+	AuthCtxID     string        `json:"authCtxId"`      // NSSAAF auth context ID
+	GPSI          string        `json:"gpsi"`           // GPSI for debug tracing
+	TransportType TransportType `json:"transportType"`  // RADIUS or DIAMETER
+	Sst           uint8         `json:"sst"`            // S-NSSAI SST (0-255)
+	Sd            string        `json:"sd"`             // S-NSSAI SD (6 hex, "FFFFFF" if none)
+	Direction     Direction     `json:"direction"`      // CLIENT_INITIATED or SERVER_INITIATED
+	Payload       []byte        `json:"payload"`        // Raw EAP bytes (already-encoded RADIUS/Diameter)
 }
 
 // AaaForwardResponse is the response from AAA Gateway back to Biz Pod.

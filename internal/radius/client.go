@@ -47,6 +47,7 @@ type Client struct {
 	transport                Transport
 	packetID                 uint8
 	lastRequestAuthenticator [16]byte // Saved for Response Authenticator verification
+	lastRequestAttrs        []byte    // Original request attributes for Response Auth computation
 	mu                       sync.Mutex
 	logger                   *slog.Logger
 }
@@ -104,15 +105,21 @@ func (c *Client) SendAccessRequest(ctx context.Context, attrs []Attribute) ([]by
 	packet := BuildAccessRequest(id, authenticator, attrs)
 	rawPacket := packet.Encode()
 
+	// Save Request Authenticator and original request attributes for Response verification.
+	// Must save BEFORE adding Message-Authenticator so we have the original attrs.
+	c.mu.Lock()
+	copy(c.lastRequestAuthenticator[:], authenticator[:])
+	c.lastRequestAttrs = rawPacket[20:] // Raw attributes from packet (before adding MA)
+	c.mu.Unlock()
+
 	// Add Message-Authenticator.
 	rawPacket = AddMessageAuthenticator(rawPacket, c.config.SharedSecret)
 
-	// Save Request Authenticator for Response verification.
-	c.mu.Lock()
-	copy(c.lastRequestAuthenticator[:], authenticator[:])
-	c.mu.Unlock()
-
-	serverAddr := fmt.Sprintf("%s:%d", c.config.ServerAddress, c.config.ServerPort)
+	// Build server address, handling cases where ServerAddress may or may not include the port.
+	serverAddr := c.config.ServerAddress
+	if !strings.Contains(serverAddr, ":") {
+		serverAddr = fmt.Sprintf("%s:%d", serverAddr, c.config.ServerPort)
+	}
 
 	// Retry loop.
 	var lastErr error
@@ -179,10 +186,12 @@ func (c *Client) validateResponse(data []byte, requestID uint8) error {
 	}
 
 	// Verify Response Authenticator (RFC 2865 §3).
+	// Must use original request attributes, not response attributes.
 	c.mu.Lock()
 	reqAuth := c.lastRequestAuthenticator
+	reqAttrs := c.lastRequestAttrs
 	c.mu.Unlock()
-	if !VerifyResponseAuthenticator(data, reqAuth, c.config.SharedSecret) {
+	if !VerifyResponseAuthenticatorWithAttrs(data, reqAuth, reqAttrs, c.config.SharedSecret) {
 		return ErrInvalidResponseAuth
 	}
 

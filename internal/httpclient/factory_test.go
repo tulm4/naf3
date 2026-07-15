@@ -318,7 +318,7 @@ func TestFactory_NewBizServiceClient_UsesInjectedTransport(t *testing.T) {
 		t.Fatalf("expected *BizRegistry in native mode, got %T", client)
 	}
 
-	_, _, err := registry.ForwardRequest(t.Context(), "/test", "GET", nil, "req-1")
+	_, _, err := registry.ForwardRequest(t.Context(), "/test", "GET", nil, "req-1", "", "")
 	if err != nil {
 		t.Fatalf("ForwardRequest: %v", err)
 	}

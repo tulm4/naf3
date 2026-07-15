@@ -5,6 +5,7 @@ package debug
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"sync/atomic"
 	"time"
 
@@ -119,8 +120,10 @@ func (d *Debug) Emit(ctx context.Context, ev Event) {
 	}
 	span := trace.SpanFromContext(ctx).SpanContext()
 	if !span.IsValid() {
+		slog.Info("DEBUG_EMIT skip no span", "svc", d.service)
 		return
 	}
+	slog.Info("DEBUG_EMIT proceeding", "svc", d.service, "gpsi", ev.GPSI, "op", ev.Op)
 	subHash, subKind := "", ""
 	gpsiHash := ""
 	switch {
@@ -162,11 +165,14 @@ func (d *Debug) Emit(ctx context.Context, ev Event) {
 	}
 	ctx2, cancel := context.WithTimeout(ctx, 5*time.Millisecond)
 	defer cancel()
-	_ = d.client.XAdd(ctx2, &redis.XAddArgs{
+	err := d.client.XAdd(ctx2, &redis.XAddArgs{
 		Stream: key,
 		MaxLen: d.maxLen,
 		Approx: true,
 		Values: fields,
 	}).Err()
+	if err != nil {
+		slog.Warn("DEBUG_EMIT XAdd failed", "svc", d.service, "key", key, "error", err)
+	}
 	_ = d.client.Expire(ctx2, key, d.ttl).Err()
 }

@@ -17,6 +17,8 @@ import (
 	"github.com/operator/nssAAF/internal/aaa/gateway"
 	"github.com/operator/nssAAF/internal/config"
 	"github.com/operator/nssAAF/internal/debug"
+	"github.com/operator/nssAAF/internal/radius"
+	"github.com/operator/nssAAF/internal/tracing"
 )
 
 var configPath = flag.String("config", "configs/aaa-gateway.yaml", "path to YAML configuration file")
@@ -26,6 +28,9 @@ func main() {
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
+
+	// Enable RADIUS protocol debug logging for troubleshooting.
+	radius.SetDebugLogger(logger)
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
@@ -47,6 +52,11 @@ func main() {
 	// Spec: docs/superpowers/specs/2026-07-12-nssAAF-per-ue-debug-tracing-design.md §6
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// Initialize OTel tracing so otelhttp.NewHandler creates valid spans.
+	// This must happen before the debug subsystem and HTTP server are started.
+	shutdownTracing := tracing.Init("nssAAF-aaa-gw", cfg.Version, podID)
+	defer shutdownTracing()
 
 	var dbg *debug.Debug
 	if cfg.Debug.Enabled {

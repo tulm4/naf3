@@ -382,12 +382,18 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 	handler = common.MetricsMiddleware(handler)
 	handler = common.LoggingMiddleware(handler)
 	handler = common.CORSMiddleware(handler)
-	handler = common.DebugMiddleware(dbg)(handler)
+
+	// DebugMiddleware must be INSIDE otelhttp.NewHandler so it can access
+	// the span created by otelhttp for emitting http.request events.
+	// This matches the http-gw pattern where DebugMiddleware wraps the mux
+	// before otelhttp.NewHandler is applied.
+	inner := common.DebugMiddleware(dbg)(handler)
+	handler = otelhttp.NewHandler(inner, "biz")
 
 	// ─── HTTP server ───────────────────────────────────────────────────
 	srv := &http.Server{
 		Addr:         f.cfg.Server.Addr,
-		Handler:      otelhttp.NewHandler(handler, "biz"),
+		Handler:      handler,
 		ReadTimeout:  f.cfg.Server.ReadTimeout,
 		WriteTimeout: f.cfg.Server.WriteTimeout,
 		IdleTimeout:  f.cfg.Server.IdleTimeout,

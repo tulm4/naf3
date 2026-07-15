@@ -279,15 +279,23 @@ func (h *Handler) CreateSliceAuthenticationContext(w http.ResponseWriter, r *htt
 	}
 
 	// Phase 2: forward to AAA-S and get next EAP challenge.
-	// nextEap, err := h.aaa.SendEAP(r.Context(), authCtx, authCtx.EapPayload)
-	// Phase 1: echo back the identity response as the next challenge.
-	nextEap := *body.EapIdRsp
+	// Build the EAP session for the AAA call.
+	eapSession := eap.NewSession(authCtxID, string(body.Gpsi)).
+		WithSnssai(fmt.Sprintf("%d:%s", body.Snssai.Sst, body.Snssai.Sd))
+	var nextEapBytes []byte
+	nextEapBytes, err = h.aaa.SendEAP(r.Context(), eapSession, h.aaa.RoutingContext(eapSession), authCtx.EapPayload)
+	if err != nil {
+		slog.Warn("forward to AAA failed, falling back to echo",
+			"auth_ctx_id", authCtxID, "error", err)
+		nextEapBytes = authCtx.EapPayload
+	}
+	nextEapStr := base64.StdEncoding.EncodeToString(nextEapBytes)
 
 	resp := nssaanats.SliceAuthContext{
 		AuthCtxId:  authCtxID,
 		Gpsi:       body.Gpsi,
 		Snssai:     body.Snssai,
-		EapMessage: &nextEap,
+		EapMessage: &nextEapStr,
 	}
 
 	location := fmt.Sprintf("%s/nnssaaf-nssaa/v1/slice-authentications/%s",
@@ -406,22 +414,23 @@ func (h *Handler) ConfirmSliceAuthentication(w http.ResponseWriter, r *http.Requ
 
 	eapPayload := []byte(*body.EapMessage)
 
-	// Store the Phase 2 EAP payload so it survives across round-trips.
-	domSession.EapPayload = eapPayload
-	if err := h.store.Save(r.Context(), domSession); err != nil {
-		common.WriteProblem(w, common.InternalServerProblem(
-			fmt.Sprintf("failed to update auth context: %s", err)))
-		return
+	// Phase 2: forward to AAA-S and get next EAP challenge.
+	// Build the EAP session for the AAA call.
+	eapSession := eap.NewSession(authCtxId, string(body.Gpsi)).
+		WithSnssai(fmt.Sprintf("%d:%s", domSession.SnssaiSST, domSession.SnssaiSD))
+	var nextEapBytes []byte
+	nextEapBytes, err = h.aaa.SendEAP(r.Context(), eapSession, h.aaa.RoutingContext(eapSession), eapPayload)
+	if err != nil {
+		slog.Warn("forward to AAA failed in confirm, falling back to echo",
+			"auth_ctx_id", authCtxId, "error", err)
+		nextEapBytes = eapPayload
 	}
-
-	// Phase 2: h.aaa.SendEAP(r.Context(), authCtxId, eapPayload)
-	// Phase 1: echo back the EAP message as the response.
-	nextEap := *body.EapMessage
+	nextEapStr := base64.StdEncoding.EncodeToString(nextEapBytes)
 
 	resp := nssaanats.SliceAuthConfirmationResponse{
 		Gpsi:       body.Gpsi,
 		Snssai:     body.Snssai,
-		EapMessage: &nextEap,
+		EapMessage: &nextEapStr,
 		AuthResult: (*specs.AuthStatus)(nil),
 	}
 

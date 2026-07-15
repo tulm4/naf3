@@ -195,6 +195,7 @@ func (r *Router) ResolveRoute(sst uint8, sd string) *RouteDecision {
 // Spec: PHASE §2.1
 func (r *Router) BuildForwardRequest(
 	authCtxID string,
+	gpsi string,
 	eapPayload []byte,
 	sst uint8,
 	sd string,
@@ -213,6 +214,7 @@ func (r *Router) BuildForwardRequest(
 		Version:       proto.CurrentVersion,
 		SessionID:     fmt.Sprintf("nssAAF;%d;%s", time.Now().UnixNano(), authCtxID),
 		AuthCtxID:     authCtxID,
+		GPSI:          gpsi,
 		TransportType: transportType,
 		Sst:           sst,
 		Sd:            sd,

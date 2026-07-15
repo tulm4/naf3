@@ -117,7 +117,7 @@ services:
       - ./configs/aaa-gateway.yaml:/etc/nssAAF/aaa-gateway.yaml:ro
       - ../bin/aaa-gateway:/app/aaa-gateway:ro
     environment:
-      REDIS_ADDR: "172.0.3.10:6379"
+      REDIS_ADDR: "redis:6379"
       BIZ_URL: "http://172.0.3.16:8080"
       DIAMETER_TRANSPORT: "${DIAMETER_TRANSPORT:-tcp}"
     ports: ["9090:9090", "18121:1812/udp", "38681:3868"]
@@ -155,7 +155,7 @@ services:
     environment:
       MASTER_KEY_HEX: "${MASTER_KEY_HEX:-6767a7ad0416a19ea174608288761dde35dfabba2a8dda9602fc520b80e1af15}"
       POSTGRES_HOST: "172.0.3.11"
-      REDIS_ADDR: "172.0.3.10:6379"
+      REDIS_ADDR: "redis:6379"
       NRF_URL: "http://172.0.3.12:8081"
       UDM_URL: "http://172.0.3.13:8081"
       NRM_URL: "http://172.0.3.18:8081"

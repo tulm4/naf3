@@ -195,18 +195,25 @@ func WriteJSON(w http.ResponseWriter, status int, v any) error {
 func DebugMiddleware(d *dbg.Debug) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			slog.Info("DEBUG_MW_TRACE", "path", r.URL.Path, "d_nil", d == nil)
 			if d == nil || !d.Enabled() {
 				next.ServeHTTP(w, r)
 				return
 			}
+			slog.Info("DEBUG_MW_TRACE mid", "enabled", d.Enabled())
 			// Best-effort GPSI/SUPI extraction from request body so events
-			// land in the per-UE stream rather than _no_sub. Failure to
-			// parse is non-fatal — we still emit the event without a key.
+			// land in the per-UE stream rather than _no_sub. Also check
+			// X-NSSAA-GPSI / X-NSSAA-SUPI headers propagated from http-gw
+			// so both http-gw and biz events land in the same per-UE stream.
 			var gpsi, supi string
-			if r.Body != nil && r.ContentLength != 0 {
+			if r.Header.Get("X-NSSAA-GPSI") != "" {
+				gpsi = r.Header.Get("X-NSSAA-GPSI")
+			} else if r.Header.Get("X-NSSAA-SUPI") != "" {
+				supi = r.Header.Get("X-NSSAA-SUPI")
+			} else if r.Body != nil && r.ContentLength != 0 {
 				body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 				if err == nil {
-					gpsi, supi = extractSubscriber(body)
+					gpsi, supi = ExtractSubscriber(body)
 					r.Body = io.NopCloser(strings.NewReader(string(body)))
 				}
 			}
@@ -215,6 +222,7 @@ func DebugMiddleware(d *dbg.Debug) func(http.Handler) http.Handler {
 
 			// Entry event: emit BEFORE the handler runs. Same trace_id as
 			// the exit event because both run within the request span.
+			slog.Info("DEBUG_MW about to emit", "gpsi", gpsi, "supi", supi)
 			d.Emit(r.Context(), dbg.Event{
 				Op:   "http.request",
 				Kind: dbg.KindHTTP,
@@ -249,9 +257,9 @@ func DebugMiddleware(d *dbg.Debug) func(http.Handler) http.Handler {
 	}
 }
 
-// extractSubscriber peeks at a JSON request body for known UE identity keys.
+// ExtractSubscriber peeks at a JSON request body for known UE identity keys.
 // Returns (gpsi, supi). It is best-effort: any parse error yields empty strings.
-func extractSubscriber(body []byte) (string, string) {
+func ExtractSubscriber(body []byte) (string, string) {
 	var m map[string]any
 	if err := json.Unmarshal(body, &m); err != nil {
 		return "", ""

@@ -305,9 +305,22 @@ func (s *RadiusServer) buildRadiusPacket(req []byte, replyCode uint8, attrs []by
 	packet[1] = req[1]
 	binary.BigEndian.PutUint16(packet[2:4], uint16(totalLen))
 
-	// RFC 2865 §4: Response Authenticator = MD5(Code+ID+Length+RequestAuth+Attributes+Secret)
-	// where Attributes are from the ORIGINAL request (req[20:]), not the response.
-	respAuth := md5Authenticator(packet[:20], req[4:20], req[20:], s.sharedSecret)
+	// RFC 2865 §3: Response Authenticator = MD5(Code+ID+Length+RequestAuth+Attributes+Secret)
+	// The Attributes are from the ORIGINAL request, EXCLUDING Message-Authenticator (RFC 2865).
+	// Extract request attributes without Message-Authenticator for Response Auth computation.
+	reqAttrsWithoutMA := removeMessageAuthFromRawPacket(req)
+	
+	// Debug: compute what AAA gateway should expect
+	respAuth := md5Authenticator(packet[:20], req[4:20], reqAttrsWithoutMA, s.sharedSecret)
+	s.logger.Info("AAA_SIM_COMPUTE",
+		"code", replyCode,
+		"id", req[1],
+		"length", totalLen,
+		"req_auth", fmt.Sprintf("%x", req[4:20]),
+		"attrs_len", len(reqAttrsWithoutMA),
+		"secret", string(s.sharedSecret),
+		"computed_resp_auth", fmt.Sprintf("%x", respAuth),
+	)
 	copy(packet[4:20], respAuth)
 
 	// Copy attributes.
@@ -384,6 +397,28 @@ func computeHMACMD5(data, secret []byte) []byte {
 // hasMessageAuth reports whether the packet contains a Message-Authenticator attribute.
 func hasMessageAuth(data []byte) bool {
 	return findAttr(data, attrMessageAuth) >= 0
+}
+
+// removeMessageAuthFromRawPacket returns a copy of the packet attributes with Message-Authenticator removed.
+// Used for Response Authenticator computation per RFC 2865.
+func removeMessageAuthFromRawPacket(data []byte) []byte {
+	if len(data) < 20 {
+		return nil
+	}
+	result := []byte{}
+	offset := 20
+	for offset+2 <= len(data) {
+		attrType := data[offset]
+		attrLen := int(data[offset+1])
+		if attrLen < 2 || offset+attrLen > len(data) {
+			break
+		}
+		if attrType != attrMessageAuth {
+			result = append(result, data[offset:offset+attrLen]...)
+		}
+		offset += attrLen
+	}
+	return result
 }
 
 // hasZeroAuth reports whether the Request Authenticator (bytes 4-20) is all zeros.

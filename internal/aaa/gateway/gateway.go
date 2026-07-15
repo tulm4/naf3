@@ -273,11 +273,15 @@ func (g *Gateway) Stop() {
 // It receives AaaForwardRequest from Biz Pod, writes session correlation to Redis,
 // forwards to AAA-S, and returns the response directly to the caller.
 func (g *Gateway) ForwardEAP(ctx context.Context, req *proto.AaaForwardRequest) (*proto.AaaForwardResponse, error) {
+	// Store GPSI in context for downstream debug events to use.
+	ctx = debug.WithSubscriber(ctx, req.GPSI, "")
+
 	// 1. Write session correlation entry to Redis (before forwarding)
 	// Wire os.Hostname() now so direct pod lookup works immediately.
 	hostname, _ := os.Hostname()
 	entry := proto.SessionCorrEntry{
 		AuthCtxID: req.AuthCtxID,
+		GPSI:      req.GPSI,
 		PodID:     hostname, // Written once here; read on server-initiated routing
 		Sst:       req.Sst,
 		Sd:        req.Sd,
@@ -287,12 +291,21 @@ func (g *Gateway) ForwardEAP(ctx context.Context, req *proto.AaaForwardRequest) 
 		return nil, fmt.Errorf("aaa-gateway: failed to write session corr: %w", err)
 	}
 
+	// Emit debug event for session correlation write with GPSI
+	g.debug.Emit(ctx, debug.Event{
+		Op:     "aaa.session_corr.write",
+		Kind:   debug.KindInternal,
+		AuthID: req.AuthCtxID,
+		GPSI:   req.GPSI,
+		Status: "ok",
+	})
+
 	// 2. Forward to AAA-S based on transport type
 	var response []byte
 	var err error
 	switch req.TransportType {
 	case proto.TransportRADIUS:
-		response, err = g.radiusForwarder.Forward(ctx, req.Payload, req.SessionID, req.Sst, req.Sd)
+		response, err = g.radiusForwarder.Forward(ctx, req.Payload, req.SessionID, req.Sst, req.Sd, req.GPSI)
 	case proto.TransportDIAMETER:
 		response, err = g.diamForwarder.Forward(ctx, req.Payload, req.SessionID, req.Sst, req.Sd)
 	default:
@@ -342,6 +355,7 @@ func (g *Gateway) HandleForward(w http.ResponseWriter, r *http.Request) {
 		Op:     "aaa.handle_forward",
 		Kind:   debug.KindInternal,
 		AuthID: req.AuthCtxID,
+		GPSI:   req.GPSI,
 		Status: "ok",
 	})
 

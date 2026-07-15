@@ -27,7 +27,7 @@ aaaGateway:
   # RADIUS client-initiated config:
   # Required for Access-Request forwarding to AAA-S. Disabled if empty.
   radiusServerAddress: "172.0.3.14:1812"     # AAA-S RADIUS address (static IP per spec §4.1)
-  radiusSharedSecret: "secret"                      # Shared secret with AAA-S
+  radiusSharedSecret: "testing123"                    # Shared secret with AAA-S
   redisMode: "standalone"
   vipAddress: "172.0.3.15"                          # Equals the container's static IP (spec §4.2)
 
@@ -45,7 +45,7 @@ metrics:
 # timeline for forensics. See design spec §6.
 debug:
   enabled: true
-  redisAddr: "${REDIS_ADDR:-172.0.3.10:6379}"
+  redisAddr: "${REDIS_ADDR:-redis:6379}"
   ttl: 24h
   maxLen: 10000
 

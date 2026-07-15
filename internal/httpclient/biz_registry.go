@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+
 	"github.com/operator/nssAAF/internal/config"
 	"github.com/operator/nssAAF/internal/proto"
 	"github.com/operator/nssAAF/internal/resilience"
@@ -78,7 +80,7 @@ func NewBizRegistry(redisAddr, staticURL string, cfg config.NativeCommConfig, tr
 	}
 
 	if transport == nil {
-		transport = &http.Transport{}
+		transport = otelhttp.NewTransport(&http.Transport{})
 	}
 
 	return &BizRegistry{
@@ -162,7 +164,7 @@ func (b *BizRegistry) selectRandomLivePod(ctx context.Context) (string, error) {
 // ForwardRequest implements proto.BizServiceClient with Redis-based pod discovery,
 // circuit breakers, and retry logic.
 // Spec: Option B — Redis-based target selection
-func (b *BizRegistry) ForwardRequest(ctx context.Context, path, method string, body []byte, requestID string) ([]byte, int, error) {
+func (b *BizRegistry) ForwardRequest(ctx context.Context, path, method string, body []byte, requestID string, gpsi string, supi string) ([]byte, int, error) {
 	var lastErr error
 	var lastStatus int
 	var lastBody []byte
@@ -194,6 +196,12 @@ func (b *BizRegistry) ForwardRequest(ctx context.Context, path, method string, b
 		req.Header.Set("Content-Type", "application/json")
 		if requestID != "" {
 			req.Header.Set("X-Request-ID", requestID)
+		}
+		if gpsi != "" {
+			req.Header.Set("X-NSSAA-GPSI", gpsi)
+		}
+		if supi != "" {
+			req.Header.Set("X-NSSAA-SUPI", supi)
 		}
 
 		resp, err := b.httpClient.Do(req)

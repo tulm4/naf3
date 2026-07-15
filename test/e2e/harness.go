@@ -404,8 +404,19 @@ func (h *Harness) AAAGWURL() string { return h.aaagwURL }
 // NRMURL returns the NRM RESTCONF base URL.
 func (h *Harness) NRMURL() string { return h.nrmURL }
 
-// RedisAddr returns the Redis address from the harness config.
+// RedisAddr returns the full Redis connection URL from the harness config.
+// Prefer Redis() for tests to avoid URL parsing issues.
 func (h *Harness) RedisAddr() string { return h.redisAddr }
+
+// Redis returns the harness's Redis client. Tests should use this instead
+// of creating their own client.
+func (h *Harness) Redis() *redis.Client { return h.redis }
+
+// PgConn returns the harness's direct PG connection pool. Tests that need
+// to query or seed slice_auth_sessions should use this rather than opening
+// their own pool. The returned pool is shared across tests and closed by
+// FinalizeHarness() after the test run.
+func (h *Harness) PgConn() *pgxpool.Pool { return h.pgConn }
 
 // Driver returns the harness's driver (ContainerDriver).
 func (h *Harness) Driver() Driver {
@@ -608,13 +619,16 @@ func ofThisFile() string {
 	return "."
 }
 
-// extractHostPort converts a redis://host:port URL (or just host:port) into
+// extractHostPort converts a redis://host:port[/db] URL (or just host:port) into
 // host:port for use with redis.Options{Addr: ...}.
 func extractHostPort(raw string) string {
 	// Strip redis:// prefix if present.
 	raw = strings.TrimPrefix(raw, "redis://")
-	// If it's already host:port, return as-is.
+	// If it's just host:port (no scheme), strip any /db suffix.
 	if !strings.Contains(raw, "://") {
+		if idx := strings.Index(raw, "/"); idx >= 0 {
+			raw = raw[:idx]
+		}
 		return raw
 	}
 	// Parse as URL to extract host:port.

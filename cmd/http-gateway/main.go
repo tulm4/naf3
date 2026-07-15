@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"flag"
 	"io"
 	"log/slog"
@@ -77,10 +78,11 @@ func main() {
 	initCtx, initCancel := context.WithCancel(context.Background())
 	defer initCancel()
 
+	var podID string
 	var dbg *debug.Debug
 	if cfg.Debug.Enabled {
-		podID, _ := os.Hostname()
 		var err error
+		podID, _ = os.Hostname()
 		dbg, err = debug.New(initCtx, debug.Config{
 			Enabled:   cfg.Debug.Enabled,
 			RedisAddr: cfg.Debug.RedisAddr,
@@ -106,6 +108,14 @@ func main() {
 		cfg.HTTPgw.BizServiceURL,
 		cfg.Redis.Addr,
 	)
+
+	// Initialize OTel tracing so otelhttp.NewHandler creates valid spans.
+	// Without this, DebugMiddleware cannot extract a valid trace_id for Emit.
+	if podID == "" {
+		podID, _ = os.Hostname()
+	}
+	shutdownTracing := tracing.Init("http-gw", cfg.Version, podID)
+	defer shutdownTracing()
 
 	// Use a mux for path-based auth scoping.
 	var authCfg auth.Config
@@ -240,7 +250,30 @@ func proxyToBiz(w http.ResponseWriter, r *http.Request, biz proto.BizServiceClie
 	}
 
 	requestID := r.Header.Get("X-Request-ID")
-	respBody, status, err := biz.ForwardRequest(r.Context(), r.URL.Path, r.Method, body, requestID)
+
+	// Propagate GPSI/SUPI from parsed body for debug tracing in biz.
+	// This ensures both http-gw and biz events land in the same per-UE stream.
+	// Inline extraction to avoid circular/import issues.
+	var gpsi, supi string
+	if len(body) > 0 {
+		var m map[string]any
+		if err := json.Unmarshal(body, &m); err == nil {
+			if v, ok := m["gpsi"].(string); ok {
+				gpsi = v
+			}
+			if v, ok := m["supi"].(string); ok {
+				supi = v
+			}
+		}
+	}
+	if gpsi != "" {
+		r.Header.Set("X-NSSAA-GPSI", gpsi)
+	}
+	if supi != "" {
+		r.Header.Set("X-NSSAA-SUPI", supi)
+	}
+
+	respBody, status, err := biz.ForwardRequest(r.Context(), r.URL.Path, r.Method, body, requestID, gpsi, supi)
 	if err != nil {
 		slog.Error("forward to biz failed", "error", err, "path", r.URL.Path)
 		http.Error(w, "service unavailable", http.StatusServiceUnavailable)

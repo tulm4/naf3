@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+
 	"github.com/operator/nssAAF/internal/proto"
 )
 
@@ -19,12 +21,14 @@ type istioBizClient struct {
 func newIstioBizClient(baseURL string) *istioBizClient {
 	return &istioBizClient{
 		baseURL: baseURL,
-		client:  http.DefaultClient,
+		client: &http.Client{
+			Transport: otelhttp.NewTransport(http.DefaultTransport),
+		},
 	}
 }
 
 // ForwardRequest delegates to Istio sidecar for resilience.
-func (c *istioBizClient) ForwardRequest(ctx context.Context, path, method string, body []byte, requestID string) ([]byte, int, error) {
+func (c *istioBizClient) ForwardRequest(ctx context.Context, path, method string, body []byte, requestID string, gpsi string, supi string) ([]byte, int, error) {
 	url := c.baseURL + path
 	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body))
 	if err != nil {
@@ -33,6 +37,12 @@ func (c *istioBizClient) ForwardRequest(ctx context.Context, path, method string
 	req.Header.Set("Content-Type", "application/json")
 	if requestID != "" {
 		req.Header.Set("X-Request-ID", requestID)
+	}
+	if gpsi != "" {
+		req.Header.Set("X-NSSAA-GPSI", gpsi)
+	}
+	if supi != "" {
+		req.Header.Set("X-NSSAA-SUPI", supi)
 	}
 
 	resp, err := c.client.Do(req)

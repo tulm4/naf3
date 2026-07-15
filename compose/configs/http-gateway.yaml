@@ -25,6 +25,10 @@ logging:
   level: "info"
   format: "json"
 
+redis:
+  addr: "${REDIS_ADDR:-redis:6379}"
+  poolSize: 10
+
 metrics:
   enabled: true
   path: "/metrics"
@@ -56,6 +60,6 @@ internalComm:
 # Spec: docs/superpowers/specs/2026-07-12-nssAAF-per-ue-debug-tracing-design.md
 debug:
   enabled: true
-  redisAddr: "${REDIS_ADDR:-172.0.3.10:6379}"
+  redisAddr: "${REDIS_ADDR:-redis:6379}"
   ttl: 24h
   maxLen: 10000
