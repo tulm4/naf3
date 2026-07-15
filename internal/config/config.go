@@ -236,10 +236,129 @@ type DebugConfig struct {
 }
 
 // NRFConfig holds NRF service discovery settings.
+// Extended with OAuth2, heartbeat, and discovery cache settings for full NRF integration.
+// Spec: TS 29.510 (NF discovery, NF profile); TS 29.526 (NSSAAF procedures).
 type NRFConfig struct {
 	BaseURL         string        `yaml:"baseURL"`
 	DiscoverTimeout time.Duration `yaml:"discoverTimeout"`
 	CacheTTL        time.Duration `yaml:"cacheTtl"` // Default: 5m
+
+	// InstanceID is the NF instance UUID used as the NF profile's nfInstanceId
+	// on NRF register/update. Required for self-registration against NRF.
+	InstanceID string `yaml:"instanceId"`
+
+	// AccessToken holds OAuth2 client credential settings for Nnrf access.
+	AccessToken TokenConfig `yaml:"accessToken"`
+
+	// Heartbeat drives the self-heartbeat refresh interval sent to NRF
+	// to keep this NF's profile marked as available.
+	Heartbeat HeartbeatConfig `yaml:"heartbeat"`
+
+	// DiscoveryCache configures the in-memory NF discovery result cache.
+	DiscoveryCache DiscoveryCacheConfig `yaml:"discoveryCache"`
+}
+
+// TokenConfig holds OAuth2 client credentials for NRF authentication.
+// Spec: TS 29.510 §6 (NF authentication via OAuth2 access tokens).
+type TokenConfig struct {
+	Enabled      bool   `yaml:"enabled"`
+	AuthServer   string `yaml:"authServer"`   // Token endpoint URL
+	ClientID     string `yaml:"clientId"`     // OAuth2 client_id
+	ClientSecret string `yaml:"clientSecret"` // OAuth2 client_secret (support ${VAR} expansion)
+	Scope        string `yaml:"scope"`        // Requested scope, e.g. "nnrf-nfm"
+}
+
+// HeartbeatConfig holds heartbeat manager settings.
+// Spec: TS 29.510 §6.4.2 (heartbeat / patch update).
+type HeartbeatConfig struct {
+	// InitialInterval is the interval between heartbeats sent to NRF
+	// before negotiation. YAML accepts an integer (seconds) or a duration string.
+	InitialInterval time.Duration `yaml:"initialIntervalSeconds"`
+	// AcceptNegotiatedInterval permits NRF to push a shorter heartbeat interval
+	// via the patch response (SecDependent: PUT .../subscriptions/<id>).
+	AcceptNegotiatedInterval bool `yaml:"acceptNegotiatedInterval"`
+	// MaxConsecutiveFailures is the tolerance before marking NRF unreachable.
+	MaxConsecutiveFailures int `yaml:"maxConsecutiveFailures"`
+}
+
+// DiscoveryCacheConfig holds discovery cache settings.
+type DiscoveryCacheConfig struct {
+	// Enabled toggles the in-memory discovery result cache.
+	Enabled bool `yaml:"enabled"`
+	// DefaultTTL is the time a discovery result stays in the cache without
+	// a successful refresh. YAML accepts an integer (seconds) or a duration string.
+	DefaultTTL time.Duration `yaml:"defaultTTLSeconds"`
+}
+
+// UnmarshalYAML implements yaml.Unmarshaler for HeartbeatConfig so that the
+// "initialIntervalSeconds" field can be expressed as either an integer
+// (seconds) or a duration string.
+func (c *HeartbeatConfig) UnmarshalYAML(node *yaml.Node) error {
+	// Parse a shadow struct that mirrors the production fields but
+	// holds the raw int-form the YAML permits for time fields.
+	var raw struct {
+		InitialIntervalSeconds interface{} `yaml:"initialIntervalSeconds"`
+		AcceptNegotiated       bool        `yaml:"acceptNegotiatedInterval"`
+		MaxConsecutive         int         `yaml:"maxConsecutiveFailures"`
+	}
+	if err := node.Decode(&raw); err != nil {
+		return err
+	}
+	if d, ok, err := decodeDurationLike(raw.InitialIntervalSeconds); err != nil {
+		return fmt.Errorf("heartbeat.initialIntervalSeconds: %w", err)
+	} else if ok {
+		c.InitialInterval = d
+	}
+	c.AcceptNegotiatedInterval = raw.AcceptNegotiated
+	c.MaxConsecutiveFailures = raw.MaxConsecutive
+	return nil
+}
+
+// UnmarshalYAML implements yaml.Unmarshaler for DiscoveryCacheConfig so that
+// the "defaultTTLSeconds" field accepts an integer (seconds) or duration string.
+func (c *DiscoveryCacheConfig) UnmarshalYAML(node *yaml.Node) error {
+	var raw struct {
+		Enabled         bool        `yaml:"enabled"`
+		DefaultTTLValue interface{} `yaml:"defaultTTLSeconds"`
+	}
+	if err := node.Decode(&raw); err != nil {
+		return err
+	}
+	c.Enabled = raw.Enabled
+	if d, ok, err := decodeDurationLike(raw.DefaultTTLValue); err != nil {
+		return fmt.Errorf("discoveryCache.defaultTTLSeconds: %w", err)
+	} else if ok {
+		c.DefaultTTL = d
+	}
+	return nil
+}
+
+// decodeDurationLike accepts:
+//   - an int (seconds)
+//   - a float64 (seconds, rounded)
+//   - a duration string (e.g. "5m", "300s") — parsed via time.ParseDuration
+//
+// Returns ok=true when the value was provided (including an explicit nil/empty).
+func decodeDurationLike(v interface{}) (time.Duration, bool, error) {
+	if v == nil {
+		return 0, false, nil
+	}
+	switch x := v.(type) {
+	case int:
+		return time.Duration(x) * time.Second, true, nil
+	case int64:
+		return time.Duration(x) * time.Second, true, nil
+	case float64:
+		return time.Duration(x * float64(time.Second)), true, nil
+	case string:
+		d, err := time.ParseDuration(x)
+		if err != nil {
+			return 0, false, fmt.Errorf("invalid duration %q: %w", x, err)
+		}
+		return d, true, nil
+	default:
+		return 0, false, fmt.Errorf("unsupported type %T", v)
+	}
 }
 
 // UDMConfig holds UDM API settings.
@@ -526,9 +645,18 @@ func applyDefaults(cfg *Config) {
 		}
 	}
 
-	// NRF cache TTL default (Phase 4 — NF Integration)
+	// NRF defaults (Phase 4 — NF Integration)
 	if cfg.NRF.CacheTTL == 0 {
 		cfg.NRF.CacheTTL = 5 * time.Minute
+	}
+	if cfg.NRF.Heartbeat.InitialInterval == 0 {
+		cfg.NRF.Heartbeat.InitialInterval = 5 * time.Minute
+	}
+	if cfg.NRF.Heartbeat.MaxConsecutiveFailures == 0 {
+		cfg.NRF.Heartbeat.MaxConsecutiveFailures = 3
+	}
+	if cfg.NRF.DiscoveryCache.DefaultTTL == 0 {
+		cfg.NRF.DiscoveryCache.DefaultTTL = time.Hour
 	}
 
 	// InternalComm native defaults
