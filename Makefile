@@ -224,7 +224,7 @@ test-fullchain: gen-certs build ## Run fullchain E2E tests (real containers for 
 	E2E_PROFILE=fullchain \
 	E2E_TLS_CA=/tmp/e2e-tls/server.crt \
 	BIZ_PG_URL=postgres://nssaa:nssaa@localhost:5432/nssaa?sslmode=disable \
-	BIZ_REDIS_URL=redis://localhost:6379 \
+	BIZ_REDIS_URL=redis://localhost:6379/0 \
 	FULLCHAIN_NRF_URL=http://localhost:8082 \
 	FULLCHAIN_UDM_URL=http://localhost:8083 \
 	FULLCHAIN_AAA_SIM_URL=http://localhost:18120 \
@@ -252,7 +252,7 @@ test-fullchain-fast: gen-certs ## Fast dev loop: binary mount pattern for ~15-30
 	E2E_PROFILE=fullchain \
 	E2E_TLS_CA=/tmp/e2e-tls/server.crt \
 	BIZ_PG_URL=postgres://nssaa:nssaa@localhost:5432/nssaa?sslmode=disable \
-	BIZ_REDIS_URL=redis://localhost:6379 \
+	BIZ_REDIS_URL=redis://localhost:6379/0 \
 	FULLCHAIN_NRF_URL=http://localhost:8082 \
 	FULLCHAIN_UDM_URL=http://localhost:8083 \
 	FULLCHAIN_AAA_SIM_URL=http://localhost:18120 \
@@ -274,7 +274,7 @@ test-fullchain-no-build: ## Run tests with existing images (skip build, ~5s star
 	E2E_PROFILE=fullchain \
 	E2E_TLS_CA=/tmp/e2e-tls/server.crt \
 	BIZ_PG_URL=postgres://nssaa:nssaa@localhost:5432/nssaa?sslmode=disable \
-	BIZ_REDIS_URL=redis://localhost:6379 \
+	BIZ_REDIS_URL=redis://localhost:6379/0 \
 	FULLCHAIN_NRF_URL=http://localhost:8082 \
 	FULLCHAIN_UDM_URL=http://localhost:8083 \
 	FULLCHAIN_AAA_SIM_URL=http://localhost:18120 \
@@ -285,58 +285,6 @@ test-fullchain-no-build: ## Run tests with existing images (skip build, ~5s star
 	@echo "$(YELLOW)Tearing down fullchain stack...$(NC)"
 	docker compose -f compose/fullchain-dev-tcp.yaml down --remove-orphans
 	@echo "$(GREEN)Fullchain tests complete (no-build mode)$(NC)"
-
-.PHONY: test-debug-full-radius
-test-debug-full-radius: ## Run per-UE debug RADIUS full-flow tests (RUN_E2E=1 required)
-	@echo "$(YELLOW)Starting fullchain TCP stack for debug RADIUS tests...$(NC)"
-	docker compose -f compose/fullchain-dev-tcp.yaml up -d --quiet-pull --wait
-	@echo "$(YELLOW)Running debug full-flow RADIUS tests...$(NC)"
-	E2E_DOCKER_MANAGED=1 \
-	E2E_PROFILE=fullchain \
-	E2E_COMPOSE_FILE=compose/fullchain-dev-tcp.yaml \
-	E2E_TLS_CA=/tmp/e2e-tls/server.crt \
-	BIZ_PG_URL=postgres://nssaa:nssaa@localhost:5432/nssaa?sslmode=disable \
-	BIZ_REDIS_URL=redis://localhost:6379 \
-	FULLCHAIN_NRF_URL=http://localhost:8082 \
-	FULLCHAIN_UDM_URL=http://localhost:8083 \
-	FULLCHAIN_AAA_SIM_URL=http://localhost:18120 \
-	FULLCHAIN_NRM_URL=http://localhost:8084 \
-	RUN_E2E=1 \
-	$(GOTEST) -C .worktrees/feature-per-ue-debug -tags=e2e -v -count=1 -timeout=10m \
-		-run 'TestDebugFullFlow_(RADIUS_Forward|AMFCallback)' \
-		./test/e2e/... \
-		|| { docker compose -f compose/fullchain-dev-tcp.yaml down --remove-orphans; exit 1; }
-	@echo "$(YELLOW)Tearing down fullchain stack...$(NC)"
-	docker compose -f compose/fullchain-dev-tcp.yaml down --remove-orphans
-	@echo "$(GREEN)Debug RADIUS full-flow tests complete$(NC)"
-
-.PHONY: test-debug-full-diameter
-test-debug-full-diameter: ## Run per-UE debug Diameter full-flow tests (RUN_E2E=1 required)
-	@echo "$(YELLOW)Starting fullchain TCP stack for debug Diameter tests...$(NC)"
-	DIAMETER_TRANSPORT=tcp docker compose -f compose/fullchain-dev-tcp.yaml up -d --quiet-pull --wait
-	@echo "$(YELLOW)Running debug full-flow Diameter tests...$(NC)"
-	E2E_DOCKER_MANAGED=1 \
-	E2E_PROFILE=fullchain \
-	E2E_COMPOSE_FILE=compose/fullchain-dev-tcp.yaml \
-	E2E_TLS_CA=/tmp/e2e-tls/server.crt \
-	BIZ_PG_URL=postgres://nssaa:nssaa@localhost:5432/nssaa?sslmode=disable \
-	BIZ_REDIS_URL=redis://localhost:6379 \
-	FULLCHAIN_NRF_URL=http://localhost:8082 \
-	FULLCHAIN_UDM_URL=http://localhost:8083 \
-	FULLCHAIN_AAA_SIM_URL=http://localhost:18120 \
-	FULLCHAIN_NRM_URL=http://localhost:8084 \
-	RUN_E2E=1 \
-	DIAMETER_TRANSPORT=tcp \
-	$(GOTEST) -C .worktrees/feature-per-ue-debug -tags=e2e -v -count=1 -timeout=10m \
-		-run 'TestDebugFullFlow_DIAMETER_Forward' \
-		./test/e2e/... \
-		|| { DIAMETER_TRANSPORT=tcp docker compose -f compose/fullchain-dev-tcp.yaml down --remove-orphans; exit 1; }
-	@echo "$(YELLOW)Tearing down fullchain stack...$(NC)"
-	DIAMETER_TRANSPORT=tcp docker compose -f compose/fullchain-dev-tcp.yaml down --remove-orphans
-	@echo "$(GREEN)Debug Diameter full-flow tests complete$(NC)"
-
-.PHONY: test-debug-full
-test-debug-full: test-debug-full-radius test-debug-full-diameter ## Run all per-UE debug full-flow tests
 
 # =============================================================================
 # Diameter + RADIUS E2E (logs-only, Makefile-owned compose lifecycle)
@@ -351,7 +299,7 @@ test-diameter-radius: gen-certs build ## Diameter TCP + RADIUS E2E (logs-only)
 	E2E_COMPOSE_FILE=compose/fullchain-dev-tcp.yaml \
 	E2E_TLS_CA=/tmp/e2e-tls/server.crt \
 	BIZ_PG_URL=postgres://nssaa:nssaa@localhost:5432/nssaa?sslmode=disable \
-	BIZ_REDIS_URL=redis://localhost:6379 \
+	BIZ_REDIS_URL=redis://localhost:6379/0 \
 	FULLCHAIN_NRF_URL=http://localhost:8082 \
 	FULLCHAIN_UDM_URL=http://localhost:8083 \
 	FULLCHAIN_AAA_SIM_URL=http://localhost:18120 \
@@ -373,7 +321,7 @@ test-diameter-radius-sctp: gen-certs build ## Diameter SCTP E2E (logs-only; skip
 	E2E_COMPOSE_FILE=compose/fullchain-dev-sctp.yaml \
 	E2E_TLS_CA=/tmp/e2e-tls/server.crt \
 	BIZ_PG_URL=postgres://nssaa:nssaa@localhost:5432/nssaa?sslmode=disable \
-	BIZ_REDIS_URL=redis://localhost:6379 \
+	BIZ_REDIS_URL=redis://localhost:6379/0 \
 	FULLCHAIN_NRF_URL=http://localhost:8082 \
 	FULLCHAIN_UDM_URL=http://localhost:8083 \
 	FULLCHAIN_AAA_SIM_URL=http://localhost:18120 \
