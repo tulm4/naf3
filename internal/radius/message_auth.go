@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"log/slog"
 )
 
 // ErrInvalidMessageAuth is returned when Message-Authenticator verification fails.
@@ -147,14 +148,47 @@ func ComputeResponseAuthenticator(code, id uint8, length uint16, requestAuth [16
 }
 
 // VerifyResponseAuthenticator validates the Response Authenticator field in Access-Accept/Reject/Challenge packets.
+func VerifyResponseAuthenticator(response []byte, requestAuth [16]byte, secret string) bool {
+	if len(response) < 20 {
+		return false
+	}
+	return VerifyResponseAuthenticatorWithAttrs(response, requestAuth, response[20:], secret)
+}
+
+// Debug logger for troubleshooting Response Authenticator issues.
+// Set to slog.Default() or pass a custom logger to enable debug output.
+var debugLogger *slog.Logger
+
+// SetDebugLogger configures debug logging for RADIUS message auth.
+func SetDebugLogger(logger *slog.Logger) {
+	debugLogger = logger
+}
+
+// debugLog writes to the debugLogger if it's set.
+func debugLog(msg string, args ...any) {
+	if debugLogger != nil {
+		debugLogger.Info(msg, args...)
+	}
+}
+
+// VerifyResponseAuthenticatorWithAttrs validates the Response Authenticator using explicit request attributes.
 // Spec: RFC 2865 §3
 //
 // The Response Authenticator is computed as:
 //
-//	MD5(Code + ID + Length + Request Authenticator + Attributes + Secret)
+//	MD5(Code + ID + Length + Request Authenticator + Original Request Attributes + Secret)
 //
 // This differs from Message-Authenticator which uses HMAC-MD5.
-func VerifyResponseAuthenticator(response []byte, requestAuth [16]byte, secret string) bool {
+func VerifyResponseAuthenticatorWithAttrs(response []byte, requestAuth [16]byte, requestAttrs []byte, secret string) bool {
+	if debugLogger != nil {
+		debugLog("VERIFY_RESP_AUTH_DEBUG",
+			"response_len", len(response),
+			"request_attrs_len", len(requestAttrs),
+			"secret_len", len(secret),
+			"secret_val", secret,
+		)
+	}
+
 	if len(response) < 20 {
 		return false
 	}
@@ -162,25 +196,35 @@ func VerifyResponseAuthenticator(response []byte, requestAuth [16]byte, secret s
 	respAuth := response[4:20]
 	code := response[0]
 	id := response[1]
-	respLen := int(response[2])<<8 | int(response[3])
-
-	if respLen > len(response) || respLen < 20 {
-		return false
-	}
-
-	attrs := response[20:respLen]
+	length := binary.BigEndian.Uint16(response[2:4])
 
 	// Build: Code(1) + ID(1) + Length(2) + RequestAuth(16) + Attributes
 	h := md5.New()
 	h.Write([]byte{code, id})
 	h.Write(response[2:4])
 	h.Write(requestAuth[:])
-	h.Write(attrs)
+	h.Write(requestAttrs)
 	h.Write([]byte(secret))
 
 	computed := h.Sum(nil)
 
-	return subtle.ConstantTimeCompare(respAuth, computed) == 1
+	cmpResult := subtle.ConstantTimeCompare(respAuth, computed)
+
+	// Debug: log mismatch details for troubleshooting
+	debugLog("VERIFY_RESP_AUTH_RESULT",
+		"code", code,
+		"id", id,
+		"length", length,
+		"req_attrs_len", len(requestAttrs),
+		"req_auth", fmt.Sprintf("%x", requestAuth),
+		"req_attrs_hex", fmt.Sprintf("%x", requestAttrs),
+		"secret", secret,
+		"cmp_result", cmpResult,
+		"resp_auth", fmt.Sprintf("%x", respAuth),
+		"computed", fmt.Sprintf("%x", computed),
+	)
+
+	return cmpResult == 1
 }
 
 // AddMessageAuthenticator adds a Message-Authenticator attribute to a RADIUS packet.

@@ -40,6 +40,7 @@ type Config struct {
 	AUSF      AUSFConfig      `yaml:"ausf"`
 	Crypto       CryptoConfig       `yaml:"crypto"`
 	InternalComm InternalCommConfig `yaml:"internalComm"`
+	Debug        DebugConfig        `yaml:"debug"`
 
 	// Per-component config (only one is non-nil based on Component field)
 	Biz    *BizConfig    `yaml:"biz,omitempty"`
@@ -223,6 +224,15 @@ type LoggingConfig struct {
 type MetricsConfig struct {
 	Enabled bool   `yaml:"enabled"`
 	Path    string `yaml:"path"`
+}
+
+// DebugConfig holds the per-UE debug subsystem configuration.
+// Spec: docs/superpowers/specs/2026-07-12-nssAAF-per-ue-debug-tracing-design.md §6
+type DebugConfig struct {
+	Enabled   bool          `yaml:"enabled"`
+	RedisAddr string        `yaml:"redisAddr"`
+	TTL       time.Duration `yaml:"ttl"`
+	MaxLen    int64         `yaml:"maxLen"`
 }
 
 // NRFConfig holds NRF service discovery settings.

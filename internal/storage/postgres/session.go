@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/operator/nssAAF/internal/crypto"
+	"github.com/operator/nssAAF/internal/debug"
 	"github.com/operator/nssAAF/internal/types"
 )
 
@@ -108,13 +109,16 @@ func newUUID() (string, error) {
 
 // Repository provides database operations for sessions.
 type Repository struct {
-	pool *Pool
-	enc  *encryptor
+	pool  *Pool
+	enc   *encryptor
+	debug *debug.Debug
 }
 
 // NewRepository creates a new session repository.
-func NewRepository(pool *Pool, enc *encryptor) *Repository {
-	return &Repository{pool: pool, enc: enc}
+// The *debug.Debug parameter is nil-safe: WrapDB short-circuits when debug
+// is nil or disabled (see internal/debug/hooks.go).
+func NewRepository(pool *Pool, enc *encryptor, d *debug.Debug) *Repository {
+	return &Repository{pool: pool, enc: enc, debug: d}
 }
 
 // encryptField encrypts a string value and returns base64-encoded ciphertext.
@@ -207,20 +211,18 @@ func (r *Repository) Create(ctx context.Context, s *Session) error {
 		aaaConfigID = *s.AAAConfigID
 	}
 
-	err = r.pool.Exec(ctx, sql,
-		s.AuthCtxID, encryptedGPSI, crypto.HashGPSI(s.GPSI), encryptedSUPI, s.SnssaiSST, s.SnssaiSD,
-		s.AMFInstanceID, amfIP, s.AMFRegion,
-		s.ReauthNotifURI, s.RevocNotifURI,
-		aaaConfigID, stateCiphertext,
-		s.EAPRounds, s.MaxEAPRounds, s.EAPLastNonce,
-		s.NssaaStatus, s.AuthResult,
-		s.FailureReason, s.FailureCause,
-		s.CreatedAt, s.UpdatedAt, s.ExpiresAt,
-	)
-	if err != nil {
-		return fmt.Errorf("session create: %w", err)
-	}
-	return nil
+	return r.debug.WrapDB(ctx, "pg.session.create", "slice_auth_sessions", func() error {
+		return r.pool.Exec(ctx, sql,
+			s.AuthCtxID, encryptedGPSI, crypto.HashGPSI(s.GPSI), encryptedSUPI, s.SnssaiSST, s.SnssaiSD,
+			s.AMFInstanceID, amfIP, s.AMFRegion,
+			s.ReauthNotifURI, s.RevocNotifURI,
+			aaaConfigID, stateCiphertext,
+			s.EAPRounds, s.MaxEAPRounds, s.EAPLastNonce,
+			s.NssaaStatus, s.AuthResult,
+			s.FailureReason, s.FailureCause,
+			s.CreatedAt, s.UpdatedAt, s.ExpiresAt,
+		)
+	})
 }
 
 // GetByAuthCtxID retrieves a session by its authCtxID.
@@ -239,13 +241,26 @@ func (r *Repository) GetByAuthCtxID(ctx context.Context, authCtxID string) (*Ses
 		FROM slice_auth_sessions
 		WHERE auth_ctx_id = $1`
 
-	row := r.pool.QueryRow(ctx, sql, authCtxID)
-	s, err := r.scanSession(row)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrSessionNotFound
+	var s *Session
+	var scanErr error
+	wrapperErr := r.debug.WrapDB(ctx, "pg.session.get", "slice_auth_sessions", func() error {
+		row := r.pool.QueryRow(ctx, sql, authCtxID)
+		rowSession, err := r.scanSession(row)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				scanErr = ErrSessionNotFound
+				return nil
+			}
+			return fmt.Errorf("session get: %w", err)
 		}
-		return nil, fmt.Errorf("session get: %w", err)
+		s = rowSession
+		return nil
+	})
+	if wrapperErr != nil {
+		return nil, wrapperErr
+	}
+	if scanErr != nil {
+		return nil, scanErr
 	}
 	return s, nil
 }
@@ -278,18 +293,26 @@ func (r *Repository) Update(ctx context.Context, s *Session) error {
 			completed_at = $16, terminated_at = $17
 		WHERE auth_ctx_id = $1`
 
-	rowsAffected, err := r.pool.ExecResult(ctx, sql,
-		s.AuthCtxID, encryptedGPSI, crypto.HashGPSI(s.GPSI), encryptedSUPI,
-		s.SnssaiSST, s.SnssaiSD,
-		stateCiphertext,
-		s.EAPRounds, s.EAPLastNonce,
-		s.NssaaStatus, s.AuthResult,
-		s.FailureReason, s.FailureCause,
-		s.UpdatedAt, s.ExpiresAt,
-		s.CompletedAt, s.TerminatedAt,
-	)
-	if err != nil {
-		return fmt.Errorf("session update: %w", err)
+	var rowsAffected int64
+	wrapperErr := r.debug.WrapDB(ctx, "pg.session.update", "slice_auth_sessions", func() error {
+		ra, err := r.pool.ExecResult(ctx, sql,
+			s.AuthCtxID, encryptedGPSI, crypto.HashGPSI(s.GPSI), encryptedSUPI,
+			s.SnssaiSST, s.SnssaiSD,
+			stateCiphertext,
+			s.EAPRounds, s.EAPLastNonce,
+			s.NssaaStatus, s.AuthResult,
+			s.FailureReason, s.FailureCause,
+			s.UpdatedAt, s.ExpiresAt,
+			s.CompletedAt, s.TerminatedAt,
+		)
+		if err != nil {
+			return fmt.Errorf("session update: %w", err)
+		}
+		rowsAffected = ra
+		return nil
+	})
+	if wrapperErr != nil {
+		return wrapperErr
 	}
 	if rowsAffected == 0 {
 		return ErrSessionNotFound
@@ -300,9 +323,17 @@ func (r *Repository) Update(ctx context.Context, s *Session) error {
 // Delete removes a session.
 func (r *Repository) Delete(ctx context.Context, authCtxID string) error {
 	sql := `DELETE FROM slice_auth_sessions WHERE auth_ctx_id = $1`
-	rowsAffected, err := r.pool.ExecResult(ctx, sql, authCtxID)
-	if err != nil {
-		return fmt.Errorf("session delete: %w", err)
+	var rowsAffected int64
+	wrapperErr := r.debug.WrapDB(ctx, "pg.session.delete", "slice_auth_sessions", func() error {
+		ra, err := r.pool.ExecResult(ctx, sql, authCtxID)
+		if err != nil {
+			return fmt.Errorf("session delete: %w", err)
+		}
+		rowsAffected = ra
+		return nil
+	})
+	if wrapperErr != nil {
+		return wrapperErr
 	}
 	if rowsAffected == 0 {
 		return ErrSessionNotFound
@@ -327,21 +358,27 @@ func (r *Repository) List(ctx context.Context, gpsi string) ([]*Session, error) 
 		WHERE gpsi_hash = $1
 		ORDER BY created_at DESC`
 
-	rows, err := r.pool.Query(ctx, sql, crypto.HashGPSI(gpsi))
-	if err != nil {
-		return nil, fmt.Errorf("session list: %w", err)
-	}
-	defer rows.Close()
-
 	var sessions []*Session
-	for rows.Next() {
-		s, err := r.scanSessionFromRows(rows)
+	wrapperErr := r.debug.WrapDB(ctx, "pg.session.list", "slice_auth_sessions", func() error {
+		rows, err := r.pool.Query(ctx, sql, crypto.HashGPSI(gpsi))
 		if err != nil {
-			return nil, fmt.Errorf("session list scan: %w", err)
+			return fmt.Errorf("session list: %w", err)
 		}
-		sessions = append(sessions, s)
+		defer rows.Close()
+
+		for rows.Next() {
+			s, err := r.scanSessionFromRows(rows)
+			if err != nil {
+				return fmt.Errorf("session list scan: %w", err)
+			}
+			sessions = append(sessions, s)
+		}
+		return rows.Err()
+	})
+	if wrapperErr != nil {
+		return nil, wrapperErr
 	}
-	return sessions, rows.Err()
+	return sessions, nil
 }
 
 // CountPending returns the number of sessions in PENDING or NOT_EXECUTED state.
@@ -351,9 +388,15 @@ func (r *Repository) CountPending(ctx context.Context) (int, error) {
 		WHERE nssaa_status IN ('PENDING', 'NOT_EXECUTED')`
 
 	var count int
-	err := r.pool.QueryRow(ctx, sql).Scan(&count)
-	if err != nil {
-		return 0, fmt.Errorf("count pending: %w", err)
+	wrapperErr := r.debug.WrapDB(ctx, "pg.session.count_pending", "slice_auth_sessions", func() error {
+		err := r.pool.QueryRow(ctx, sql).Scan(&count)
+		if err != nil {
+			return fmt.Errorf("count pending: %w", err)
+		}
+		return nil
+	})
+	if wrapperErr != nil {
+		return 0, wrapperErr
 	}
 	return count, nil
 }
@@ -369,9 +412,17 @@ func (r *Repository) ExpireStale(ctx context.Context) (int, error) {
 		WHERE expires_at < NOW()
 		AND nssaa_status NOT IN ('PENDING', 'NOT_EXECUTED')`
 
-	rowsAffected, err := r.pool.ExecResult(ctx, sql)
-	if err != nil {
-		return 0, fmt.Errorf("session expire: %w", err)
+	var rowsAffected int64
+	wrapperErr := r.debug.WrapDB(ctx, "pg.session.expire_stale", "slice_auth_sessions", func() error {
+		ra, err := r.pool.ExecResult(ctx, sql)
+		if err != nil {
+			return fmt.Errorf("session expire: %w", err)
+		}
+		rowsAffected = ra
+		return nil
+	})
+	if wrapperErr != nil {
+		return 0, wrapperErr
 	}
 	return int(rowsAffected), nil
 }

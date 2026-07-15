@@ -114,3 +114,12 @@ internalComm:
     connectionPool:
       maxIdleConnsPerHost: 50
       idleConnTimeout: 60s
+
+# Per-UE debug tracing — off by default.
+# Set enabled: true per environment to capture timelines in `nssaa:debug:stream:*`.
+# Spec: docs/superpowers/specs/2026-07-12-nssAAF-per-ue-debug-tracing-design.md
+debug:
+  enabled: true
+  redisAddr: "${REDIS_ADDR:-172.0.3.10:6379}"
+  ttl: 24h
+  maxLen: 10000

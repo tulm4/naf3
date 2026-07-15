@@ -5,8 +5,10 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/md5"
+	crand "crypto/rand"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"log/slog"
 	"math/rand"
 	"net"
@@ -14,13 +16,27 @@ import (
 	"time"
 )
 
-// RADIUS codes. RFC 2865.
+// RADIUS codes. RFC 2865, RFC 5176.
 const (
 	radiusAccessRequest   = 1
 	radiusAccessAccept    = 2
 	radiusAccessReject    = 3
 	radiusAccessChallenge = 11
+	// RFC 5176 §3 — Change-of-Authorization (CoA-Request) and
+	// Disconnect-Request. 3GPP TS 29.561 §16.1.2 maps RAR (Re-Auth-Request)
+	// to CoA-Request (43) and ASR (Abort-Session-Request) to Disconnect-Request
+	// (44) when carried over RADIUS/Diameter.
+	radiusCoARequest     = 43 // RFC 5176 §3.1 — 3GPP TS 29.561: RAR
+	radiusDisconnectRequest = 44 // RFC 5176 §3.2 — 3GPP TS 29.561: ASR
 )
+
+// CodeReauthRequest is the RADIUS code for Re-Auth-Request (RFC 5176 CoA-Request).
+// Alias kept for callers that prefer the 3GPP naming.
+const CodeReauthRequest = radiusCoARequest
+
+// CodeAbortSessionRequest is the RADIUS code for Abort-Session-Request
+// (RFC 5176 Disconnect-Request).
+const CodeAbortSessionRequest = radiusDisconnectRequest
 
 // RADIUS attribute types. RFC 2865, RFC 3579.
 const (
@@ -152,12 +168,96 @@ func (s *RadiusServer) sendResponse(clientAddr net.Addr, resp []byte) {
 			s.logger.Info("radius_access_reject", "client", clientAddr.String())
 		case radiusAccessChallenge:
 			s.logger.Info("radius_access_challenge", "client", clientAddr.String())
+		case radiusCoARequest:
+			s.logger.Info("radius_coa_request", "client", clientAddr.String())
+		case radiusDisconnectRequest:
+			s.logger.Info("radius_disconnect_request", "client", clientAddr.String())
 		}
 	}
 	_, err := s.ln.WriteTo(resp, clientAddr)
 	if err != nil {
 		s.logger.Error("failed to send RADIUS response", "error", err)
 	}
+}
+
+// SendRAR sends a RADIUS Re-Auth-Request (RFC 5176 §3.1 CoA-Request, code 43)
+// to clientAddr. 3GPP TS 29.561 §16 maps AAA-S → AAA-Client RAR over RADIUS
+// onto the CoA-Request code.
+//
+// sessionID identifies the existing session to re-authenticate; it is
+// transmitted in the State attribute (RFC 2865 §5.24).
+func (s *RadiusServer) SendRAR(clientAddr net.Addr, sessionID string) error {
+	return s.SendServerInitiated(clientAddr, radiusCoARequest, sessionID)
+}
+
+// SendASR sends a RADIUS Abort-Session-Request (RFC 5176 §3.2 Disconnect-Request,
+// code 44) to clientAddr. 3GPP TS 29.561 §16 maps AAA-S → AAA-Client ASR
+// over RADIUS onto the Disconnect-Request code.
+//
+// sessionID identifies the existing session to abort; it is transmitted in
+// the State attribute.
+func (s *RadiusServer) SendASR(clientAddr net.Addr, sessionID string) error {
+	return s.SendServerInitiated(clientAddr, radiusDisconnectRequest, sessionID)
+}
+
+// SendServerInitiated builds and sends a server-initiated RADIUS packet
+// (CoA-Request / Disconnect-Request) to clientAddr. The packet carries a
+// fresh random Request Authenticator (RFC 5176 §3) and a State attribute
+// carrying sessionID so the receiver can correlate to the live session.
+//
+// Per RFC 5176 §3, server-initiated packets MUST contain a Message-Authenticator
+// attribute so the receiver can verify packet integrity before acting on it.
+func (s *RadiusServer) SendServerInitiated(clientAddr net.Addr, code uint8, sessionID string) error {
+	switch code {
+	case radiusCoARequest, radiusDisconnectRequest:
+		// ok
+	default:
+		return fmt.Errorf("unsupported server-initiated code: %d (want %d or %d)",
+			code, radiusCoARequest, radiusDisconnectRequest)
+	}
+	pkt, err := s.buildServerInitiatedPacket(code, sessionID)
+	if err != nil {
+		return fmt.Errorf("build packet: %w", err)
+	}
+	s.sendResponse(clientAddr, pkt)
+	return nil
+}
+
+// buildServerInitiatedPacket assembles a CoA-Request / Disconnect-Request
+// packet with a random Request Authenticator, State=sessionID, and a valid
+// Message-Authenticator (HMAC-MD5).
+func (s *RadiusServer) buildServerInitiatedPacket(code uint8, sessionID string) ([]byte, error) {
+	attrs := buildStateAttr(sessionID)
+	maAttr := buildMessageAuthAttr()
+
+	totalLen := 20 + len(attrs) + len(maAttr)
+	pkt := make([]byte, totalLen)
+	pkt[0] = code
+	pkt[1] = 0 // Identifier — unsolicited, receiver doesn't correlate by ID
+	binary.BigEndian.PutUint16(pkt[2:4], uint16(totalLen))
+
+	// Random Request Authenticator (RFC 5176 §3 — must be unpredictable).
+	// Use crypto/rand here even though math/rand is used elsewhere for session
+	// IDs (which are not security-sensitive).
+	if _, err := io.ReadFull(crand.Reader, pkt[4:20]); err != nil {
+		return nil, fmt.Errorf("read random authenticator: %w", err)
+	}
+
+	offset := 20
+	copy(pkt[offset:], attrs)
+	offset += len(attrs)
+	copy(pkt[offset:], maAttr)
+	offset += len(maAttr)
+
+	// Fill Message-Authenticator = HMAC-MD5(packet, secret) with MA value zeroed.
+	maValueOffset := offset - 16
+	for i := 0; i < 16; i++ {
+		pkt[maValueOffset+i] = 0
+	}
+	ma := computeHMACMD5(pkt[:offset], s.sharedSecret)
+	copy(pkt[maValueOffset:maValueOffset+16], ma)
+
+	return pkt, nil
 }
 
 func (s *RadiusServer) buildResponse(req []byte, replyCode uint8, sessionID string) []byte {
@@ -205,9 +305,22 @@ func (s *RadiusServer) buildRadiusPacket(req []byte, replyCode uint8, attrs []by
 	packet[1] = req[1]
 	binary.BigEndian.PutUint16(packet[2:4], uint16(totalLen))
 
-	// RFC 2865 §4: Response Authenticator = MD5(Code+ID+Length+RequestAuth+Attributes+Secret)
-	// where Attributes are from the ORIGINAL request (req[20:]), not the response.
-	respAuth := md5Authenticator(packet[:20], req[4:20], req[20:], s.sharedSecret)
+	// RFC 2865 §3: Response Authenticator = MD5(Code+ID+Length+RequestAuth+Attributes+Secret)
+	// The Attributes are from the ORIGINAL request, EXCLUDING Message-Authenticator (RFC 2865).
+	// Extract request attributes without Message-Authenticator for Response Auth computation.
+	reqAttrsWithoutMA := removeMessageAuthFromRawPacket(req)
+	
+	// Debug: compute what AAA gateway should expect
+	respAuth := md5Authenticator(packet[:20], req[4:20], reqAttrsWithoutMA, s.sharedSecret)
+	s.logger.Info("AAA_SIM_COMPUTE",
+		"code", replyCode,
+		"id", req[1],
+		"length", totalLen,
+		"req_auth", fmt.Sprintf("%x", req[4:20]),
+		"attrs_len", len(reqAttrsWithoutMA),
+		"secret", string(s.sharedSecret),
+		"computed_resp_auth", fmt.Sprintf("%x", respAuth),
+	)
 	copy(packet[4:20], respAuth)
 
 	// Copy attributes.
@@ -284,6 +397,28 @@ func computeHMACMD5(data, secret []byte) []byte {
 // hasMessageAuth reports whether the packet contains a Message-Authenticator attribute.
 func hasMessageAuth(data []byte) bool {
 	return findAttr(data, attrMessageAuth) >= 0
+}
+
+// removeMessageAuthFromRawPacket returns a copy of the packet attributes with Message-Authenticator removed.
+// Used for Response Authenticator computation per RFC 2865.
+func removeMessageAuthFromRawPacket(data []byte) []byte {
+	if len(data) < 20 {
+		return nil
+	}
+	result := []byte{}
+	offset := 20
+	for offset+2 <= len(data) {
+		attrType := data[offset]
+		attrLen := int(data[offset+1])
+		if attrLen < 2 || offset+attrLen > len(data) {
+			break
+		}
+		if attrType != attrMessageAuth {
+			result = append(result, data[offset:offset+attrLen]...)
+		}
+		offset += attrLen
+	}
+	return result
 }
 
 // hasZeroAuth reports whether the Request Authenticator (bytes 4-20) is all zeros.

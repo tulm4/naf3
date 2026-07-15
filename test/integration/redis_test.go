@@ -38,7 +38,7 @@ func TestIntegration_Redis_CacheSession(t *testing.T) {
 	client := openTestRedisClient(t)
 	defer client.Close()
 
-	cache := cacheredis.NewSessionCache(client, 10*time.Second)
+	cache := cacheredis.NewSessionCache(client, 10*time.Second, nil)
 	ctx := context.Background()
 
 	entry := &cacheredis.SessionCacheEntry{
@@ -66,7 +66,7 @@ func TestIntegration_Redis_GetCachedSession(t *testing.T) {
 	client := openTestRedisClient(t)
 	defer client.Close()
 
-	cache := cacheredis.NewSessionCache(client, 10*time.Second)
+	cache := cacheredis.NewSessionCache(client, 10*time.Second, nil)
 	ctx := context.Background()
 
 	entry := &cacheredis.SessionCacheEntry{
@@ -95,7 +95,7 @@ func TestIntegration_Redis_CacheExpiry(t *testing.T) {
 	client := openTestRedisClient(t)
 	defer client.Close()
 
-	cache := cacheredis.NewSessionCache(client, 500*time.Millisecond)
+	cache := cacheredis.NewSessionCache(client, 500*time.Millisecond, nil)
 	ctx := context.Background()
 
 	entry := &cacheredis.SessionCacheEntry{
@@ -132,7 +132,7 @@ func TestIntegration_Redis_CacheEviction(t *testing.T) {
 	client := openTestRedisClient(t)
 	defer client.Close()
 
-	cache := cacheredis.NewSessionCache(client, 10*time.Second)
+	cache := cacheredis.NewSessionCache(client, 10*time.Second, nil)
 	ctx := context.Background()
 
 	// Insert multiple entries.

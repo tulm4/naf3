@@ -24,7 +24,7 @@ func TestIntegration_PG_SessionCreate(t *testing.T) {
 
 	enc, err := postgres.NewEncryptor(make([]byte, 32))
 	require.NoError(t, err)
-	repo := postgres.NewRepository(pool, enc)
+	repo := postgres.NewRepository(pool, enc, nil)
 
 	ctx := context.Background()
 	session := &postgres.Session{
@@ -59,7 +59,7 @@ func TestIntegration_PG_SessionEncryption(t *testing.T) {
 
 	enc, err := postgres.NewEncryptor(make([]byte, 32))
 	require.NoError(t, err)
-	repo := postgres.NewRepository(pool, enc)
+	repo := postgres.NewRepository(pool, enc, nil)
 
 	ctx := context.Background()
 
@@ -121,7 +121,7 @@ func TestIntegration_PG_SessionUpdate(t *testing.T) {
 
 	enc, err := postgres.NewEncryptor(make([]byte, 32))
 	require.NoError(t, err)
-	repo := postgres.NewRepository(pool, enc)
+	repo := postgres.NewRepository(pool, enc, nil)
 
 	ctx := context.Background()
 	session := &postgres.Session{
@@ -159,7 +159,7 @@ func TestIntegration_PG_SessionDelete(t *testing.T) {
 
 	enc, err := postgres.NewEncryptor(make([]byte, 32))
 	require.NoError(t, err)
-	repo := postgres.NewRepository(pool, enc)
+	repo := postgres.NewRepository(pool, enc, nil)
 
 	ctx := context.Background()
 	session := &postgres.Session{
@@ -221,7 +221,7 @@ func TestIntegration_PG_QueryByGPSI(t *testing.T) {
 
 	enc, err := postgres.NewEncryptor(make([]byte, 32))
 	require.NoError(t, err)
-	repo := postgres.NewRepository(pool, enc)
+	repo := postgres.NewRepository(pool, enc, nil)
 
 	ctx := context.Background()
 	gpsi := "520804600000007"
@@ -255,7 +255,7 @@ func TestIntegration_PG_QueryBySnssai(t *testing.T) {
 
 	enc, err := postgres.NewEncryptor(make([]byte, 32))
 	require.NoError(t, err)
-	repo := postgres.NewRepository(pool, enc)
+	repo := postgres.NewRepository(pool, enc, nil)
 
 	ctx := context.Background()
 	sst := uint8(128)
@@ -304,7 +304,7 @@ func TestIntegration_PG_MultipleConn(t *testing.T) {
 
 	enc, err := postgres.NewEncryptor(make([]byte, 32))
 	require.NoError(t, err)
-	repo := postgres.NewRepository(pool, enc)
+	repo := postgres.NewRepository(pool, enc, nil)
 
 	const n = 10
 	results := make([]error, n)

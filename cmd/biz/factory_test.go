@@ -89,7 +89,7 @@ func TestNewRateLimiterSet_UsesDistinctRateLimitPolicies(t *testing.T) {
 	defer func() { _ = client.Close() }()
 
 	f := NewBizPodFactory(cfg)
-	rateLimiters := f.newRateLimiterSet(client)
+	rateLimiters := f.newRateLimiterSet(client, nil)
 
 	amfAllowed1, err := rateLimiters.amfRateLimiter.AllowAMF(context.Background(), "amf-test")
 	if err == nil {

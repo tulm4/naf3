@@ -34,6 +34,8 @@
 | `internal/crypto/` | `docs/design/17_crypto.md`, `docs/roadmap/PHASE_5_Security_Crypto.md` | 5 | READY |
 | `internal/nrm/` | `docs/design/18_nrm_fcaps.md`, `docs/roadmap/PHASE_6_Testing_NRM.md` | 6 | READY |
 | *(cross-cutting)* | `docs/design/19_observability.md` | 4 | READY |
+| `internal/debug/` | `docs/superpowers/specs/2026-07-12-nssAAF-per-ue-debug-tracing-design.md` | — | READY |
+| `cmd/nssAAF-debug/` | `docs/superpowers/specs/2026-07-12-nssAAF-per-ue-debug-tracing-design.md` | — | READY |
 | *(cross-cutting)* | `docs/design/20_config_management.md` | ALL | TBD |
 | *(cross-cutting)* | `docs/design/24_test_strategy.md` | 6 | READY |
 | `deployments/helm/nssaa-http-gateway/` | `docs/roadmap/PHASE_7_K8s.md` | 7 | TBD |

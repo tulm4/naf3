@@ -34,7 +34,9 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -61,6 +63,7 @@ type Harness struct {
 	bizURL    string
 	aaagwURL  string
 	nrmURL    string
+	redisAddr string
 
 	// driver provides mock/container backend for AMF and AUSF.
 	// Use Driver() to access it. Initialized by NewHarnessFromDriver().
@@ -215,13 +218,14 @@ func NewHarnessFromDriver(t *testing.T, driver Driver) *Harness {
 	}
 
 	h := &Harness{
-		t:         t,
-		config:    cfg,
-		driver:    driver,
-		httpGWURL: cfg.Services.HTTPGatewayUrl,
-		bizURL:    cfg.Services.BizPodUrl,
-		aaagwURL:  cfg.Services.AAAGatewayUrl,
-		nrmURL:    cfg.Services.NRMUrl,
+		t:          t,
+		config:     cfg,
+		driver:     driver,
+		httpGWURL:  cfg.Services.HTTPGatewayUrl,
+		bizURL:     cfg.Services.BizPodUrl,
+		aaagwURL:   cfg.Services.AAAGatewayUrl,
+		nrmURL:     cfg.Services.NRMUrl,
+		redisAddr:  extractHostPort(cfg.Infra.RedisUrl),
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -400,6 +404,20 @@ func (h *Harness) AAAGWURL() string { return h.aaagwURL }
 // NRMURL returns the NRM RESTCONF base URL.
 func (h *Harness) NRMURL() string { return h.nrmURL }
 
+// RedisAddr returns the full Redis connection URL from the harness config.
+// Prefer Redis() for tests to avoid URL parsing issues.
+func (h *Harness) RedisAddr() string { return h.redisAddr }
+
+// Redis returns the harness's Redis client. Tests should use this instead
+// of creating their own client.
+func (h *Harness) Redis() *redis.Client { return h.redis }
+
+// PgConn returns the harness's direct PG connection pool. Tests that need
+// to query or seed slice_auth_sessions should use this rather than opening
+// their own pool. The returned pool is shared across tests and closed by
+// FinalizeHarness() after the test run.
+func (h *Harness) PgConn() *pgxpool.Pool { return h.pgConn }
+
 // Driver returns the harness's driver (ContainerDriver).
 func (h *Harness) Driver() Driver {
 	return h.driver
@@ -442,6 +460,76 @@ func ParseAuthCtxIDFromResp(t *testing.T, resp *http.Response) string {
 	id, ok := ParseAuthCtxID(body)
 	require.True(t, ok, "authCtxId must be present in response")
 	return id
+}
+
+// ─── Debug tracing helpers ─────────────────────────────────────────────────
+
+// requireDebugEnabled checks whether debug mode is enabled in the running stack.
+// It returns true if E2E_DEBUG_ENABLED is set to "true", false otherwise.
+// When false, callers should skip debug-related tests.
+func (h *Harness) requireDebugEnabled() bool {
+	return os.Getenv("E2E_DEBUG_ENABLED") == "true"
+}
+
+// postNSSAA sends a POST /nnssaaf-nssaa/v1/slice-authentications request
+// via the HTTP Gateway and returns the response. The caller is responsible
+// for closing the response body.
+func (h *Harness) postNSSAA(t *testing.T, gpsi string, sst uint8, sd string) *http.Response {
+	t.Helper()
+	body := map[string]interface{}{
+		"gpsi":     gpsi,
+		"snssai":   map[string]interface{}{"sst": sst, "sd": sd},
+		"eapIdRsp": "dGVzdA==", // base64 "test"
+	}
+	payloadBytes, _ := json.Marshal(body)
+	req, err := http.NewRequest(http.MethodPost, h.HTTPGWURL()+"/nnssaaf-nssaa/v1/slice-authentications", strings.NewReader(string(payloadBytes)))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Request-ID", "test-debug-req")
+	client := h.TLSClient()
+	resp, err := client.Do(req.WithContext(requireTestContext(t)))
+	require.NoError(t, err)
+	return resp
+}
+
+// runCLITrace executes the debug CLI trace command against the harness Redis
+// instance for the given GPSI and returns the stdout output.
+func (h *Harness) runCLITrace(t *testing.T, gpsi string) string {
+	t.Helper()
+	addr := h.RedisAddr()
+	args := []string{
+		"run",
+		"./cmd/nssAAF-debug",
+		"trace",
+		"--redis=" + addr,
+		"--gpsi=" + gpsi,
+		"--since=24h",
+	}
+	cmd := exec.Command("go", args...)
+	var out strings.Builder
+	cmd.Dir = h.configInfraRoot()
+	cmd.Stdout = &out
+	cmd.Stderr = os.Stderr
+	err := cmd.Run()
+	if err != nil {
+		t.Logf("CLI trace failed (may be expected if debug is off): %v", err)
+	}
+	return out.String()
+}
+
+// configInfraRoot returns the project root directory (where go.mod lives).
+// Used to resolve relative paths for go run invocations.
+func (h *Harness) configInfraRoot() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	for dir := cwd; dir != "/"; dir = filepath.Dir(dir) {
+		if _, statErr := os.Stat(filepath.Join(dir, "go.mod")); statErr == nil {
+			return dir
+		}
+	}
+	return "."
 }
 
 // ─── Internal helpers ───────────────────────────────────────────────────────
@@ -529,4 +617,24 @@ func ofThisFile() string {
 		}
 	}
 	return "."
+}
+
+// extractHostPort converts a redis://host:port[/db] URL (or just host:port) into
+// host:port for use with redis.Options{Addr: ...}.
+func extractHostPort(raw string) string {
+	// Strip redis:// prefix if present.
+	raw = strings.TrimPrefix(raw, "redis://")
+	// If it's just host:port (no scheme), strip any /db suffix.
+	if !strings.Contains(raw, "://") {
+		if idx := strings.Index(raw, "/"); idx >= 0 {
+			raw = raw[:idx]
+		}
+		return raw
+	}
+	// Parse as URL to extract host:port.
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	return u.Host
 }

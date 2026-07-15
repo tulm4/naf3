@@ -20,6 +20,7 @@ import (
 	"go.opentelemetry.io/otel"
 
 	"github.com/operator/nssAAF/internal/config"
+	"github.com/operator/nssAAF/internal/debug"
 	"github.com/operator/nssAAF/internal/proto"
 	"github.com/redis/go-redis/v9"
 )
@@ -86,16 +87,21 @@ type Config struct {
 
 	// DLQ holds Dead Letter Queue settings for server-initiated message processing.
 	DLQ config.DLQConfig
+
+	// Debug is the per-UE debug subsystem (optional; nil-safe). All Emit/Wrap*
+	// calls short-circuit when nil or disabled, so the request flow is unaffected.
+	Debug *debug.Debug
 }
 
 // Gateway is the AAA Gateway component. It runs in a separate process from Biz Pods.
 type Gateway struct {
 	cfg Config
 
-	redis         *redis.Client
-	bizHTTPClient *http.Client
-	version       string
-	logger        *slog.Logger
+	debug          *debug.Debug // optional; nil-safe — see internal/debug hooks
+	redis          *redis.Client
+	bizHTTPClient  *http.Client
+	version        string
+	logger         *slog.Logger
 
 	registry        *ServerInitiatedRegistry // tracks pending server-initiated requests
 	radiusHandler   *RadiusHandler
@@ -111,6 +117,7 @@ type Gateway struct {
 func New(cfg Config) *Gateway {
 	g := &Gateway{
 		cfg:     cfg,
+		debug:   cfg.Debug,
 		version: cfg.Version,
 		logger:  cfg.Logger,
 	}
@@ -125,6 +132,7 @@ func New(cfg Config) *Gateway {
 	g.radiusHandler = &RadiusHandler{
 		logger:       cfg.Logger,
 		tracer:       otel.Tracer("aaa-gateway/radius"),
+		debug:        cfg.Debug,
 		forwardToBiz: g.forwardToBiz,
 		registry:     g.registry,
 		sharedSecret: cfg.RadiusSharedSecret,
@@ -140,7 +148,7 @@ func New(cfg Config) *Gateway {
 			Timeout:        cfg.InternalComm.Native.Radius.Timeout,
 			MaxRetries:     cfg.InternalComm.Native.Radius.MaxRetries,
 			ResponseWindow: cfg.InternalComm.Native.Radius.ResponseWindow,
-		}, cfg.Logger)
+		}, cfg.Logger, cfg.Debug)
 	}
 
 	// Create the persistent Diameter forwarder for client-initiated path.
@@ -160,6 +168,7 @@ func New(cfg Config) *Gateway {
 		cfg.Logger,
 		g.forwardToBiz,
 		g.registry,
+		cfg.Debug,
 	)
 
 	return g
@@ -264,11 +273,15 @@ func (g *Gateway) Stop() {
 // It receives AaaForwardRequest from Biz Pod, writes session correlation to Redis,
 // forwards to AAA-S, and returns the response directly to the caller.
 func (g *Gateway) ForwardEAP(ctx context.Context, req *proto.AaaForwardRequest) (*proto.AaaForwardResponse, error) {
+	// Store GPSI in context for downstream debug events to use.
+	ctx = debug.WithSubscriber(ctx, req.GPSI, "")
+
 	// 1. Write session correlation entry to Redis (before forwarding)
 	// Wire os.Hostname() now so direct pod lookup works immediately.
 	hostname, _ := os.Hostname()
 	entry := proto.SessionCorrEntry{
 		AuthCtxID: req.AuthCtxID,
+		GPSI:      req.GPSI,
 		PodID:     hostname, // Written once here; read on server-initiated routing
 		Sst:       req.Sst,
 		Sd:        req.Sd,
@@ -278,12 +291,21 @@ func (g *Gateway) ForwardEAP(ctx context.Context, req *proto.AaaForwardRequest) 
 		return nil, fmt.Errorf("aaa-gateway: failed to write session corr: %w", err)
 	}
 
+	// Emit debug event for session correlation write with GPSI
+	g.debug.Emit(ctx, debug.Event{
+		Op:     "aaa.session_corr.write",
+		Kind:   debug.KindInternal,
+		AuthID: req.AuthCtxID,
+		GPSI:   req.GPSI,
+		Status: "ok",
+	})
+
 	// 2. Forward to AAA-S based on transport type
 	var response []byte
 	var err error
 	switch req.TransportType {
 	case proto.TransportRADIUS:
-		response, err = g.radiusForwarder.Forward(ctx, req.Payload, req.SessionID, req.Sst, req.Sd)
+		response, err = g.radiusForwarder.Forward(ctx, req.Payload, req.SessionID, req.Sst, req.Sd, req.GPSI)
 	case proto.TransportDIAMETER:
 		response, err = g.diamForwarder.Forward(ctx, req.Payload, req.SessionID, req.Sst, req.Sd)
 	default:
@@ -318,9 +340,24 @@ func (g *Gateway) HandleForward(w http.ResponseWriter, r *http.Request) {
 	resp, err := g.ForwardEAP(r.Context(), &req)
 	if err != nil {
 		g.logger.Error("ForwardEAP failed", "error", err)
+		g.debug.Emit(r.Context(), debug.Event{
+			Op:     "aaa.handle_forward",
+			Kind:   debug.KindInternal,
+			AuthID: req.AuthCtxID,
+			Status: "error",
+			Error:  err,
+		})
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	g.debug.Emit(r.Context(), debug.Event{
+		Op:     "aaa.handle_forward",
+		Kind:   debug.KindInternal,
+		AuthID: req.AuthCtxID,
+		GPSI:   req.GPSI,
+		Status: "ok",
+	})
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
@@ -372,7 +409,9 @@ func (g *Gateway) writeSessionCorr(ctx context.Context, sessionID string, entry 
 	if err != nil {
 		return err
 	}
-	return g.redis.Set(ctx, key, data, proto.DefaultPayloadTTL).Err()
+	return g.debug.WrapRedis(ctx, "redis.session_corr.write", key, func() error {
+		return g.redis.Set(ctx, key, data, proto.DefaultPayloadTTL).Err()
+	})
 }
 
 // getBizPodURL reads the BizPodEntry for a specific podID from Redis HASH.
@@ -494,6 +533,25 @@ func (g *Gateway) forwardToBiz(ctx context.Context, sessionID string, transportT
 		g.logger.Error("failed to marshal server-initiated request", "error", err)
 		return
 	}
+
+	// Spec: debug tracing verification spec §3, hop "aaa-gw server-initiated
+	// reception" — emit "http.request.out" once per outbound flow so an operator
+	// pulling a single UE's stream can see the egress before the response lands.
+	// GPSI is intentionally empty here (server-initiated ingress carries no GPSI
+	// in payload or DTO); this event lands in the _no_sub stream.
+	g.debug.Emit(ctx, debug.Event{
+		Op:     "http.request.out",
+		Kind:   debug.KindHTTP,
+		AuthID: entry.AuthCtxID,
+		Detail: map[string]any{
+			"method":       http.MethodPost,
+			"target":       "biz",
+			"session_id":   sessionID,
+			"transport":    transportType,
+			"message_type": messageType,
+		},
+		Status: "ok",
+	})
 
 	// 3. Retry loop
 	var lastErr error

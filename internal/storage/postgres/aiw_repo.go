@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/operator/nssAAF/internal/crypto"
+	"github.com/operator/nssAAF/internal/debug"
 	"github.com/operator/nssAAF/internal/storage"
 )
 
@@ -43,20 +44,36 @@ type aiwRow struct {
 // AiwRepository implements storage.AiwStore for PostgreSQL.
 // Uses the aiw_auth_sessions table.
 type AiwRepository struct {
-	pool *Pool
-	enc  *encryptor
+	pool  *Pool
+	enc   *encryptor
+	debug *debug.Debug
 }
 
 // NewAiwRepository creates a new AIW session repository.
-func NewAiwRepository(pool *Pool, enc *encryptor) *AiwRepository {
-	return &AiwRepository{pool: pool, enc: enc}
+// The *debug.Debug parameter is nil-safe: WrapDB short-circuits when debug
+// is nil or disabled (see internal/debug/hooks.go).
+func NewAiwRepository(pool *Pool, enc *encryptor, d *debug.Debug) *AiwRepository {
+	return &AiwRepository{pool: pool, enc: enc, debug: d}
 }
 
 // Load implements storage.AiwStore.
 func (r *AiwRepository) Load(ctx context.Context, id string) (*storage.AiwSession, error) {
-	row, err := r.loadRow(ctx, id)
-	if err != nil {
-		return nil, err
+	var row *aiwRow
+	var loadErr error
+	wrapperErr := r.debug.WrapDB(ctx, "pg.aiw.load", "aiw_auth_sessions", func() error {
+		got, err := r.loadRow(ctx, id)
+		if err != nil {
+			loadErr = err
+			return nil
+		}
+		row = got
+		return nil
+	})
+	if wrapperErr != nil {
+		return nil, wrapperErr
+	}
+	if loadErr != nil {
+		return nil, loadErr
 	}
 	return r.rowToSession(row), nil
 }
@@ -64,19 +81,39 @@ func (r *AiwRepository) Load(ctx context.Context, id string) (*storage.AiwSessio
 // Save implements storage.AiwStore.
 func (r *AiwRepository) Save(ctx context.Context, s *storage.AiwSession) error {
 	row := r.sessionToRow(s)
-	err := r.updateRow(ctx, row)
-	if errors.Is(err, storage.ErrSessionNotFound) {
-		return r.createRow(ctx, row)
+	var saveErr error
+	wrapperErr := r.debug.WrapDB(ctx, "pg.aiw.save", "aiw_auth_sessions", func() error {
+		err := r.updateRow(ctx, row)
+		if errors.Is(err, storage.ErrSessionNotFound) {
+			saveErr = r.createRow(ctx, row)
+			return nil
+		}
+		if err != nil {
+			saveErr = err
+			return nil
+		}
+		return nil
+	})
+	if wrapperErr != nil {
+		return wrapperErr
 	}
-	return err
+	return saveErr
 }
 
 // Delete implements storage.AiwStore.
 func (r *AiwRepository) Delete(ctx context.Context, id string) error {
 	sql := `DELETE FROM aiw_auth_sessions WHERE auth_ctx_id = $1`
-	rowsAffected, err := r.pool.ExecResult(ctx, sql, id)
-	if err != nil {
-		return fmt.Errorf("aiw delete: %w", err)
+	var rowsAffected int64
+	wrapperErr := r.debug.WrapDB(ctx, "pg.aiw.delete", "aiw_auth_sessions", func() error {
+		ra, err := r.pool.ExecResult(ctx, sql, id)
+		if err != nil {
+			return fmt.Errorf("aiw delete: %w", err)
+		}
+		rowsAffected = ra
+		return nil
+	})
+	if wrapperErr != nil {
+		return wrapperErr
 	}
 	if rowsAffected == 0 {
 		return storage.ErrSessionNotFound

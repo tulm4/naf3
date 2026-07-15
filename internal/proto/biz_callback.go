@@ -9,6 +9,7 @@ import "time"
 // to AAA-S; read by AAA Gateway on response arrival or server-initiated routing.
 type SessionCorrEntry struct {
 	AuthCtxID string `json:"authCtxId"` // NSSAAF auth context ID
+	GPSI      string `json:"gpsi"`      // GPSI for debug tracing
 	PodID     string `json:"podId"`     // Biz Pod hostname/UID (observability only; NOT used for routing)
 	Sst       uint8  `json:"sst"`       // S-NSSAI SST
 	Sd        string `json:"sd"`        // S-NSSAI SD

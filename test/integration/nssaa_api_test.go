@@ -176,7 +176,7 @@ func TestIntegration_NSSAA_CreateSession(t *testing.T) {
 
 	enc, err := postgres.NewEncryptor(make([]byte, 32))
 	require.NoError(t, err)
-	store := &storeWithCache{pg: postgres.NewNssaaRepository(pool, enc)}
+	store := &storeWithCache{pg: postgres.NewNssaaRepository(pool, enc, nil)}
 	router := nssaaRouter(store)
 
 	body := map[string]interface{}{
@@ -209,7 +209,7 @@ func TestIntegration_NSSAA_CreateSession_GPSIStoredEncrypted(t *testing.T) {
 
 	enc, err := postgres.NewEncryptor(make([]byte, 32))
 	require.NoError(t, err)
-	pgStore := postgres.NewNssaaRepository(pool, enc)
+	pgStore := postgres.NewNssaaRepository(pool, enc, nil)
 	store := &storeWithCache{pg: pgStore}
 	router := nssaaRouter(store)
 
@@ -254,7 +254,7 @@ func TestIntegration_NSSAA_ConfirmSession(t *testing.T) {
 
 	enc, err := postgres.NewEncryptor(make([]byte, 32))
 	require.NoError(t, err)
-	store := &storeWithCache{pg: postgres.NewNssaaRepository(pool, enc)}
+	store := &storeWithCache{pg: postgres.NewNssaaRepository(pool, enc, nil)}
 	router := nssaaRouter(store)
 
 	// Create session first.
@@ -294,7 +294,7 @@ func TestIntegration_NSSAA_GetSession(t *testing.T) {
 
 	enc, err := postgres.NewEncryptor(make([]byte, 32))
 	require.NoError(t, err)
-	pgStore := postgres.NewNssaaRepository(pool, enc)
+	pgStore := postgres.NewNssaaRepository(pool, enc, nil)
 	store := &storeWithCache{pg: pgStore}
 	router := nssaaRouter(store)
 
@@ -327,7 +327,7 @@ func TestIntegration_NSSAA_GetSession_NotFound(t *testing.T) {
 
 	enc, err := postgres.NewEncryptor(make([]byte, 32))
 	require.NoError(t, err)
-	store := postgres.NewNssaaRepository(pool, enc)
+	store := postgres.NewNssaaRepository(pool, enc, nil)
 
 	// Verify store returns ErrNotFound for nonexistent session.
 	_, err = store.Load(context.Background(), "nonexistent-uuid-12345")
@@ -347,10 +347,10 @@ func TestIntegration_NSSAA_SessionInRedis(t *testing.T) {
 	require.NoError(t, err)
 	redisClient := openTestRedis(t)
 	defer redisClient.Close()
-	cache := cacheredis.NewSessionCache(redisClient, 5*time.Minute)
+	cache := cacheredis.NewSessionCache(redisClient, 5*time.Minute, nil)
 
 	store := &storeWithCache{
-		pg:    postgres.NewNssaaRepository(pool, enc),
+		pg:    postgres.NewNssaaRepository(pool, enc, nil),
 		cache: cache,
 	}
 	router := nssaaRouter(store)
@@ -382,7 +382,7 @@ func TestIntegration_NSSAA_ConfirmSession_InvalidBase64(t *testing.T) {
 
 	enc, err := postgres.NewEncryptor(make([]byte, 32))
 	require.NoError(t, err)
-	store := &storeWithCache{pg: postgres.NewNssaaRepository(pool, enc)}
+	store := &storeWithCache{pg: postgres.NewNssaaRepository(pool, enc, nil)}
 	router := nssaaRouter(store)
 
 	// Create session.
@@ -421,7 +421,7 @@ func TestIntegration_NSSAA_ConfirmSession_GPSIMismatch(t *testing.T) {
 
 	enc, err := postgres.NewEncryptor(make([]byte, 32))
 	require.NoError(t, err)
-	store := &storeWithCache{pg: postgres.NewNssaaRepository(pool, enc)}
+	store := &storeWithCache{pg: postgres.NewNssaaRepository(pool, enc, nil)}
 	router := nssaaRouter(store)
 
 	// Create session with GPSI 520804600000005.
@@ -457,7 +457,7 @@ func TestIntegration_NSSAA_ConfirmSession_SnssaiMismatch(t *testing.T) {
 
 	enc, err := postgres.NewEncryptor(make([]byte, 32))
 	require.NoError(t, err)
-	store := &storeWithCache{pg: postgres.NewNssaaRepository(pool, enc)}
+	store := &storeWithCache{pg: postgres.NewNssaaRepository(pool, enc, nil)}
 	router := nssaaRouter(store)
 
 	// Create session with SST=1.
@@ -492,7 +492,7 @@ func TestIntegration_NSSAA_ConcurrentSessions(t *testing.T) {
 
 	enc, err := postgres.NewEncryptor(make([]byte, 32))
 	require.NoError(t, err)
-	store := &storeWithCache{pg: postgres.NewNssaaRepository(pool, enc)}
+	store := &storeWithCache{pg: postgres.NewNssaaRepository(pool, enc, nil)}
 	router := nssaaRouter(store)
 
 	const n = 10
@@ -542,10 +542,10 @@ func TestIntegration_NSSAA_SessionExpiry(t *testing.T) {
 	require.NoError(t, err)
 	redisClient := openTestRedis(t)
 	defer redisClient.Close()
-	cache := cacheredis.NewSessionCache(redisClient, 1*time.Second) // 1s TTL for fast expiry test
+	cache := cacheredis.NewSessionCache(redisClient, 1*time.Second, nil) // 1s TTL for fast expiry test
 
 	store := &storeWithCache{
-		pg:    postgres.NewNssaaRepository(pool, enc),
+		pg:    postgres.NewNssaaRepository(pool, enc, nil),
 		cache: cache,
 	}
 	router := nssaaRouter(store)

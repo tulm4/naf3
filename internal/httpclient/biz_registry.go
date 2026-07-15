@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+
 	"github.com/operator/nssAAF/internal/config"
 	"github.com/operator/nssAAF/internal/proto"
 	"github.com/operator/nssAAF/internal/resilience"
@@ -46,7 +48,11 @@ var _ proto.BizServiceClient = (*BizRegistry)(nil)
 // redisAddr: Redis server address for pod discovery
 // staticURL: fallback static URL when Redis has no live pods
 // cfg: NativeCommConfig for timeout, retry, and circuit breaker settings
-func NewBizRegistry(redisAddr, staticURL string, cfg config.NativeCommConfig) *BizRegistry {
+// transport: optional http.RoundTripper override for outbound HTTP. When nil,
+// the client builds a default pooled transport from cfg.Pool.
+//
+// Spec: docs/superpowers/specs/2026-07-12-nssAAF-per-ue-debug-tracing-design.md §5.4
+func NewBizRegistry(redisAddr, staticURL string, cfg config.NativeCommConfig, transport http.RoundTripper) *BizRegistry {
 	retryCfg := resilience.RetryConfig{
 		MaxAttempts: cfg.Retry.MaxAttempts,
 		BaseDelay:   cfg.Retry.BaseDelay,
@@ -73,10 +79,17 @@ func NewBizRegistry(redisAddr, staticURL string, cfg config.NativeCommConfig) *B
 		cbCfg.SuccessThreshold = 3
 	}
 
+	if transport == nil {
+		transport = otelhttp.NewTransport(&http.Transport{})
+	}
+
 	return &BizRegistry{
-		redisAddr:  redisAddr,
-		staticURL:  staticURL,
-		httpClient: &http.Client{Timeout: cfg.Timeout},
+		redisAddr: redisAddr,
+		staticURL: staticURL,
+		httpClient: &http.Client{
+			Transport: transport,
+			Timeout:   cfg.Timeout,
+		},
 		cbRegistry: resilience.NewRegistry(
 			cbCfg.FailureThreshold,
 			cbCfg.RecoveryTimeout,
@@ -151,7 +164,7 @@ func (b *BizRegistry) selectRandomLivePod(ctx context.Context) (string, error) {
 // ForwardRequest implements proto.BizServiceClient with Redis-based pod discovery,
 // circuit breakers, and retry logic.
 // Spec: Option B — Redis-based target selection
-func (b *BizRegistry) ForwardRequest(ctx context.Context, path, method string, body []byte, requestID string) ([]byte, int, error) {
+func (b *BizRegistry) ForwardRequest(ctx context.Context, path, method string, body []byte, requestID string, gpsi string, supi string) ([]byte, int, error) {
 	var lastErr error
 	var lastStatus int
 	var lastBody []byte
@@ -183,6 +196,12 @@ func (b *BizRegistry) ForwardRequest(ctx context.Context, path, method string, b
 		req.Header.Set("Content-Type", "application/json")
 		if requestID != "" {
 			req.Header.Set("X-Request-ID", requestID)
+		}
+		if gpsi != "" {
+			req.Header.Set("X-NSSAA-GPSI", gpsi)
+		}
+		if supi != "" {
+			req.Header.Set("X-NSSAA-SUPI", supi)
 		}
 
 		resp, err := b.httpClient.Do(req)

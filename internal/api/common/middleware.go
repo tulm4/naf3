@@ -4,13 +4,15 @@ package common
 
 import (
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
-	"runtime/debug"
+	runtimedebug "runtime/debug"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	dbg "github.com/operator/nssAAF/internal/debug"
 	"github.com/operator/nssAAF/internal/metrics"
 )
 
@@ -75,7 +77,7 @@ func RecoveryMiddleware(next http.Handler) http.Handler {
 					"error", err,
 					"request_id", reqID,
 					"path", r.URL.Path,
-					"stack", string(debug.Stack()),
+					"stack", string(runtimedebug.Stack()),
 				)
 				problem := InternalServerProblem("An unexpected error occurred")
 				w.Header().Set(HeaderContentType, MediaTypeProblemJSON)
@@ -183,4 +185,99 @@ func WriteJSON(w http.ResponseWriter, status int, v any) error {
 	w.Header().Set(HeaderContentType, MediaTypeJSONVersion)
 	w.WriteHeader(status)
 	return json.NewEncoder(w).Encode(v)
+}
+
+// DebugMiddleware emits one http.request event before the handler runs and
+// one http.request.exit event after it returns. Both share the same trace_id
+// (since they run in the same request scope). Status and duration are captured
+// via a wrapped ResponseWriter. Safe to call with d == nil (no-op).
+// Spec: docs/superpowers/specs/2026-07-13-nssAAF-per-ue-debug-tracing-verification-spec.md §3
+func DebugMiddleware(d *dbg.Debug) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			slog.Info("DEBUG_MW_TRACE", "path", r.URL.Path, "d_nil", d == nil)
+			if d == nil || !d.Enabled() {
+				next.ServeHTTP(w, r)
+				return
+			}
+			slog.Info("DEBUG_MW_TRACE mid", "enabled", d.Enabled())
+			// Best-effort GPSI/SUPI extraction from request body so events
+			// land in the per-UE stream rather than _no_sub. Also check
+			// X-NSSAA-GPSI / X-NSSAA-SUPI headers propagated from http-gw
+			// so both http-gw and biz events land in the same per-UE stream.
+			var gpsi, supi string
+			if r.Header.Get("X-NSSAA-GPSI") != "" {
+				gpsi = r.Header.Get("X-NSSAA-GPSI")
+			} else if r.Header.Get("X-NSSAA-SUPI") != "" {
+				supi = r.Header.Get("X-NSSAA-SUPI")
+			} else if r.Body != nil && r.ContentLength != 0 {
+				body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+				if err == nil {
+					gpsi, supi = ExtractSubscriber(body)
+					r.Body = io.NopCloser(strings.NewReader(string(body)))
+				}
+			}
+			start := time.Now()
+			wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+
+			// Entry event: emit BEFORE the handler runs. Same trace_id as
+			// the exit event because both run within the request span.
+			slog.Info("DEBUG_MW about to emit", "gpsi", gpsi, "supi", supi)
+			d.Emit(r.Context(), dbg.Event{
+				Op:   "http.request",
+				Kind: dbg.KindHTTP,
+				GPSI: gpsi,
+				SUPI: supi,
+				Detail: map[string]any{
+					"method":    r.Method,
+					"path":      stripAPIversion(r.URL.Path),
+					"client_ip": clientIP(r),
+				},
+			})
+
+			next.ServeHTTP(wrapped, r)
+
+			// Exit event: emit AFTER the handler returns, regardless of
+			// outcome (deferred in case the handler panics — RecoveryMiddleware
+			// catches the panic upstream but the deferred emit still fires).
+			d.Emit(r.Context(), dbg.Event{
+				Op:   "http.request.exit",
+				Kind: dbg.KindHTTP,
+				GPSI: gpsi,
+				SUPI: supi,
+				Detail: map[string]any{
+					"method":      r.Method,
+					"path":        stripAPIversion(r.URL.Path),
+					"status":      wrapped.statusCode,
+					"duration_ms": time.Since(start).Milliseconds(),
+				},
+				Status: statusLabel(wrapped.statusCode),
+			})
+		})
+	}
+}
+
+// ExtractSubscriber peeks at a JSON request body for known UE identity keys.
+// Returns (gpsi, supi). It is best-effort: any parse error yields empty strings.
+func ExtractSubscriber(body []byte) (string, string) {
+	var m map[string]any
+	if err := json.Unmarshal(body, &m); err != nil {
+		return "", ""
+	}
+	if v, ok := m["gpsi"].(string); ok {
+		return v, ""
+	}
+	if v, ok := m["supi"].(string); ok {
+		return "", v
+	}
+	return "", ""
+}
+
+// clientIP returns the best-effort client IP: X-Forwarded-For first, then
+// RemoteAddr. Used only for debug telemetry — never for auth.
+func clientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		return xff
+	}
+	return r.RemoteAddr
 }

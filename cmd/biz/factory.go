@@ -13,6 +13,7 @@ import (
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/operator/nssAAF/internal/amf"
 	"github.com/operator/nssAAF/internal/api/aiw"
@@ -23,6 +24,7 @@ import (
 	"github.com/operator/nssAAF/internal/cache/redis"
 	"github.com/operator/nssAAF/internal/config"
 	"github.com/operator/nssAAF/internal/crypto"
+	"github.com/operator/nssAAF/internal/debug"
 	"github.com/operator/nssAAF/internal/metrics"
 	"github.com/operator/nssAAF/internal/nfclient"
 	"github.com/operator/nssAAF/internal/nrf"
@@ -35,15 +37,16 @@ import (
 
 // BizPod holds all dependencies for the Biz Pod.
 type BizPod struct {
-	Server    *http.Server
-	NRFClient *nrf.Client
-	NssaaStore storage.NssaaStore
-	AiwStore   storage.AiwStore
-	Pool      *postgres.Pool
-	RedisPool *redis.Pool
-	DLQ       *redis.DLQ
-	AAAClient *httpAAAClient
-	Logger    *slog.Logger
+	Server          *http.Server
+	NRFClient       *nrf.Client
+	NssaaStore      storage.NssaaStore
+	AiwStore        storage.AiwStore
+	Pool            *postgres.Pool
+	RedisPool       *redis.Pool
+	DLQ             *redis.DLQ
+	AAAClient       *httpAAAClient
+	Logger          *slog.Logger
+	Debug           *debug.Debug
 	HeartbeatCancel func() // cancels the podHeartbeat goroutine on shutdown
 }
 
@@ -94,21 +97,23 @@ func (f *bizPodFactory) newNFRegistry() *resilience.Registry {
 
 // rateLimiterSet holds the explicit per-scope limiter wiring.
 type rateLimiterSet struct {
-	amfRateLimiter *redis.RateLimiter
+	amfRateLimiter  *redis.RateLimiter
 	gpsiRateLimiter *redis.RateLimiter
 }
 
-func (f *bizPodFactory) newRateLimiterSet(client goredis.Cmdable) rateLimiterSet {
+func (f *bizPodFactory) newRateLimiterSet(client goredis.Cmdable, dbg *debug.Debug) rateLimiterSet {
 	return rateLimiterSet{
 		amfRateLimiter: redis.NewRateLimiter(
 			client,
 			1*time.Second,
 			f.cfg.RateLimit.PerAmfPerSec,
+			dbg,
 		),
 		gpsiRateLimiter: redis.NewRateLimiter(
 			client,
 			1*time.Minute,
 			f.cfg.RateLimit.PerGpsiPerMin,
+			dbg,
 		),
 	}
 }
@@ -188,9 +193,32 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 		return nil, nil, fmt.Errorf("session encryptor: %w", err)
 	}
 
+	// ─── Per-UE debug subsystem (optional; off by default) ─────────────
+	// Spec: docs/superpowers/specs/2026-07-12-nssAAF-per-ue-debug-tracing-design.md §6
+	// Initialized before session stores so they can receive *debug.Debug.
+	var dbg *debug.Debug
+	if f.cfg.Debug.Enabled {
+		dbg, err = debug.New(ctx, debug.Config{
+			Enabled:   f.cfg.Debug.Enabled,
+			RedisAddr: f.cfg.Debug.RedisAddr,
+			Service:   "biz",
+			PodID:     f.podID,
+			TTL:       f.cfg.Debug.TTL,
+			MaxLen:    f.cfg.Debug.MaxLen,
+		})
+		if err != nil {
+			f.logger.Warn("debug subsystem init failed; continuing without debug", "error", err)
+			dbg = nil
+		}
+	}
+	dbgCleanup := func() {}
+	if dbg != nil {
+		dbgCleanup = func() { _ = dbg.Close() }
+	}
+
 	// ─── Session stores ──────────────────────────────────────────────────
-	nssaaStore := postgres.NewNssaaRepository(pgPool, encryptor)
-	aiwStore := postgres.NewAiwRepository(pgPool, encryptor)
+	nssaaStore := postgres.NewNssaaRepository(pgPool, encryptor, dbg)
+	aiwStore := postgres.NewAiwRepository(pgPool, encryptor, dbg)
 
 	// ─── Redis pool + DLQ ───────────────────────────────────────────────
 	redisPool, err := redis.NewPool(ctx, redis.Config{
@@ -217,6 +245,17 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 	dlq := redis.NewDLQ(redisPool)
 	dlqHTTPClient := &http.Client{Timeout: 10 * time.Second}
 	go dlq.Process(ctx, dlqHTTPClient)
+
+	// Wire debug cleanup (dbg is initialized before session stores so they
+	// can receive *debug.Debug; the actual close happens here to keep
+	// cleanup ordering intact).
+	if dbg != nil {
+		prevCleanup := cleanup
+		cleanup = func() {
+			dbgCleanup()
+			prevCleanup()
+		}
+	}
 
 	// ─── Three isolated CB registries for blast-radius isolation ───────
 	// Internal NF registry (NRF, UDM, AUSF) — wired from canonical config path (CB-G1)
@@ -264,7 +303,7 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 	)
 
 	// ─── Rate limiters (RL-G1) ───────────────────────────────────────────
-	rateLimiters := f.newRateLimiterSet(redisPool.Client())
+	rateLimiters := f.newRateLimiterSet(redisPool.Client(), dbg)
 
 	// ─── HTTP AAA client ────────────────────────────────────────────────
 	if f.cfg.Biz.UseMTLS {
@@ -293,6 +332,7 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 		f.cfg.Version,
 		commCfg,
 		f.logger,
+		dbg,
 	)
 
 	// Start VIP health check goroutine after pod initialization.
@@ -343,6 +383,13 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 	handler = common.LoggingMiddleware(handler)
 	handler = common.CORSMiddleware(handler)
 
+	// DebugMiddleware must be INSIDE otelhttp.NewHandler so it can access
+	// the span created by otelhttp for emitting http.request events.
+	// This matches the http-gw pattern where DebugMiddleware wraps the mux
+	// before otelhttp.NewHandler is applied.
+	inner := common.DebugMiddleware(dbg)(handler)
+	handler = otelhttp.NewHandler(inner, "biz")
+
 	// ─── HTTP server ───────────────────────────────────────────────────
 	srv := &http.Server{
 		Addr:         f.cfg.Server.Addr,
@@ -367,6 +414,7 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 		DLQ:        dlq,
 		AAAClient:  aaaClient,
 		Logger:     f.logger,
+		Debug:      dbg,
 	}, cleanup, nil
 }
 
@@ -388,6 +436,9 @@ func (bp *BizPod) Close() {
 	}
 	if bp.AAAClient != nil {
 		_ = bp.AAAClient.Close()
+	}
+	if bp.Debug != nil {
+		_ = bp.Debug.Close()
 	}
 	if bp.Server != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

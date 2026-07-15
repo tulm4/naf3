@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/operator/nssAAF/internal/crypto"
+	"github.com/operator/nssAAF/internal/debug"
 	"github.com/operator/nssAAF/internal/storage"
 	"github.com/operator/nssAAF/internal/types"
 )
@@ -50,13 +51,16 @@ type nssaaRow struct {
 // NssaaRepository implements storage.NssaaStore for PostgreSQL.
 // Uses the slice_auth_sessions table.
 type NssaaRepository struct {
-	pool *Pool
-	enc  *encryptor
+	pool  *Pool
+	enc   *encryptor
+	debug *debug.Debug
 }
 
 // NewNssaaRepository creates a new NSSAA session repository.
-func NewNssaaRepository(pool *Pool, enc *encryptor) *NssaaRepository {
-	return &NssaaRepository{pool: pool, enc: enc}
+// The *debug.Debug parameter is nil-safe: WrapDB short-circuits when debug
+// is nil or disabled (see internal/debug/hooks.go).
+func NewNssaaRepository(pool *Pool, enc *encryptor, d *debug.Debug) *NssaaRepository {
+	return &NssaaRepository{pool: pool, enc: enc, debug: d}
 }
 
 // Load implements storage.NssaaStore.
@@ -157,22 +161,20 @@ func (r *NssaaRepository) createRow(ctx context.Context, s *nssaaRow) error {
 		aaaConfigID = *s.AAAConfigID
 	}
 
-	err = r.pool.Exec(ctx, sql,
-		s.AuthCtxID, encryptedGPSI, crypto.HashGPSI(s.GPSI),
-		s.SnssaiSST, s.SnssaiSD,
-		s.AMFInstanceID, amfIP, s.AMFRegion,
-		s.ReauthNotifURI, s.RevocNotifURI,
-		s.CallbackOwner, s.HasAIWContext,
-		aaaConfigID, stateCiphertext,
-		s.EAPRounds, s.MaxEAPRounds, s.EAPLastNonce,
-		s.NssaaStatus, s.AuthResult,
-		s.FailureReason, s.FailureCause,
-		s.CreatedAt, s.UpdatedAt, s.ExpiresAt,
-	)
-	if err != nil {
-		return fmt.Errorf("nssaa create: %w", err)
-	}
-	return nil
+	return r.debug.WrapDB(ctx, "pg.session.create", "slice_auth_sessions", func() error {
+		return r.pool.Exec(ctx, sql,
+			s.AuthCtxID, encryptedGPSI, crypto.HashGPSI(s.GPSI),
+			s.SnssaiSST, s.SnssaiSD,
+			s.AMFInstanceID, amfIP, s.AMFRegion,
+			s.ReauthNotifURI, s.RevocNotifURI,
+			s.CallbackOwner, s.HasAIWContext,
+			aaaConfigID, stateCiphertext,
+			s.EAPRounds, s.MaxEAPRounds, s.EAPLastNonce,
+			s.NssaaStatus, s.AuthResult,
+			s.FailureReason, s.FailureCause,
+			s.CreatedAt, s.UpdatedAt, s.ExpiresAt,
+		)
+	})
 }
 
 // updateRow updates an existing NSSAA session row.
@@ -200,20 +202,25 @@ func (r *NssaaRepository) updateRow(ctx context.Context, s *nssaaRow) error {
 			completed_at = $19, terminated_at = $20
 		WHERE auth_ctx_id = $1`
 
-	rowsAffected, err := r.pool.ExecResult(ctx, sql,
-		s.AuthCtxID, encryptedGPSI, crypto.HashGPSI(s.GPSI),
-		s.SnssaiSST, s.SnssaiSD,
-		stateCiphertext,
-		s.EAPRounds, s.EAPLastNonce,
-		s.NssaaStatus, s.AuthResult,
-		s.FailureReason, s.FailureCause,
-		s.ReauthNotifURI, s.RevocNotifURI,
-		s.CallbackOwner, s.HasAIWContext,
-		s.UpdatedAt, s.ExpiresAt,
-		s.CompletedAt, s.TerminatedAt,
-	)
-	if err != nil {
-		return fmt.Errorf("nssaa update: %w", err)
+	var rowsAffected int64
+	wrapperErr := r.debug.WrapDB(ctx, "pg.session.update", "slice_auth_sessions", func() error {
+		var err error
+		rowsAffected, err = r.pool.ExecResult(ctx, sql,
+			s.AuthCtxID, encryptedGPSI, crypto.HashGPSI(s.GPSI),
+			s.SnssaiSST, s.SnssaiSD,
+			stateCiphertext,
+			s.EAPRounds, s.EAPLastNonce,
+			s.NssaaStatus, s.AuthResult,
+			s.FailureReason, s.FailureCause,
+			s.ReauthNotifURI, s.RevocNotifURI,
+			s.CallbackOwner, s.HasAIWContext,
+			s.UpdatedAt, s.ExpiresAt,
+			s.CompletedAt, s.TerminatedAt,
+		)
+		return err
+	})
+	if wrapperErr != nil {
+		return fmt.Errorf("nssaa update: %w", wrapperErr)
 	}
 	if rowsAffected == 0 {
 		return storage.ErrSessionNotFound

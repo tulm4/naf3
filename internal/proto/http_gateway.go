@@ -12,12 +12,14 @@ type BizServiceClient interface {
 	// - method: HTTP method (GET, POST, PUT, DELETE)
 	// - body: request body bytes
 	// - requestID: correlation ID for tracing (optional, forwarded as X-Request-ID header)
+	// - gpsi: GPSI for per-UE debug tracing (optional, forwarded as X-NSSAA-GPSI header)
+	// - supi: SUPI for per-UE debug tracing (optional, forwarded as X-NSSAA-SUPI header)
 	// Returns (responseBody, httpStatus, error)
 	// - 2xx: success, HTTP Gateway forwards response to AMF/AUSF
 	// - 4xx: Biz Pod rejected (validation failure)
 	// - 5xx: Biz Pod error; HTTP Gateway may retry if idempotent
 	// - context.DeadlineExceeded: all Biz Pods failed; HTTP Gateway returns 503
-	ForwardRequest(ctx context.Context, path string, method string, body []byte, requestID string) ([]byte, int, error)
+	ForwardRequest(ctx context.Context, path string, method string, body []byte, requestID string, gpsi string, supi string) ([]byte, int, error)
 }
 
 // AaaServerInitiatedResponse is returned by Biz Pod to AAA Gateway after processing

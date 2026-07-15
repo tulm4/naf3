@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+
 	"github.com/operator/nssAAF/internal/config"
 	"github.com/operator/nssAAF/internal/metrics"
 	"github.com/operator/nssAAF/internal/proto"
@@ -56,12 +58,12 @@ func NewNativeAAAClient(aaaGatewayURL string, cfg config.NativeCommConfig, logge
 		source:        "nssAAF",
 		logger:        logger,
 		httpClient: &http.Client{
-			Transport: &http.Transport{
+			Transport: otelhttp.NewTransport(&http.Transport{
 				MaxIdleConns:        cfg.Pool.MaxIdleConns,
 				MaxIdleConnsPerHost: cfg.Pool.MaxIdleConnsPerHost,
 				IdleConnTimeout:     cfg.Pool.IdleConnTimeout,
 				TLSClientConfig:      tlsCfg,
-			},
+			}),
 			Timeout: 20 * time.Second, // Stricter timeout for AAA
 		},
 		cbRegistry: resilience.NewRegistry(

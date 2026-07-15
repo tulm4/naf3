@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"flag"
 	"io"
 	"log/slog"
@@ -14,9 +15,15 @@ import (
 	"syscall"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+
+	"github.com/operator/nssAAF/internal/api/common"
 	"github.com/operator/nssAAF/internal/auth"
 	"github.com/operator/nssAAF/internal/config"
+	"github.com/operator/nssAAF/internal/debug"
 	"github.com/operator/nssAAF/internal/httpclient"
+	"github.com/operator/nssAAF/internal/proto"
+	"github.com/operator/nssAAF/internal/tracing"
 )
 
 var configPath = flag.String("config", "configs/http-gateway.yaml", "path to YAML configuration file")
@@ -66,72 +73,61 @@ func main() {
 	}
 	slog.Info("auth initialized", "jwks_url", jwksURL)
 
-	bizClient := httpclient.NewFactory(cfg.InternalComm).NewBizServiceClient(
+	// Per-UE debug subsystem (optional; off by default).
+	// Spec: docs/superpowers/specs/2026-07-12-nssAAF-per-ue-debug-tracing-design.md §6
+	initCtx, initCancel := context.WithCancel(context.Background())
+	defer initCancel()
+
+	var podID string
+	var dbg *debug.Debug
+	if cfg.Debug.Enabled {
+		var err error
+		podID, _ = os.Hostname()
+		dbg, err = debug.New(initCtx, debug.Config{
+			Enabled:   cfg.Debug.Enabled,
+			RedisAddr: cfg.Debug.RedisAddr,
+			Service:   "http-gw",
+			PodID:     podID,
+			TTL:       cfg.Debug.TTL,
+			MaxLen:    cfg.Debug.MaxLen,
+		})
+		if err != nil {
+			slog.Warn("debug subsystem init failed; continuing without debug", "error", err)
+			dbg = nil
+		} else {
+			slog.Info("debug subsystem initialized", "service", "http-gw", "redis", cfg.Debug.RedisAddr)
+		}
+	}
+
+	// OTel-instrumented HTTP transport for outbound calls to Biz Pod so
+	// W3C traceparent headers propagate across the HTTP Gateway → Biz hop.
+	// Spec: docs/superpowers/specs/2026-07-12-nssAAF-per-ue-debug-tracing-design.md §5.4
+	clientFactory := httpclient.NewFactory(cfg.InternalComm)
+	clientFactory.SetTransport(tracing.HTTPTransport())
+	bizClient := clientFactory.NewBizServiceClient(
 		cfg.HTTPgw.BizServiceURL,
 		cfg.Redis.Addr,
 	)
 
-	// Use a mux for path-based auth scoping.
-	mux := http.NewServeMux()
+	// Initialize OTel tracing so otelhttp.NewHandler creates valid spans.
+	// Without this, DebugMiddleware cannot extract a valid trace_id for Emit.
+	if podID == "" {
+		podID, _ = os.Hostname()
+	}
+	shutdownTracing := tracing.Init("http-gw", cfg.Version, podID)
+	defer shutdownTracing()
 
+	// Use a mux for path-based auth scoping.
 	var authCfg auth.Config
 	if cfg.HTTPgw.Auth != nil {
 		authCfg.Disabled = cfg.HTTPgw.Auth.Disabled
 	}
 
-	// N58: Nnssaaf_NSSAA — requires nnssaaf-nssaa scope
-	mux.Handle("/nnssaaf-nssaa/", auth.NewAuthMiddleware(authCfg)(
-		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			var body []byte
-			if r.Body != nil {
-				body, _ = io.ReadAll(r.Body)
-			}
-
-			requestID := r.Header.Get("X-Request-ID")
-			respBody, status, err := bizClient.ForwardRequest(r.Context(), r.URL.Path, r.Method, body, requestID)
-			if err != nil {
-				slog.Error("forward to biz failed", "error", err, "path", r.URL.Path)
-				http.Error(w, "service unavailable", http.StatusServiceUnavailable)
-				return
-			}
-
-			w.WriteHeader(status)
-			if len(respBody) > 0 {
-				_, _ = w.Write(respBody)
-			}
-		}),
-	))
-
-	// N60: Nnssaaf_AIW — requires nnssaaf-aiw scope
-	mux.Handle("/nnssaaf-aiw/", auth.NewAuthMiddleware(authCfg)(
-		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			var body []byte
-			if r.Body != nil {
-				body, _ = io.ReadAll(r.Body)
-			}
-
-			requestID := r.Header.Get("X-Request-ID")
-			respBody, status, err := bizClient.ForwardRequest(r.Context(), r.URL.Path, r.Method, body, requestID)
-			if err != nil {
-				slog.Error("forward to biz failed", "error", err, "path", r.URL.Path)
-				http.Error(w, "service unavailable", http.StatusServiceUnavailable)
-				return
-			}
-
-			w.WriteHeader(status)
-			if len(respBody) > 0 {
-				_, _ = w.Write(respBody)
-			}
-		}),
-	))
-
-	// Health endpoints — no auth required
-	mux.HandleFunc("/healthz/", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	handler := buildHandler(buildHandlerDeps{
+		BizClient: bizClient,
+		AuthCfg:   authCfg,
+		Debug:     dbg,
 	})
-
-	handler := mux
 
 	// TODO(phase-6): Log TLS cipher suite on each connection for audit.
 	// AuditEntry.TLSCipher field per docs/design/15_sbi_security.md §8.
@@ -197,9 +193,97 @@ func main() {
 
 	<-signalReceived()
 	slog.Info("shutting down HTTP Gateway")
+	if dbg != nil {
+		_ = dbg.Close()
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(ctx)
+}
+
+// buildHandler assembles the HTTP Gateway's request handler chain: path
+// mux → auth middleware → DebugMiddleware → otelhttp.NewHandler. The chain
+// matches the Biz Pod and AAA Gateway patterns so W3C traceparent
+// propagation and per-UE debug events behave consistently across components.
+//
+// Spec: docs/superpowers/specs/2026-07-12-nssAAF-per-ue-debug-tracing-design.md §5.3, §5.4
+func buildHandler(deps buildHandlerDeps) http.Handler {
+	mux := http.NewServeMux()
+
+	// N58: Nnssaaf_NSSAA — requires nnssaaf-nssaa scope
+	mux.Handle("/nnssaaf-nssaa/", auth.NewAuthMiddleware(deps.AuthCfg)(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			proxyToBiz(w, r, deps.BizClient)
+		}),
+	))
+
+	// N60: Nnssaaf_AIW — requires nnssaaf-aiw scope
+	mux.Handle("/nnssaaf-aiw/", auth.NewAuthMiddleware(deps.AuthCfg)(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			proxyToBiz(w, r, deps.BizClient)
+		}),
+	))
+
+	// Health endpoints — no auth required
+	mux.HandleFunc("/healthz/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	})
+
+	// DebugMiddleware must sit *inside* otelhttp.NewHandler so the
+	// DebugMiddleware can still observe the response status written by
+	// downstream handlers (otelhttp.NewHandler is the outermost wrapper that
+	// finalizes the span). When dbg is nil, DebugMiddleware is a no-op
+	// pass-through.
+	inner := common.DebugMiddleware(deps.Debug)(mux)
+	return otelhttp.NewHandler(inner, "http-gw")
+}
+
+// proxyToBiz forwards an inbound request to the configured Biz Pod client
+// and writes the response (status + body) back to the original client.
+//
+// Spec: TS 29.526 §7.2 (N58, N60)
+func proxyToBiz(w http.ResponseWriter, r *http.Request, biz proto.BizServiceClient) {
+	var body []byte
+	if r.Body != nil {
+		body, _ = io.ReadAll(r.Body)
+	}
+
+	requestID := r.Header.Get("X-Request-ID")
+
+	// Propagate GPSI/SUPI from parsed body for debug tracing in biz.
+	// This ensures both http-gw and biz events land in the same per-UE stream.
+	// Inline extraction to avoid circular/import issues.
+	var gpsi, supi string
+	if len(body) > 0 {
+		var m map[string]any
+		if err := json.Unmarshal(body, &m); err == nil {
+			if v, ok := m["gpsi"].(string); ok {
+				gpsi = v
+			}
+			if v, ok := m["supi"].(string); ok {
+				supi = v
+			}
+		}
+	}
+	if gpsi != "" {
+		r.Header.Set("X-NSSAA-GPSI", gpsi)
+	}
+	if supi != "" {
+		r.Header.Set("X-NSSAA-SUPI", supi)
+	}
+
+	respBody, status, err := biz.ForwardRequest(r.Context(), r.URL.Path, r.Method, body, requestID, gpsi, supi)
+	if err != nil {
+		slog.Error("forward to biz failed", "error", err, "path", r.URL.Path)
+		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	w.WriteHeader(status)
+	if len(respBody) > 0 {
+		_, _ = w.Write(respBody)
+	}
 }
 
 func signalReceived() <-chan struct{} {

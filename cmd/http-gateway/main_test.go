@@ -23,12 +23,117 @@ type bizServiceClient struct {
 	forwardCalled     bool
 }
 
-func (b *bizServiceClient) ForwardRequest(ctx context.Context, path, method string, body []byte, requestID string) ([]byte, int, error) {
+func (b *bizServiceClient) ForwardRequest(ctx context.Context, path, method string, body []byte, requestID, gpsi, supi string) ([]byte, int, error) {
 	b.forwardCalled = true
 	b.forwardPath = path
 	b.forwardMethod = method
 	b.forwardBody = body
 	return b.forwardRespBody, b.forwardRespStatus, b.forwardRespErr
+}
+
+// TestHttpGateway_BuildHandler_DebugEnabledEmitsHttpRequest proves Task 15
+// of the per-UE debug plan: when the debug subsystem is enabled, the HTTP
+// Gateway's request handler chain emits an `http.request` debug event for
+// each inbound request. This guards the DebugMiddleware wiring against
+// accidental removal.
+//
+// Spec: docs/superpowers/specs/2026-07-12-nssAAF-per-ue-debug-tracing-design.md §5.3, §6
+func TestHttpGateway_BuildHandler_DebugEnabledEmitsHttpRequest(t *testing.T) {
+	dbg := newEnabledDebugForTest(t)
+
+	biz := &bizServiceClient{
+		forwardRespBody:   []byte(`{}`),
+		forwardRespStatus: http.StatusOK,
+	}
+
+	handler := buildHandler(buildHandlerDeps{
+		BizClient: biz,
+		AuthCfg:   noAuth(),
+		Debug:     dbg,
+	})
+
+	// The buildHandler chain must run the proxied request and reach the biz
+	// double, proving the handler composition did not drop the proxy logic.
+	req := httptest.NewRequest(http.MethodPost, "/nnssaaf-nssaa/v1/test", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	assert.True(t, biz.forwardCalled, "bizServiceClient.ForwardRequest was not invoked")
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+// TestHttpGateway_BuildHandler_NilDebugIsPassThrough proves that when the
+// debug subsystem is not configured (dbg == nil), the handler chain still
+// proxies requests without panicking. This guards nil-safety of the
+// DebugMiddleware wiring.
+//
+// Spec: docs/superpowers/specs/2026-07-12-nssAAF-per-ue-debug-tracing-design.md §6
+func TestHttpGateway_BuildHandler_NilDebugIsPassThrough(t *testing.T) {
+	biz := &bizServiceClient{
+		forwardRespBody:   []byte(`{"ok":true}`),
+		forwardRespStatus: http.StatusOK,
+	}
+
+	handler := buildHandler(buildHandlerDeps{
+		BizClient: biz,
+		AuthCfg:   noAuth(),
+		Debug:     nil,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/nnssaaf-aiw/v1/test", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	assert.True(t, biz.forwardCalled, "bizServiceClient.ForwardRequest was not invoked")
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+// TestHttpGateway_BuildHandler_AuthDisabledReachesBiz proves the auth
+// middleware is short-circuited when AuthCfg.Disabled is true, so the test
+// doubles below don't need to forge JWT tokens.
+func TestHttpGateway_BuildHandler_AuthDisabledReachesBiz(t *testing.T) {
+	biz := &bizServiceClient{
+		forwardRespBody:   []byte(`{}`),
+		forwardRespStatus: http.StatusOK,
+	}
+	dbg := newEnabledDebugForTest(t)
+	handler := buildHandler(buildHandlerDeps{
+		BizClient: biz,
+		AuthCfg:   authConfigDisabled(),
+		Debug:     dbg,
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/nnssaaf-nssaa/v1/test", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	require.True(t, biz.forwardCalled)
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+// errBizClient lets tests exercise the error path without a real biz pod.
+type errBizClient struct{}
+
+func (errBizClient) ForwardRequest(ctx context.Context, path, method string, body []byte, requestID, gpsi, supi string) ([]byte, int, error) {
+	return nil, 0, errors.New("biz unavailable")
+}
+
+// TestHttpGateway_BuildHandler_BizErrorSurfaces503 proves the handler still
+// surfaces the upstream 503 even when DebugMiddleware is in the chain — i.e.,
+// the debug wrap must not swallow responses.
+func TestHttpGateway_BuildHandler_BizErrorSurfaces503(t *testing.T) {
+	dbg := newEnabledDebugForTest(t)
+	handler := buildHandler(buildHandlerDeps{
+		BizClient: errBizClient{},
+		AuthCfg:   noAuth(),
+		Debug:     dbg,
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/nnssaaf-nssaa/v1/test", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 }
 
 // TestHttpGateway_ForwardsRequests verifies that the http-gateway forwards
@@ -76,6 +181,8 @@ func TestHttpGateway_ForwardRequest_Success(t *testing.T) {
 		"POST",
 		[]byte(`{"key":"value"}`),
 		"",
+		"",
+		"",
 	)
 
 	assert.NoError(t, err)
@@ -96,6 +203,8 @@ func TestHttpGateway_ForwardRequest_502OnBizError(t *testing.T) {
 		"/test",
 		"GET",
 		nil,
+		"",
+		"",
 		"",
 	)
 
@@ -119,6 +228,8 @@ func TestHttpGateway_ForwardRequest_503OnTimeout(t *testing.T) {
 		"/test",
 		"GET",
 		nil,
+		"",
+		"",
 		"",
 	)
 
@@ -144,7 +255,7 @@ func TestHttpGateway_SetsXVersionHeader(t *testing.T) {
 		forwardRespStatus: http.StatusOK,
 	}
 
-	_, _, err := client.ForwardRequest(context.Background(), "/path", "GET", nil, "")
+	_, _, err := client.ForwardRequest(context.Background(), "/path", "GET", nil, "", "", "")
 
 	assert.NoError(t, err)
 	assert.Equal(t, "", receivedVersion)

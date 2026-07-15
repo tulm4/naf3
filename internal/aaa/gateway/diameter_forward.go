@@ -16,7 +16,11 @@ import (
 	"github.com/fiorix/go-diameter/v4/diam/datatype"
 	"github.com/fiorix/go-diameter/v4/diam/sm"
 	"github.com/fiorix/go-diameter/v4/diam/sm/smpeer"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
+	"github.com/operator/nssAAF/internal/debug"
 	"github.com/operator/nssAAF/internal/diameter"
 )
 
@@ -75,6 +79,8 @@ type diamForwarder struct {
 	mu          sync.RWMutex
 	logger      *slog.Logger
 	connected   bool
+	debug       *debug.Debug // optional; nil-safe — see internal/debug hooks
+	tracer      trace.Tracer
 
 	// Server-initiated inbound (handlers live on df.machine, fire on the
 	// forwarder's outbound socket — TCP is bidirectional, RFC 6733 §5.6).
@@ -109,6 +115,7 @@ type diamForwarder struct {
 // forwardToBiz is the callback used by server-initiated inbound handlers (ASR/RAR/STR)
 // to deliver inbound Diameter server messages to the Biz Pod via the registry/HTTP path.
 // registry tracks pending server-initiated requests until Biz Pod acknowledges.
+// dbg is the per-UE debug subsystem; nil-safe.
 // Spec: RFC 6733 §5.3 (CER/CEA), RFC 4072 (DER/DEA), RFC 6733 §5.6 (TCP bidirectional)
 func newDiamForwarder(
 	addr, network, originHost, originRealm, destHost, destRealm string,
@@ -116,6 +123,7 @@ func newDiamForwarder(
 	logger *slog.Logger,
 	forwardToBiz func(ctx context.Context, sessionID string, transportType string, messageType string, raw []byte),
 	registry *ServerInitiatedRegistry,
+	dbg *debug.Debug,
 ) *diamForwarder {
 	// Apply defaults for optional config fields (GAP-AAA-04, GAP-DIA-02, GAP-DIA-03)
 	if cfg.Transport == "" {
@@ -137,6 +145,8 @@ func newDiamForwarder(
 		destRealm:    destRealm,
 		logger:       logger,
 		cfg:          cfg,
+		debug:        dbg,
+		tracer:       otel.Tracer("aaa-gateway/diameter"),
 		pending:      make(map[uint32]chan *diam.Message),
 		forwardToBiz: forwardToBiz,
 		registry:     registry,
@@ -416,10 +426,36 @@ func (df *diamForwarder) Forward(ctx context.Context, eapPayload []byte, session
 		}
 	}
 
-	_, err = m.WriteTo(conn)
-	if err != nil {
+	// Protocol-kind debug event before the wire write so an operator pulling a
+	// single UE's stream sees the DER with command code + peer + session before
+	// the corresponding response. This is the higher-level "we are about to
+	// send DER" signal with request metadata.
+	df.debug.Emit(ctx, debug.Event{
+		Op:     "aaa.diameter.forward",
+		Kind:   debug.KindProtocol,
+		AuthID: sessionID,
+		Detail: map[string]any{
+			"command_code": 268, // DER per RFC 4072 §3.1
+			"peer":         df.addr,
+			"network":      df.network,
+			"hop_by_hop":   hopByHop,
+			"eap_len":      len(eapPayload),
+		},
+		Status: "ok",
+	})
+
+	// WrapProtocol captures timing + outcome of the actual DER wire write.
+	// Emits "diameter.eap.forward" with duration_ms so an operator pulling a
+	// single UE's stream sees the wire-level send vs. the higher-level
+	// diameter.eap.send. WrapProtocol is nil-safe (short-circuits when debug
+	// is nil or disabled).
+	writeErr := df.debug.WrapProtocol(ctx, "diameter.eap.forward", func() error {
+		_, e := m.WriteTo(conn)
+		return e
+	})
+	if writeErr != nil {
 		df.removePending(hopByHop)
-		return nil, fmt.Errorf("diameter_forward: failed to send DER: %w", err)
+		return nil, fmt.Errorf("diameter_forward: failed to send DER: %w", writeErr)
 	}
 
 	df.incrementMessagesSent()
@@ -689,7 +725,34 @@ func (df *diamForwarder) handleASR() diam.HandlerFunc {
 		// Detach entire flow into background goroutine to avoid blocking the
 		// handler goroutine. Under high load, blocking would exhaust the pool.
 		go func() {
-			df.forwardToBiz(context.Background(), sessionID, "DIAMETER", "ASR", raw)
+			// Create a fresh span so the detached server-initiated flow has a
+			// traceable root; the HTTP call to biz, AMF notifications, and DB
+			// ops all inherit this context.
+			detachedCtx, span := df.tracer.Start(context.Background(), "ASR",
+				trace.WithAttributes(
+					attribute.String("session_id", sessionID),
+					attribute.String("transport", "DIAMETER"),
+					attribute.String("message_type", "ASR"),
+				),
+			)
+			defer span.End()
+
+			// Spec: debug tracing verification spec §3, hop "aaa-gw
+			// server-initiated reception" — emit "aaa.diameter.recv". GPSI is
+			// intentionally empty (server-initiated ingress carries no GPSI).
+			df.debug.Emit(detachedCtx, debug.Event{
+				Op:     "aaa.diameter.recv",
+				Kind:   debug.KindProtocol,
+				AuthID: sessionID,
+				Detail: map[string]any{
+					"command_code": 274, // ASR per RFC 6733 §5.3
+					"transport":    "DIAMETER",
+					"message_type": "ASR",
+				},
+				Status: "ok",
+			})
+
+			df.forwardToBiz(detachedCtx, sessionID, "DIAMETER", "ASR", raw)
 			resp := respCh.Wait()
 			df.logger.Info("ASR: received response from registry",
 				"session_id", sessionID,
@@ -756,7 +819,34 @@ func (df *diamForwarder) handleRAR() diam.HandlerFunc {
 		}
 
 		go func() {
-			df.forwardToBiz(context.Background(), sessionID, "DIAMETER", "RAR", raw)
+			// Create a fresh span so the detached server-initiated flow has a
+			// traceable root; the HTTP call to biz, AMF notifications, and DB
+			// ops all inherit this context.
+			detachedCtx, span := df.tracer.Start(context.Background(), "RAR",
+				trace.WithAttributes(
+					attribute.String("session_id", sessionID),
+					attribute.String("transport", "DIAMETER"),
+					attribute.String("message_type", "RAR"),
+				),
+			)
+			defer span.End()
+
+			// Spec: debug tracing verification spec §3, hop "aaa-gw
+			// server-initiated reception" — emit "aaa.diameter.recv". GPSI is
+			// intentionally empty (server-initiated ingress carries no GPSI).
+			df.debug.Emit(detachedCtx, debug.Event{
+				Op:     "aaa.diameter.recv",
+				Kind:   debug.KindProtocol,
+				AuthID: sessionID,
+				Detail: map[string]any{
+					"command_code": 258, // RAR per RFC 6733 §5.3
+					"transport":    "DIAMETER",
+					"message_type": "RAR",
+				},
+				Status: "ok",
+			})
+
+			df.forwardToBiz(detachedCtx, sessionID, "DIAMETER", "RAR", raw)
 			resp := respCh.Wait()
 			df.logger.Info("RAR: received response from registry",
 				"session_id", sessionID,
@@ -825,7 +915,34 @@ func (df *diamForwarder) handleSTR() diam.HandlerFunc {
 		// Detach entire flow into background goroutine to avoid blocking the
 		// handler goroutine. Under high load, blocking would exhaust the pool.
 		go func() {
-			df.forwardToBiz(context.Background(), sessionID, "DIAMETER", "STR", raw)
+			// Create a fresh span so the detached server-initiated flow has a
+			// traceable root; the HTTP call to biz, AMF notifications, and DB
+			// ops all inherit this context.
+			detachedCtx, span := df.tracer.Start(context.Background(), "STR",
+				trace.WithAttributes(
+					attribute.String("session_id", sessionID),
+					attribute.String("transport", "DIAMETER"),
+					attribute.String("message_type", "STR"),
+				),
+			)
+			defer span.End()
+
+			// Spec: debug tracing verification spec §3, hop "aaa-gw
+			// server-initiated reception" — emit "aaa.diameter.recv". GPSI is
+			// intentionally empty (server-initiated ingress carries no GPSI).
+			df.debug.Emit(detachedCtx, debug.Event{
+				Op:     "aaa.diameter.recv",
+				Kind:   debug.KindProtocol,
+				AuthID: sessionID,
+				Detail: map[string]any{
+					"command_code": 275, // STR per RFC 6733 §5.3
+					"transport":    "DIAMETER",
+					"message_type": "STR",
+				},
+				Status: "ok",
+			})
+
+			df.forwardToBiz(detachedCtx, sessionID, "DIAMETER", "STR", raw)
 			resp := respCh.Wait()
 			df.logger.Info("STR: received response from registry",
 				"session_id", sessionID,

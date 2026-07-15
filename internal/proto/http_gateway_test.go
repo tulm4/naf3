@@ -18,7 +18,7 @@ type mockBizServiceClient struct {
 	forwardRespErr    error
 }
 
-func (m *mockBizServiceClient) ForwardRequest(ctx context.Context, path, method string, body []byte, requestID string) ([]byte, int, error) {
+func (m *mockBizServiceClient) ForwardRequest(ctx context.Context, path, method string, body []byte, requestID string, gpsi string, supi string) ([]byte, int, error) {
 	m.forwardCalled = true
 	m.forwardPath = path
 	m.forwardMethod = method
@@ -38,7 +38,7 @@ func TestBizServiceClient_Interface(t *testing.T) {
 	ctx := context.Background()
 	body := []byte(`{"gpsi":"5123456789","snssai":{"sst":1,"sd":"010203"}}`)
 
-	respBody, status, err := mock.ForwardRequest(ctx, "/nnssaaf-nssaa/v1/slice-authentications", "POST", body, "")
+	respBody, status, err := mock.ForwardRequest(ctx, "/nnssaaf-nssaa/v1/slice-authentications", "POST", body, "", "", "")
 	if err != nil {
 		t.Errorf("ForwardRequest error: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestBizServiceClient_Error(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	_, _, err := mock.ForwardRequest(ctx, "/test", "GET", nil, "")
+	_, _, err := mock.ForwardRequest(ctx, "/test", "GET", nil, "", "", "")
 	if err == nil {
 		t.Error("expected error, got nil")
 	}

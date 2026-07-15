@@ -1,3 +1,5 @@
+//go:build e2e
+
 // Package e2e provides end-to-end conformance tests for the Nnssaaf_Aiw interface.
 // Tests are designed to run against a live NSSAAF stack (via docker-compose).
 //
