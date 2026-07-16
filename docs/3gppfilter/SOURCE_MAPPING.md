@@ -14,6 +14,11 @@ Bảng ánh xạ các file đã filter với source documents gốc.
 | 29561-i50.md | TS 29.561 | TS29561_NSSAAA_Interworking.md | Ch.16 (RADIUS), Ch.17 (Diameter) |
 | 23502-id0.md | TS 23.502 | TS23502_NSSAA_Procedures.md | §4.2.9.1-4.2.9.4 |
 | 28541-ie0.md | TS 28.541 | TS28541_NSSAAF_NRM.md | §5.3.145-5.3.148 |
+| 29510-ib0.md | TS 29.510 | 06_nrf_integration/*.md | §5.2-5.5, §6.1-6.3 (NRF integration) |
+
+#### 6. NRF Integration
+- **Primary:** TS 29.510 §5.2-5.5, §6.1-6.3
+- **Reference:** 06_nrf_integration/ directory
 | 29571-ib0.md | TS 29.571 | TS29571_NSSAAF_DataTypes.md | §5.4.4.60-5.4.4.61 |
 | TS29571_CommonData.yaml | TS 29.571 | TS29571_CommonData.yaml | Full YAML schemas |
 

@@ -25,6 +25,12 @@ docs/3gppfilter/
 │
 └── 05_data_management/
     └── NSSAAF_DataTypes_NRM.md          # TS 29.571 + TS 28.541
+│
+└── 06_nrf_integration/                   # TS 29.510 — NRF integration (NEW)
+    ├── README.md                         # Index
+    ├── NSSAAF_NRF_procedures.md          # Register, Discover, Token, Heartbeat
+    ├── NSSAAF_NFProfile.md               # NFProfile, NssaafInfo, NFService
+    └── NSSAAF_AccessToken.md             # OAuth2 token request/response
 
 # Reference files (không đọc trực tiếp — dùng chunk ở trên):
 ├── TS29526_Nnssaaf_NSSAA.yaml            # TS 29.526 v18.7.0 — Full OpenAPI

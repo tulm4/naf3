@@ -16,6 +16,10 @@
 | "How does NSSAAF talk to RADIUS/Diameter?" | 04_protocols/AAA_interworking.md |
 | "What data types does NSSAAF use?" | 05_data_management/NSSAAF_DataTypes_NRM.md |
 | "How is NSSAAF managed (NRM)?" | 05_data_management/NSSAAF_DataTypes_NRM.md |
+| "How does NSSAAF register with NRF?" | 06_nrf_integration/NSSAAF_NRF_procedures.md |
+| "How does NSSAAF discover AMF/AUSF?" | 06_nrf_integration/NSSAAF_NRF_procedures.md |
+| "How does NSSAAF get OAuth tokens?" | 06_nrf_integration/NSSAAF_AccessToken.md |
+| "What should NSSAAF put in its NFProfile?" | 06_nrf_integration/NSSAAF_NFProfile.md |
 
 ---
 
@@ -39,6 +43,7 @@
 | Spec | Version | File |
 |------|---------|------|
 | TS 23.502 | v18.4.0 | TS23502_NSSAA_Procedures.md |
+| TS 29.510 | v18.11.0 | 06_nrf_integration/ |
 | TS 29.526 | v18.7.0 | TS29526_Nnssaaf_NSSAA.yaml |
 | TS 29.561 | v18.5.0 | TS29561_NSSAAA_Interworking.md |
 | TS 29.571 | v18.2.0 | TS29571_NSSAAF_DataTypes.md |
@@ -134,8 +139,13 @@ docs/3gppfilter/
 │   └── NSSAAF_services.md                      ← TS 33.501 §5.13, §14.4, §16.3-5
 ├── 04_protocols/
 │   └── AAA_interworking.md                     ← TS 29.561 Ch.16-17 (RADIUS/Diameter)
-└── 05_data_management/
-    └── NSSAAF_DataTypes_NRM.md                ← TS 29.571 + TS 28.541
+├── 05_data_management/
+│   └── NSSAAF_DataTypes_NRM.md                ← TS 29.571 + TS 28.541
+└── 06_nrf_integration/
+    ├── README.md                               ← Index for NRF docs
+    ├── NSSAAF_NRF_procedures.md               ← TS 29.510 §5.2-5.5, §6.1-6.3
+    ├── NSSAAF_NFProfile.md                    ← NFProfile, NssaafInfo, NFService
+    └── NSSAAF_AccessToken.md                  ← OAuth2 token request/response
 
 # Reference only (do not read directly):
 ├── TS29526_Nnssaaf_NSSAA.yaml                  ← Full OpenAPI spec
