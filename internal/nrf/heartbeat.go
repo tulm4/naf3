@@ -69,12 +69,16 @@ func (m *HeartbeatManager) Start(ctx context.Context) error {
 	}
 
 	m.wg.Add(1)
-	go m.run(ctx)
+	// run uses Background context because the heartbeat loop should survive
+	// the caller's context being cancelled (e.g., during startup).
+	// Cancellation is handled via stopCh.
+	go m.run(context.Background())
 
 	return nil
 }
 
-// run is the main heartbeat loop.
+// run is the main heartbeat loop. Uses Background context since cancellation
+// is handled via stopCh, not the caller's ctx.
 func (m *HeartbeatManager) run(ctx context.Context) {
 	defer m.wg.Done()
 
@@ -90,8 +94,8 @@ func (m *HeartbeatManager) run(ctx context.Context) {
 			m.deregister(context.Background())
 			return
 		case <-ticker.C:
-			if err := m.heartbeat(ctx); err != nil {
-				m.handleFailure(ctx, err)
+			if err := m.heartbeat(context.Background()); err != nil {
+				m.handleFailure(context.Background(), err)
 			} else {
 				m.mu.Lock()
 				m.consecutiveFailures = 0
@@ -135,12 +139,17 @@ func (m *HeartbeatManager) register(ctx context.Context) error {
 func (m *HeartbeatManager) heartbeat(ctx context.Context) error {
 	m.mu.RLock()
 	etag := m.etag
+	instanceID := m.instanceID
 	m.mu.RUnlock()
 
-	newEtag, err := m.client.Heartbeat(ctx, m.instanceID, etag)
+	slog.Info("nrf heartbeat sending", "instance_id", instanceID, "etag", etag)
+
+	newEtag, err := m.client.Heartbeat(ctx, instanceID, etag)
 	if err != nil {
+		slog.Error("nrf heartbeat call failed", "error", err, "instance_id", instanceID)
 		return err
 	}
+	slog.Info("nrf heartbeat success", "new_etag", newEtag, "instance_id", instanceID)
 
 	m.mu.Lock()
 	m.etag = newEtag

@@ -297,9 +297,11 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 
 	// StartHeartbeat performs the initial PUT registration synchronously and
 	// then runs the PATCH heartbeat loop, so a separate RegisterAsync would
-	// issue a duplicate PUT. Failures are non-fatal: StartHeartbeat returns
-	// nil when the manager handles background retries on its own.
-	if err := nrfClient.StartHeartbeat(ctx); err != nil {
+	// issue a duplicate PUT. Uses Background context because the heartbeat
+	// manager manages its own cancellation via stopCh and deregisters on shutdown.
+	// Failures are non-fatal: StartHeartbeat returns nil when the manager handles
+	// background retries on its own.
+	if err := nrfClient.StartHeartbeat(context.Background()); err != nil {
 		f.logger.Warn("nrf heartbeat start failed; NRF registration will retry in background",
 			"error", err,
 		)

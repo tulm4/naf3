@@ -50,8 +50,6 @@ services:
       dockerfile: Dockerfile.nrf-mock
     image: nssaaf-nrf-mock:latest
     ports: ["8082:8081"]
-    volumes:
-      - ../bin/nrf-mock:/app/nrf-mock:ro
     environment:
       NRF_NF_STATUS: "udm-001:REGISTERED,aaa-gw-001:REGISTERED"
       NRF_SERVICE_ENDPOINTS: "UDM:nudm-uem:udm-mock:8081"
@@ -151,7 +149,7 @@ services:
         condition: service_healthy
     volumes:
       - ./configs/biz.yaml:/etc/nssAAF/biz.yaml:ro
-      - ../bin/biz:/app/biz:ro
+      - ./configs/nf-profile.yaml:/etc/nssAAF/nf-profile.yaml:ro
     environment:
       MASTER_KEY_HEX: "${MASTER_KEY_HEX:-6767a7ad0416a19ea174608288761dde35dfabba2a8dda9602fc520b80e1af15}"
       POSTGRES_HOST: "172.0.3.11"

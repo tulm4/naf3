@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -110,6 +111,12 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 // ServeHTTP implements http.Handler so Server can be used with httptest.NewServer.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Log incoming request
+	slog.Info("nrf mock request",
+		"method", r.Method,
+		"path", r.URL.Path,
+		"remote_addr", r.RemoteAddr,
+	)
 	s.httpSrv.Handler.ServeHTTP(w, r)
 }
 
@@ -118,6 +125,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // POST → registration
 // PUT → update/heartbeat
 // PATCH → patch update / heartbeat (TS 29.510 §5.2.2.3.1B)
+// DELETE → deregistration
 func (s *Server) handleNfInstancesDisc(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/nnrf-disc/v1/nf-instances")
 	path = strings.TrimSuffix(path, "/")
@@ -138,6 +146,9 @@ func (s *Server) handleNfInstancesDisc(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPatch:
 		id := strings.TrimPrefix(path, "/")
 		s.handlePatchInstance(w, r, id)
+	case http.MethodDelete:
+		id := strings.TrimPrefix(path, "/")
+		s.handleDeleteInstance(w, r, id)
 	default:
 		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, `{"cause":"METHOD_NOT_ALLOWED"}`, http.StatusMethodNotAllowed)
@@ -165,6 +176,9 @@ func (s *Server) handleNfInstancesNfm(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPatch:
 		id := strings.TrimPrefix(path, "/")
 		s.handlePatchInstance(w, r, id)
+	case http.MethodDelete:
+		id := strings.TrimPrefix(path, "/")
+		s.handleDeleteInstance(w, r, id)
 	default:
 		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, `{"cause":"METHOD_NOT_ALLOWED"}`, http.StatusMethodNotAllowed)
@@ -344,6 +358,17 @@ func (s *Server) handlePatchInstance(w http.ResponseWriter, r *http.Request, id 
 	}
 	s.mu.Unlock()
 	w.Header().Set("ETag", fmt.Sprintf(`"etag-%d"`, time.Now().UnixNano()))
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleDeleteInstance handles DELETE /nnrf-disc/v1/nf-instances/{id} — Nnrf_NFDeregistration.
+func (s *Server) handleDeleteInstance(w http.ResponseWriter, r *http.Request, id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	delete(s.nfStatus, id)
+	delete(s.profiles, id)
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
