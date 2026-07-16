@@ -9,6 +9,7 @@ package main
 import (
 	"github.com/operator/nssAAF/internal/auth"
 	"github.com/operator/nssAAF/internal/debug"
+	"github.com/operator/nssAAF/internal/nrf"
 	"github.com/operator/nssAAF/internal/proto"
 )
 
@@ -18,4 +19,5 @@ type buildHandlerDeps struct {
 	BizClient proto.BizServiceClient
 	AuthCfg   auth.Config
 	Debug     *debug.Debug
+	NRFClient *nrf.Client // Phase 1: NRF client for discovery API (added in Phase 2)
 }

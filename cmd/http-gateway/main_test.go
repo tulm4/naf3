@@ -50,6 +50,7 @@ func TestHttpGateway_BuildHandler_DebugEnabledEmitsHttpRequest(t *testing.T) {
 		BizClient: biz,
 		AuthCfg:   noAuth(),
 		Debug:     dbg,
+		NRFClient: nil,
 	})
 
 	// The buildHandler chain must run the proxied request and reach the biz
@@ -78,6 +79,7 @@ func TestHttpGateway_BuildHandler_NilDebugIsPassThrough(t *testing.T) {
 		BizClient: biz,
 		AuthCfg:   noAuth(),
 		Debug:     nil,
+		NRFClient: nil,
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/nnssaaf-aiw/v1/test", nil)
@@ -101,6 +103,7 @@ func TestHttpGateway_BuildHandler_AuthDisabledReachesBiz(t *testing.T) {
 		BizClient: biz,
 		AuthCfg:   authConfigDisabled(),
 		Debug:     dbg,
+		NRFClient: nil,
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/nnssaaf-nssaa/v1/test", nil)
@@ -127,6 +130,7 @@ func TestHttpGateway_BuildHandler_BizErrorSurfaces503(t *testing.T) {
 		BizClient: errBizClient{},
 		AuthCfg:   noAuth(),
 		Debug:     dbg,
+		NRFClient: nil,
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/nnssaaf-nssaa/v1/test", nil)

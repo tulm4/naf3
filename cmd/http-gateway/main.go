@@ -73,6 +73,16 @@ func main() {
 	}
 	slog.Info("auth initialized", "jwks_url", jwksURL)
 
+	// Phase 1: Initialize NRF client for self-registration and heartbeat.
+	// Spec: docs/superpowers/plans/2026-07-17-nssAAF-nrf-migration-spec.md §Phase 1
+	gwFactory := NewHTTPGatewayFactory(cfg, WithHTTPGatewayLogger(logger))
+	gwPod, gwCleanup, err := gwFactory.Build(context.Background())
+	if err != nil {
+		slog.Error("HTTP Gateway factory build failed", "error", err)
+		os.Exit(1)
+	}
+	defer gwCleanup()
+
 	// Per-UE debug subsystem (optional; off by default).
 	// Spec: docs/superpowers/specs/2026-07-12-nssAAF-per-ue-debug-tracing-design.md §6
 	initCtx, initCancel := context.WithCancel(context.Background())
@@ -127,6 +137,7 @@ func main() {
 		BizClient: bizClient,
 		AuthCfg:   authCfg,
 		Debug:     dbg,
+		NRFClient: gwPod.NRFClient,
 	})
 
 	// TODO(phase-6): Log TLS cipher suite on each connection for audit.
@@ -193,6 +204,19 @@ func main() {
 
 	<-signalReceived()
 	slog.Info("shutting down HTTP Gateway")
+
+	// Deregister from NRF on graceful shutdown.
+	// Spec: docs/superpowers/plans/2026-07-17-nssAAF-nrf-migration-spec.md §Phase 1
+	if gwPod.NRFClient != nil {
+		nrfCtx, nrfCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer nrfCancel()
+		if err := gwPod.NRFClient.Deregister(nrfCtx, gwPod.NRFClient.NFInstanceID()); err != nil {
+			gwPod.Logger.Warn("NRF deregistration failed", "error", err)
+		} else {
+			gwPod.Logger.Info("NRF deregistration successful")
+		}
+	}
+
 	if dbg != nil {
 		_ = dbg.Close()
 	}
