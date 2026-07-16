@@ -152,6 +152,7 @@ type DLQConfig struct {
 // HTTPgwConfig holds HTTP Gateway configuration.
 type HTTPgwConfig struct {
 	BizServiceURL string      `yaml:"bizServiceUrl"` // http://svc-nssaa-biz:8080
+	DiscoveryURL  string      `yaml:"discoveryUrl"`  // http://svc-nssaa-http-gw:8443
 	Auth          *AuthConfig `yaml:"auth,omitempty"`
 	TLS           *TLSConfig  `yaml:"tls,omitempty"`
 }

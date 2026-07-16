@@ -25,6 +25,7 @@ import (
 	"github.com/operator/nssAAF/internal/config"
 	"github.com/operator/nssAAF/internal/crypto"
 	"github.com/operator/nssAAF/internal/debug"
+	"github.com/operator/nssAAF/internal/discovery"
 	"github.com/operator/nssAAF/internal/metrics"
 	"github.com/operator/nssAAF/internal/nfclient"
 	"github.com/operator/nssAAF/internal/nrf"
@@ -307,7 +308,16 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 		)
 	}
 
-	udmClient := udm.NewClient(f.cfg.UDM, nrfFactory, nrfClient)
+	// Phase 3: Biz Pod discovers UDM via HTTP Gateway's internal discovery API
+	// instead of direct NRF calls.
+	// Spec: docs/superpowers/plans/2026-07-17-nssAAF-nrf-migration-spec.md §Phase 3
+	httpGatewayDiscoveryURL := f.cfg.HTTPgw.DiscoveryURL
+	if httpGatewayDiscoveryURL == "" {
+		httpGatewayDiscoveryURL = "http://172.0.3.14:8443" // Default HTTP Gateway URL
+	}
+	discClient := discovery.NewClient(httpGatewayDiscoveryURL)
+
+	udmClient := udm.NewClient(f.cfg.UDM, nrfFactory, discClient)
 	ausfClient := ausf.NewClient(f.cfg.AUSF, nrfFactory)
 
 	// ─── AMF notifier with circuit breaker (CB-G3) ────────────────────
