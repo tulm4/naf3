@@ -28,7 +28,6 @@ import (
 	"github.com/operator/nssAAF/internal/discovery"
 	"github.com/operator/nssAAF/internal/metrics"
 	"github.com/operator/nssAAF/internal/nfclient"
-	"github.com/operator/nssAAF/internal/nrf"
 	"github.com/operator/nssAAF/internal/resilience"
 	"github.com/operator/nssAAF/internal/storage"
 	"github.com/operator/nssAAF/internal/storage/postgres"
@@ -39,7 +38,6 @@ import (
 // BizPod holds all dependencies for the Biz Pod.
 type BizPod struct {
 	Server          *http.Server
-	NRFClient       *nrf.Client
 	NssaaStore      storage.NssaaStore
 	AiwStore        storage.AiwStore
 	Pool            *postgres.Pool
@@ -281,44 +279,19 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 	amfRegistry := resilience.NewRegistry(amfCfg.FailureThreshold, amfCfg.RecoveryTimeout, amfCfg.SuccessThreshold)
 
 	// ─── NF clients with circuit breakers (CB-G1) ─────────────────────
-	nrfFactory := nfclient.NewFactory(internalNFRegistry)
-	nrfClient := nrf.NewClient(f.cfg.NRF, nrfFactory)
-
-	// Load the NF profile YAML (if configured) before starting the heartbeat
-	// loop. SetProfilePath initializes the HeartbeatManager which StartHeartbeat
-	// depends on; without it StartHeartbeat returns "not initialized".
-	if f.cfg.NRF.ProfilePath != "" {
-		if err := nrfClient.SetProfilePath(f.cfg.NRF.ProfilePath, f.cfg.NRF.Heartbeat); err != nil {
-			f.logger.Warn("failed to load NFProfile; continuing without profile-based registration",
-				"path", f.cfg.NRF.ProfilePath,
-				"error", err,
-			)
-		}
-	}
-
-	// StartHeartbeat performs the initial PUT registration synchronously and
-	// then runs the PATCH heartbeat loop, so a separate RegisterAsync would
-	// issue a duplicate PUT. Uses Background context because the heartbeat
-	// manager manages its own cancellation via stopCh and deregisters on shutdown.
-	// Failures are non-fatal: StartHeartbeat returns nil when the manager handles
-	// background retries on its own.
-	if err := nrfClient.StartHeartbeat(context.Background()); err != nil {
-		f.logger.Warn("nrf heartbeat start failed; NRF registration will retry in background",
-			"error", err,
-		)
-	}
-
 	// Phase 3: Biz Pod discovers UDM via HTTP Gateway's internal discovery API
 	// instead of direct NRF calls.
 	// Spec: docs/superpowers/plans/2026-07-17-nssAAF-nrf-migration-spec.md §Phase 3
+	internalNFClientFactory := nfclient.NewFactory(internalNFRegistry)
+
 	httpGatewayDiscoveryURL := f.cfg.HTTPgw.DiscoveryURL
 	if httpGatewayDiscoveryURL == "" {
 		httpGatewayDiscoveryURL = "http://172.0.3.14:8443" // Default HTTP Gateway URL
 	}
 	discClient := discovery.NewClient(httpGatewayDiscoveryURL)
 
-	udmClient := udm.NewClient(f.cfg.UDM, nrfFactory, discClient)
-	ausfClient := ausf.NewClient(f.cfg.AUSF, nrfFactory)
+	udmClient := udm.NewClient(f.cfg.UDM, internalNFClientFactory, discClient)
+	ausfClient := ausf.NewClient(f.cfg.AUSF, internalNFClientFactory)
 
 	// ─── AMF notifier with circuit breaker (CB-G3) ────────────────────
 	amfFactory := nfclient.NewFactory(amfRegistry)
@@ -382,7 +355,6 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 	nssaaHandler := nssaa.NewHandler(nssaaStore,
 		nssaa.WithAPIRoot(apiRoot),
 		nssaa.WithAAA(aaaClient),
-		nssaa.WithNRFClient(nrfClient),
 		nssaa.WithUDMClient(udmClient),
 		nssaa.WithAMFRateLimiter(rateLimiters.amfRateLimiter), // PerAmfPerSec, 1-second window (RL-POLICY-AMF)
 		nssaa.WithRateLimiter(rateLimiters.gpsiRateLimiter),   // PerGpsiPerMin, 1-minute window (RL-POLICY-AUTHCTX)
@@ -438,7 +410,6 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 
 	return &BizPod{
 		Server:     srv,
-		NRFClient:  nrfClient,
 		NssaaStore: nssaaStore,
 		AiwStore:   aiwStore,
 		Pool:       pgPool,
@@ -457,11 +428,6 @@ func (bp *BizPod) Close() {
 	}
 	if bp.Pool != nil {
 		bp.Pool.Close()
-	}
-	if bp.NRFClient != nil {
-		nrfCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = bp.NRFClient.Deregister(nrfCtx, bp.NRFClient.NFInstanceID())
 	}
 	if bp.RedisPool != nil {
 		_ = bp.RedisPool.Close()

@@ -28,7 +28,6 @@ var configPath = flag.String("config", "configs/biz.yaml", "path to YAML configu
 var (
 	pgHealth                func(ctx context.Context) error
 	redisHealth             func(ctx context.Context) error
-	nrfHealth               interface{ IsRegistered() bool }
 	serverInitiatedHandler  func(context.Context, *proto.AaaServerInitiatedRequest) (*proto.AaaServerInitiatedResponse, error)
 )
 
@@ -76,7 +75,6 @@ func main() {
 	redisHealth = func(ctx context.Context) error {
 		return pod.RedisPool.Client().Ping(ctx).Err()
 	}
-	nrfHealth = pod.NRFClient
 
 	// Start HTTP server
 	errCh := make(chan error, 1)
@@ -237,7 +235,9 @@ func handleLiveness(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.WriteString(w, `{"status":"ok","service":"nssAAF-biz"}`)
 }
 
-// handleReadiness implements /healthz/ready — checks PostgreSQL, Redis, NRF.
+// handleReadiness implements /healthz/ready — checks PostgreSQL, Redis.
+// NRF registration is owned by HTTP Gateway (Phase 4 migration), so the
+// Biz Pod no longer reports NRF health here.
 func handleReadiness(w http.ResponseWriter, r *http.Request) {
 	checks := map[string]string{}
 
@@ -261,15 +261,9 @@ func handleReadiness(w http.ResponseWriter, r *http.Request) {
 		checks["redis"] = "degraded (not initialized)"
 	}
 
-	if nrfHealth != nil && nrfHealth.IsRegistered() {
-		checks["nrf_registration"] = "ok"
-	} else {
-		checks["nrf_registration"] = "degraded (retrying)"
-	}
-
 	allOk := true
 	for _, v := range checks {
-		if v != "ok" && v != "degraded (retrying)" && v != "degraded (not initialized)" {
+		if v != "ok" && v != "degraded (not initialized)" {
 			allOk = false
 			break
 		}
