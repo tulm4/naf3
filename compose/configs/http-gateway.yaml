@@ -21,6 +21,18 @@ httpGateway:
     key: "/tmp/e2e-tls/server.key"
     ca: "/tmp/e2e-tls/server.crt"
 
+# NRF integration — HTTP Gateway registers as NSSAAF NF instance (Phase 1)
+# REQ-01: NRF registration on startup
+# REQ-02: Heartbeat every 5 minutes (negotiated)
+nrf:
+  baseURL: "${NRF_URL:-http://172.0.3.12:8081}"
+  discoverTimeout: 5s
+  profilePath: "${NSSAF_NF_PROFILE_PATH:-/etc/nssAAF/nf-profile.yaml}"
+  heartbeat:
+    initialIntervalSeconds: 30
+    acceptNegotiatedInterval: true
+    maxConsecutiveFailures: 3
+
 logging:
   level: "info"
   format: "json"
