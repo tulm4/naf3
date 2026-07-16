@@ -278,14 +278,22 @@ func (s *Server) handleGetInstance(w http.ResponseWriter, r *http.Request, id st
 		return
 	}
 
+	// Return NSSAAF-specific profile if that's the type
 	nfType := s.nfTypeFromID(id)
-	profile := defaultNFProfile(nfType, id, status)
+	if nfType == NFTypeNSSAAF {
+		profile := defaultNSSAAFProfile(id, status)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(profile)
+		return
+	}
 
+	profile := defaultNFProfile(nfType, id, status)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(profile)
 }
 
 // handlePutInstance handles PUT /nnrf-disc/v1/nf-instances/{id} — Nnrf_NFHeartBeat.
+// Per TS 29.510 §5.2.2.2, returns 201 Created with HeartBeat-Interval header.
 func (s *Server) handlePutInstance(w http.ResponseWriter, r *http.Request, id string) {
 	if id == "" {
 		w.Header().Set("Content-Type", "application/json")
@@ -299,11 +307,19 @@ func (s *Server) handlePutInstance(w http.ResponseWriter, r *http.Request, id st
 		return
 	}
 	s.mu.Lock()
+	// Store profile
+	s.profiles[id] = mustMarshal(payload)
 	if status, ok := payload["nfStatus"].(string); ok {
 		s.nfStatus[id] = status
+	} else {
+		s.nfStatus[id] = "REGISTERED"
 	}
 	s.mu.Unlock()
-	w.WriteHeader(http.StatusOK)
+
+	// Return 201 Created with HeartBeat-Interval header per TS 29.510 §5.2.2.2
+	w.Header().Set("HeartBeat-Interval", "300")
+	w.Header().Set("ETag", fmt.Sprintf(`"etag-%d"`, time.Now().UnixNano()))
+	w.WriteHeader(http.StatusCreated)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(payload)
 }
@@ -365,6 +381,8 @@ func (s *Server) nfTypeFromID(id string) string {
 		return NFTypeAUSF
 	case strings.HasPrefix(id, "aaa-gw-"):
 		return NFTypeAAAGW
+	case strings.HasPrefix(id, "nssAAF-"):
+		return NFTypeNSSAAF
 	default:
 		return NFTypeNSSAAF
 	}
@@ -409,4 +427,48 @@ func defaultNFProfile(nfType, nfInstanceID, status string) map[string]interface{
 			},
 		},
 	}
+}
+
+// defaultNSSAProfile returns a valid NF profile for NSSAAF.
+func defaultNSSAAFProfile(nfInstanceID, status string) map[string]interface{} {
+	return map[string]interface{}{
+		"nfInstanceId":   nfInstanceID,
+		"nfType":         NFTypeNSSAAF,
+		"nfStatus":       status,
+		"heartBeatTimer": 300,
+		"load":           0,
+		"plmnList": []map[string]interface{}{
+			{"mcc": "001", "mnc": "01"},
+		},
+		"nssaafInfo": map[string]interface{}{
+			"supiRanges": []map[string]interface{}{
+				{
+					"start":  "imsi-001010000000001",
+					"end":    "imsi-001019999999999",
+					"pattern": "^imsi-00101[0-9]{8}$",
+					"size":   "LARGE",
+				},
+			},
+		},
+		"nfServices": map[string]interface{}{
+			"nnssaaf-nssaa": map[string]interface{}{
+				"serviceName": "nnssaaf-nssaa",
+				"versions": []map[string]interface{}{
+					{"apiVersion": "v1"},
+				},
+				"ipEndPoints": []map[string]interface{}{
+					{"ipv4Address": "127.0.0.1", "port": 8080},
+				},
+			},
+		},
+	}
+}
+
+// mustMarshal serializes v to JSON. Panics on error (use only in test/handlers).
+func mustMarshal(v interface{}) []byte {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	return b
 }
