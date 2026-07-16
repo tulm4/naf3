@@ -1,45 +1,27 @@
-# Example NFProfile configuration for NSSAAF deployment.
-instanceId: "550e8400-e29b-41d4-a716-446655440000"
-instanceName: "nssAAF-gw-001"
-fqdn: "nssAAF.operator.com"
-locality: "dc-1"
-nfSetId: "nssAAF-set-001"
+# NSSAAF NF Profile for HTTP Gateway
+# Loaded by HTTP Gateway at startup for NRF self-registration.
+# Spec: TS 29.510 §6.1 (NFProfile); docs/superpowers/plans/2026-07-17-nssAAF-nrf-migration-spec.md
 
+nfInstanceId: "${NF_INSTANCE_ID:-}"
+nfType: NSSAAF
+nfStatus: REGISTERED
+fqdn: "http-gateway.nssaa.svc.cluster.local"
 ipv4Addresses:
-  - "10.0.1.50"
-  - "10.0.2.50"
-
-plmnList:
-  - mcc: "208"
-    mnc: "001"
-
-snssais:
-  - sst: 1
-    sd: "000001"
-  - sst: 2
-
-nssaafInfo:
-  supiRanges:
-    - start: "imsi-208010000000001"
-      end: "imsi-208019999999999"
-      pattern: "^imsi-20801[0-9]{8}$"
-      size: "LARGE"
-
-nfServices:
-  nnssaaf-nssaa:
-    serviceInstanceId: "nnssaaf-nssaa-001"
-    apiPrefix: "/nnssaaf-nssaa/v1"
-    allowedNfTypes: ["AMF"]
-    capacity: 1000
-    priority: 100
-  nnssaaf-aiw:
-    serviceInstanceId: "nnssaaf-aiw-001"
-    apiPrefix: "/nnssaaf-aiw/v1"
-    allowedNfTypes: ["AUSF"]
-    capacity: 1000
-    priority: 100
-
-customInfo:
-  supportedAaaProtocols: ["RADIUS", "DIAMETER"]
-  maxEapRounds: 20
-  eapTimeoutSeconds: 30
+  - "${HTTP_GW_IP:-172.0.3.17}"
+ports:
+  - port: 8443
+    protocol: "HTTP/2"
+    security: "TLS"
+services:
+  - serviceName: nnssaaf-nssaa
+    versions:
+      - apiVersion: v1
+        fullVersion: 1.0.0
+  - serviceName: nnssaaf-aiw
+    versions:
+      - apiVersion: v1
+        fullVersion: 1.0.0
+heartBeatTimer: 30
+priority: 100
+capacity: 1000
+load: 0

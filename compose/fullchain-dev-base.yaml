@@ -50,6 +50,8 @@ services:
       dockerfile: Dockerfile.nrf-mock
     image: nssaaf-nrf-mock:latest
     ports: ["8082:8081"]
+    volumes:
+      - ../bin/nrf-mock:/app/nrf-mock:ro
     environment:
       NRF_NF_STATUS: "udm-001:REGISTERED,aaa-gw-001:REGISTERED"
       NRF_SERVICE_ENDPOINTS: "UDM:nudm-uem:udm-mock:8081"
@@ -141,20 +143,17 @@ services:
         condition: service_healthy
       aaa-gateway:
         condition: service_healthy
-      nrf-mock:
-        condition: service_healthy
       udm-mock:
         condition: service_healthy
       nrm:
         condition: service_healthy
     volumes:
       - ./configs/biz.yaml:/etc/nssAAF/biz.yaml:ro
-      - ./configs/nf-profile.yaml:/etc/nssAAF/nf-profile.yaml:ro
+      - ../bin/biz:/app/biz:ro
     environment:
       MASTER_KEY_HEX: "${MASTER_KEY_HEX:-6767a7ad0416a19ea174608288761dde35dfabba2a8dda9602fc520b80e1af15}"
       POSTGRES_HOST: "172.0.3.11"
       REDIS_ADDR: "redis:6379"
-      NRF_URL: "http://172.0.3.12:8081"
       UDM_URL: "http://172.0.3.13:8081"
       NRM_URL: "http://172.0.3.18:8081"
       AAA_GW_URL: "http://172.0.3.15:9090"
@@ -178,13 +177,18 @@ services:
     depends_on:
       biz:
         condition: service_healthy
+      nrf-mock:
+        condition: service_healthy
     volumes:
       - ./configs/http-gateway.yaml:/etc/nssAAF/http-gateway.yaml:ro
+      - ./configs/nf-profile.yaml:/etc/nssAAF/nf-profile.yaml:ro
       - /tmp/e2e-tls:/tmp/e2e-tls:ro
       - ../bin/http-gateway:/app/http-gateway:ro
     environment:
       NAF3_AUTH_DISABLED: "1"
       BIZ_URL: "http://172.0.3.16:8080"
+      NRF_URL: "http://172.0.3.12:8081"
+      NSSAF_NF_PROFILE_PATH: "/etc/nssAAF/nf-profile.yaml"
     ports: ["8443:8443"]
     networks:
       default:

@@ -52,16 +52,13 @@ metrics:
   enabled: true
   path: "/metrics"
 
-# NRF integration — REQ-01, REQ-02, REQ-03
-nrf:
-  baseURL: "${NRF_URL:-http://172.0.3.12:8081}"
-  discoverTimeout: 5s
-  # Path to NFProfile YAML. Loaded via nrf.SetProfilePath before StartHeartbeat.
-  profilePath: "${NSSAF_NF_PROFILE_PATH:-/etc/nssAAF/nf-profile.yaml}"
-  heartbeat:
-    initialIntervalSeconds: 30
-    acceptNegotiatedInterval: true
-    maxConsecutiveFailures: 3
+# NRF integration — REMOVED in Phase 5: HTTP Gateway is now the NSSAAF NF instance
+# Biz Pod discovers NFs (UDM, AMF, etc.) via the HTTP Gateway internal discovery API.
+# Spec: docs/superpowers/plans/2026-07-17-nssAAF-nrf-migration-spec.md §Phase 3/5
+
+# HTTP Gateway URL for NF discovery (Phase 3)
+httpGateway:
+  discoveryUrl: "${HTTP_GW_URL:-http://172.0.3.17:8443}"
 
 # UDM integration — REQ-04, REQ-05
 udm:
