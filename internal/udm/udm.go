@@ -13,25 +13,26 @@ import (
 	"net/http"
 
 	"github.com/operator/nssAAF/internal/config"
+	"github.com/operator/nssAAF/internal/discovery"
 	"github.com/operator/nssAAF/internal/nfclient"
-	"github.com/operator/nssAAF/internal/nrf"
 )
 
 // Client is the UDM Nudm_UECM client.
 // REQ-04: Nudm_UECM_Get wired to N58 handler — gates AAA routing.
 // REQ-05: Nudm_UECM_UpdateAuthContext called after EAP completion.
 type Client struct {
-	baseURL   string
-	nrfClient *nrf.Client
-	factory   *nfclient.Factory
+	baseURL string
+	disc    discovery.NFDiscoveryClient
+	factory *nfclient.Factory
 }
 
 // NewClient creates a new UDM client.
-func NewClient(cfg config.UDMConfig, factory *nfclient.Factory, nrfClient *nrf.Client) *Client {
+// discoveryClient is used for on-demand NF discovery when baseURL is not configured.
+func NewClient(cfg config.UDMConfig, factory *nfclient.Factory, discoveryClient discovery.NFDiscoveryClient) *Client {
 	return &Client{
-		baseURL:   cfg.BaseURL,
-		nrfClient: nrfClient,
-		factory:   factory,
+		baseURL: cfg.BaseURL,
+		disc:    discoveryClient,
+		factory: factory,
 	}
 }
 
@@ -50,11 +51,45 @@ func (c *Client) discoverBaseURL(ctx context.Context, supi string) (string, erro
 	if c.baseURL != "" {
 		return c.baseURL, nil
 	}
-	if c.nrfClient == nil {
-		return "", errors.New("udm: no baseURL and no NRF client configured")
+	if c.disc == nil {
+		return "", errors.New("udm: no baseURL and no discovery client configured")
 	}
-	plmn := extractPLMNFromSupi(supi)
-	return c.nrfClient.DiscoverUDM(ctx, plmn)
+
+	// Discover UDM via HTTP Gateway's internal discovery API.
+	// Spec: docs/superpowers/plans/2026-07-17-nssAAF-nrf-migration-spec.md §Phase 3
+	profile, err := c.disc.FindNF(ctx, "UDM")
+	if err != nil {
+		return "", fmt.Errorf("udm: discover UDM: %w", err)
+	}
+
+	// Extract base URL from NF profile.
+	// Prefer first IPv4 address + first IPEndPoint.
+	if len(profile.NfServices) == 0 {
+		return "", errors.New("udm: no services in UDM profile")
+	}
+
+	svc := profile.NfServices[0]
+	if len(svc.IPEndPoints) == 0 {
+		return "", errors.New("udm: no IP endpoints in UDM service")
+	}
+
+	ep := svc.IPEndPoints[0]
+	ip := ep.IPv4Address
+	if ip == "" {
+		return "", errors.New("udm: no IPv4 address in UDM endpoint")
+	}
+
+	port := ep.Port
+	if port == 0 {
+		port = 443 // Default HTTPS port
+	}
+
+	scheme := svc.Scheme
+	if scheme == "" {
+		scheme = "https"
+	}
+
+	return fmt.Sprintf("%s://%s:%d", scheme, ip, port), nil
 }
 
 // GetAuthContext calls Nudm_UECM_Get to retrieve auth subscription for a SUPI.
