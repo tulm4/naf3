@@ -1,5 +1,9 @@
 package nrf
 
+// NFType represents the type of Network Function.
+// Spec: TS 29.510 §5.4.2
+type NFType string
+
 // NF Type constants
 const (
 	NFTypeNSSAAF = "NSSAAF"

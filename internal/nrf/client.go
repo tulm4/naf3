@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -407,6 +408,37 @@ func (c *Client) DiscoverAMF(ctx context.Context, amfID string) (string, error) 
 	}
 	c.cache.Set(key, amf.NFInstanceID)
 	return amf.NFInstanceID, nil
+}
+
+// FindNF discovers an NF instance by type and returns the first matching
+// profile. Returns (nil, nil) when NRF has no matching instances.
+// REQ-03 / TS 29.510 §5.3 (Nnrf_NFDiscovery_Search).
+func (c *Client) FindNF(ctx context.Context, nfType string) (*NFProfile, error) {
+	// Normalize NF type so callers may pass "udm", "Udm", etc.
+	normalizedType := NFType(strings.ToUpper(nfType))
+
+	path := fmt.Sprintf("/nnrf-disc/v1/nf-instances?target-nf-type=%s", normalizedType)
+	status, respBody, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("nrf: find nf: %w", err)
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("nrf: find nf status %d: %s", status, respBody)
+	}
+
+	var result struct {
+		NFInstances []NFProfile `json:"nfInstances"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("nrf: decode find result: %w", err)
+	}
+
+	if len(result.NFInstances) == 0 {
+		return nil, nil // Not found, return nil without error
+	}
+
+	// Return the first matching NF instance.
+	return &result.NFInstances[0], nil
 }
 
 // IsRegistered returns true if NRF registration succeeded.

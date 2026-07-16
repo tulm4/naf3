@@ -254,6 +254,13 @@ func buildHandler(deps buildHandlerDeps) http.Handler {
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 
+	// Internal NF discovery API — no auth required (internal network only).
+	// Spec: docs/superpowers/plans/2026-07-17-nssAAF-nrf-migration-spec.md §Phase 2
+	if deps.NRFClient != nil {
+		discHandler := newDiscoveryHandler(deps.NRFClient, slog.Default())
+		mux.HandleFunc("/internal/nf-discovery/", discHandler.HandleNFFind)
+	}
+
 	// DebugMiddleware must sit *inside* otelhttp.NewHandler so the
 	// DebugMiddleware can still observe the response status written by
 	// downstream handlers (otelhttp.NewHandler is the outermost wrapper that
