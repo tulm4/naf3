@@ -171,7 +171,7 @@ func TestGetAuthContext_NoBaseURL(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "no baseURL and no NRF client configured")
+	assert.Contains(t, err.Error(), "no baseURL and no discovery client configured")
 }
 
 func TestUpdateAuthContext_Success(t *testing.T) {
@@ -253,7 +253,7 @@ func TestUpdateAuthContext_NoBaseURL(t *testing.T) {
 	err := client.UpdateAuthContext(ctx, "imsi-208001000000000", "auth-xyz", "EAP_SUCCESS")
 
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "no baseURL and no NRF client configured")
+	assert.Contains(t, err.Error(), "no baseURL and no discovery client configured")
 }
 
 func TestExtractPLMNFromSupi(t *testing.T) {
