@@ -108,7 +108,9 @@ VENDOR 3GPP 10415
 # Length: 3 (SST only) or 6 (SST + SD)
 # SST: Slice/Service Type (0-255)
 # SD: Slice Differentiator (3 octets, optional)
-ATTRIBUTE 3GPP-S-NSSAI  200  tlv  3GPP
+BEGIN-VENDOR 3GPP
+ATTRIBUTE 3GPP-S-NSSAI 200 tlv
+END-VENDOR 3GPP
 ```
 
 - [ ] **Step 2: Commit**
