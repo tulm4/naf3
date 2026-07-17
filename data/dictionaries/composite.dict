@@ -1,0 +1,5 @@
+# Composite RADIUS dictionary for NSS-AAA
+# Combines standard RADIUS attributes with 3GPP vendor-specific
+
+$INCLUDE radius-standard.dict
+$INCLUDE 3gpp-nssaaa.dict
