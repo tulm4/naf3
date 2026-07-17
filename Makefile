@@ -5,12 +5,15 @@
 #   biz         — Biz Pod (N58/N60 SBI + EAP engine)
 #   http-gateway — HTTP Gateway (stateless TLS terminator)
 #   aaa-gateway — AAA Gateway (Diameter/RADIUS transport)
+#   nrf-mock    — NRF Mock (for development)
+#   udm-mock    — UDM Mock (for development)
+#   aaa-sim     — AAA Simulator (for development)
 #
 # Requires: Go 1.22+, golangci-lint, docker (optional)
 #
 # Usage:
 #   make help              # Show all targets
-#   make build            # Build all 3 binaries
+#   make build            # Build all binaries
 #   make test             # Run unit tests
 #   make lint             # Run linter
 #   make docker-build     # Build all Docker images
@@ -86,17 +89,16 @@ help: ## Show all available make targets
 # =============================================================================
 
 .PHONY: build
-build: build-all ## Build all 3 component binaries
+build: build-all ## Build all binaries
 	@echo "$(GREEN)Build complete:$(NC)"
 	@echo "  biz          → $(BIZ_BINARY)"
 	@echo "  http-gateway → $(HTTPGW_BINARY)"
 	@echo "  aaa-gateway → $(AAAGW_BINARY)"
-	@echo "  nrm → $(NRM_BINARY)"
-	@echo "  aaa-sim → $(AAASIM_BINARY)"
-	@echo "  nrf-mock → $(NRFMOCK_BINARY)"
-	@echo "  aaa-sim → $(UDMMOCK_BINARY)"
+	@echo "  nrf-mock    → $(NRFMOCK_BINARY)"
+	@echo "  udm-mock    → $(UDMMOCK_BINARY)"
+	@echo "  aaa-sim     → $(AAASIM_BINARY)"
 
-build-all: build-biz build-http-gateway build-aaa-gateway build-nrm build-aaa-sim build-nrf-mock build-udm-mock ## Build all 3 binaries
+build-all: build-biz build-http-gateway build-aaa-gateway build-nrf-mock build-udm-mock build-aaa-sim ## Build all binaries
 
 .PHONY: build-biz
 build-biz: ## Build Biz Pod binary
@@ -430,11 +432,14 @@ mod-download: ## Download all dependencies
 # =============================================================================
 
 .PHONY: docker-build
-docker-build: docker-build-biz docker-build-http-gateway docker-build-aaa-gateway ## Build all component Docker images
+docker-build: docker-build-biz docker-build-http-gateway docker-build-aaa-gateway docker-build-nrf-mock docker-build-udm-mock docker-build-aaa-sim ## Build all Docker images
 	@echo "$(GREEN)Docker build complete:$(NC)"
 	@echo "  biz          → $(DOCKER_IMAGE_PREFIX)-biz:$(DOCKER_TAG)"
 	@echo "  http-gateway → $(DOCKER_IMAGE_PREFIX)-http-gw:$(DOCKER_TAG)"
 	@echo "  aaa-gateway → $(DOCKER_IMAGE_PREFIX)-aaa-gw:$(DOCKER_TAG)"
+	@echo "  nrf-mock    → $(DOCKER_IMAGE_PREFIX)-nrf-mock:$(DOCKER_TAG)"
+	@echo "  udm-mock    → $(DOCKER_IMAGE_PREFIX)-udm-mock:$(DOCKER_TAG)"
+	@echo "  aaa-sim     → $(DOCKER_IMAGE_PREFIX)-aaa-sim:$(DOCKER_TAG)"
 
 .PHONY: docker-build-biz
 docker-build-biz: ## Build Biz Pod Docker image
@@ -451,8 +456,23 @@ docker-build-aaa-gateway: ## Build AAA Gateway Docker image
 	@echo "$(YELLOW)Building AAA Gateway image...$(NC)"
 	$(DOCKER_BUILD) -t $(DOCKER_IMAGE_PREFIX)-aaa-gw:$(DOCKER_TAG) -f Dockerfile.aaa-gateway .
 
+.PHONY: docker-build-nrf-mock
+docker-build-nrf-mock: ## Build NRF Mock Docker image
+	@echo "$(YELLOW)Building NRF Mock image...$(NC)"
+	$(DOCKER_BUILD) -t $(DOCKER_IMAGE_PREFIX)-nrf-mock:$(DOCKER_TAG) -f Dockerfile.nrf-mock .
+
+.PHONY: docker-build-udm-mock
+docker-build-udm-mock: ## Build UDM Mock Docker image
+	@echo "$(YELLOW)Building UDM Mock image...$(NC)"
+	$(DOCKER_BUILD) -t $(DOCKER_IMAGE_PREFIX)-udm-mock:$(DOCKER_TAG) -f Dockerfile.udm-mock .
+
+.PHONY: docker-build-aaa-sim
+docker-build-aaa-sim: ## Build AAA Simulator Docker image
+	@echo "$(YELLOW)Building AAA Simulator image...$(NC)"
+	$(DOCKER_BUILD) -t $(DOCKER_IMAGE_PREFIX)-aaa-sim:$(DOCKER_TAG) -f Dockerfile.aaa-sim .
+
 .PHONY: docker-buildx
-docker-buildx: docker-buildx-biz docker-buildx-http-gateway docker-buildx-aaa-gateway ## Build multi-platform Docker images (amd64 + arm64)
+docker-buildx: docker-buildx-biz docker-buildx-http-gateway docker-buildx-aaa-gateway docker-buildx-nrf-mock docker-buildx-udm-mock docker-buildx-aaa-sim ## Build multi-platform Docker images (amd64 + arm64)
 
 docker-buildx-biz:
 	$(DOCKER_BUILDX) \
@@ -474,6 +494,27 @@ docker-buildx-aaa-gateway:
 		-t $(DOCKER_IMAGE_PREFIX)-aaa-gw:latest \
 		--push \
 		-f Dockerfile.aaa-gateway .
+
+docker-buildx-nrf-mock:
+	$(DOCKER_BUILDX) \
+		-t $(DOCKER_IMAGE_PREFIX)-nrf-mock:$(DOCKER_TAG) \
+		-t $(DOCKER_IMAGE_PREFIX)-nrf-mock:latest \
+		--push \
+		-f Dockerfile.nrf-mock .
+
+docker-buildx-udm-mock:
+	$(DOCKER_BUILDX) \
+		-t $(DOCKER_IMAGE_PREFIX)-udm-mock:$(DOCKER_TAG) \
+		-t $(DOCKER_IMAGE_PREFIX)-udm-mock:latest \
+		--push \
+		-f Dockerfile.udm-mock .
+
+docker-buildx-aaa-sim:
+	$(DOCKER_BUILDX) \
+		-t $(DOCKER_IMAGE_PREFIX)-aaa-sim:$(DOCKER_TAG) \
+		-t $(DOCKER_IMAGE_PREFIX)-aaa-sim:latest \
+		--push \
+		-f Dockerfile.aaa-sim .
 
 # =============================================================================
 # Dev targets
