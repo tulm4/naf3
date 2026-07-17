@@ -40,6 +40,9 @@ AAASIM_BINARY = $(BINARY_DIR)/aaa-sim
 NRFMOCK_BINARY = $(BINARY_DIR)/nrf-mock
 UDMMOCK_BINARY = $(BINARY_DIR)/udm-mock
 
+# RADIUS dictionary code generation
+RADIUS_DICT_GEN = $(BINARY_DIR)/radius-dict-gen
+
 # Linting
 LINTER = golangci-lint
 LINTER_FLAGS = run ./...
@@ -552,6 +555,21 @@ compose-down: ## Stop all services
 .PHONY: compose-logs
 compose-logs: ## Tail logs from all services
 	docker compose -f compose/dev.yaml logs -f
+
+# =============================================================================
+# Code Generation
+# =============================================================================
+
+$(RADIUS_DICT_GEN):
+	go install layeh.com/radius/cmd/radius-dict-gen@latest
+
+.PHONY: gen-radius-dict
+gen-radius-dict: $(RADIUS_DICT_GEN) ## Generate RADIUS dictionary code from dictionaries
+	@echo "Generating RADIUS dictionary code..."
+	@mkdir -p internal/radius/layeh/gen
+	$(RADIUS_DICT_GEN) -dict data/dictionaries/composite.dict \
+		-package gen -o internal/radius/layeh/gen/dict.go
+	@echo "Done: internal/radius/layeh/gen/dict.go"
 
 # =============================================================================
 # Dependency targets
