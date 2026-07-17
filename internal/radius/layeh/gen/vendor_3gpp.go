@@ -8,34 +8,37 @@ import (
 
 // NSSAI represents a Single Network Slice Selection Assistance Information.
 // Spec: 3GPP TS 29.561 §16.3.2
-// Layout: Type(1) + Length(1) + SST(1) + SD(3) = 6 bytes
 type NSSAI struct {
 	SST uint8   // Slice/Service Type (0-255)
 	SD  [3]byte // Slice Differentiator (zero if SST-only)
 }
 
-// Pack encodes NSSAI into the VSA sub-TLV format.
+// Pack encodes NSSAI into the data portion of the 3GPP-S-NSSAI sub-TLV.
+// The generated ThreeGPPSNSSAI_Add helper wraps this in Type+Length.
+// Spec: TS 29.561 §16.3.2
 func (n *NSSAI) Pack() []byte {
-	// 3GPP sub-type: 200, length: 6 (SST + SD)
-	b := make([]byte, 6)
-	b[0] = 200 // 3GPP sub-type: 3GPP-S-NSSAI
-	b[1] = 6   // Length: SST(1) + SD(3) = 4, but per 3GPP spec length field includes Type+Length bytes
-	b[2] = n.SST
-	copy(b[3:6], n.SD[:])
+	b := make([]byte, 4)
+	b[0] = n.SST
+	copy(b[1:4], n.SD[:])
 	return b
 }
 
-// Unpack decodes NSSAI from VSA sub-TLV format.
-// Expects the full 6-byte sub-TLV: Type(1) + Length(1) + SST(1) + SD(3).
+// Unpack decodes NSSAI from the data portion of the 3GPP-S-NSSAI sub-TLV.
+// The generated ThreeGPPSNSSAI_Gets helper strips Type+Length before passing data.
+// Per TS 29.561 §16.3.2:
+//   - Length=3: SST only (1 byte data)
+//   - Length=6: SST + SD (4 byte data)
 func (n *NSSAI) Unpack(b []byte) error {
-	if len(b) < 6 {
-		return fmt.Errorf("NSSAI: expected 6 bytes, got %d", len(b))
+	if len(b) == 0 {
+		return fmt.Errorf("NSSAI: empty data")
 	}
-	if b[0] != 200 {
-		return fmt.Errorf("NSSAI: expected type 200, got %d", b[0])
+	n.SST = b[0]
+	if len(b) >= 4 {
+		copy(n.SD[:], b[1:4])
+	} else if len(b) > 1 {
+		// Partial SD — treat as zeros (SST-only variant)
+		n.SD = [3]byte{0, 0, 0}
 	}
-	n.SST = b[2]
-	copy(n.SD[:], b[3:6])
 	return nil
 }
 
