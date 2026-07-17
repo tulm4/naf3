@@ -1,0 +1,13 @@
+# 3GPP Vendor-Specific Attributes for NSS-AAA
+# Vendor: 3GPP (10415)
+# Source: 3GPP TS 29.561 V18.5.0 (2024-09) §16.3
+
+VENDOR 3GPP 10415
+
+# 3GPP-S-NSSAI (Sub-attribute #200)
+# Format: Type(1) + Length(1) + SST(1) + SD(3) = 6 bytes
+# Type: 200 (fixed)
+# Length: 3 (SST only) or 6 (SST + SD)
+# SST: Slice/Service Type (0-255)
+# SD: Slice Differentiator (3 octets, optional)
+ATTRIBUTE 3GPP-S-NSSAI  200  tlv  3GPP
