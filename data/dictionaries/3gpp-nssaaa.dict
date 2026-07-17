@@ -4,10 +4,12 @@
 
 VENDOR 3GPP 10415
 
+BEGIN-VENDOR 3GPP
 # 3GPP-S-NSSAI (Sub-attribute #200)
 # Format: Type(1) + Length(1) + SST(1) + SD(3) = 6 bytes
 # Type: 200 (fixed)
 # Length: 3 (SST only) or 6 (SST + SD)
 # SST: Slice/Service Type (0-255)
 # SD: Slice Differentiator (3 octets, optional)
-ATTRIBUTE 3GPP-S-NSSAI  200  tlv  3GPP
+ATTRIBUTE 3GPP-S-NSSAI 200 tlv
+END-VENDOR 3GPP
