@@ -253,9 +253,9 @@ Check off validation items:
 ```markdown
 ## Validation Checklist
 
-- [x] `go build ./...` compiles without errors
-- [x] `go test ./...` passes
-- [x] `golangci-lint run ./...` passes
+- [x] `make build` compiles without errors
+- [x] `make test` passes
+- [x] `make lint` passes
 ```
 
 #### 4. GSD State Files
