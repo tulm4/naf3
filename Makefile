@@ -567,8 +567,8 @@ $(RADIUS_DICT_GEN):
 gen-radius-dict: $(RADIUS_DICT_GEN) ## Generate RADIUS dictionary code from dictionaries
 	@echo "Generating RADIUS dictionary code..."
 	@mkdir -p internal/radius/layeh/gen
-	$(RADIUS_DICT_GEN) -dict data/dictionaries/composite.dict \
-		-package gen -o internal/radius/layeh/gen/dict.go
+	cd data/dictionaries && $(CURDIR)/$(RADIUS_DICT_GEN) -output $(CURDIR)/internal/radius/layeh/gen/dict.go \
+		-package gen composite.dict
 	@echo "Done: internal/radius/layeh/gen/dict.go"
 
 # =============================================================================

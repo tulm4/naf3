@@ -11,5 +11,8 @@ BEGIN-VENDOR 3GPP
 # Length: 3 (SST only) or 6 (SST + SD)
 # SST: Slice/Service Type (0-255)
 # SD: Slice Differentiator (3 octets, optional)
-ATTRIBUTE 3GPP-S-NSSAI 200 tlv
+# Type is "octets" because layeh's radius-dict-gen does not support tlv
+# for vendor attributes; the sub-TLV structure is parsed manually in
+# internal/radius/layeh/gen/vendor_3gpp.go.
+ATTRIBUTE 3GPP-S-NSSAI 200 octets
 END-VENDOR 3GPP
