@@ -9,12 +9,13 @@ import (
 
 // YAMLProfile represents the NFProfile configuration in YAML format.
 type YAMLProfile struct {
-	InstanceID    string                 `yaml:"instanceId"`
-	InstanceName  string                 `yaml:"instanceName"`
+	InstanceID     string                 `yaml:"instanceId"`
+	InstanceName   string                 `yaml:"instanceName"`
 	FQDN          string                 `yaml:"fqdn"`
 	Locality      string                 `yaml:"locality"`
 	NFSetID       string                 `yaml:"nfSetId"`
 	IPv4Addresses []string               `yaml:"ipv4Addresses"`
+	HeartbeatTimer int                  `yaml:"heartBeatTimer"`
 	PLMNList      []PLMN                 `yaml:"plmnList"`
 	SNSSAIList    []Snssai               `yaml:"snssais"`
 	NSSAAServices map[string]YAMLService `yaml:"nfServices"`
@@ -24,9 +25,10 @@ type YAMLProfile struct {
 
 // YAMLService represents a service configuration in YAML.
 type YAMLService struct {
-	ServiceInstanceID string   `yaml:"serviceInstanceId"`
+	ServiceInstanceID  string   `yaml:"serviceInstanceId"`
 	APIPrefix         string   `yaml:"apiPrefix"`
 	AllowedNfTypes    []string `yaml:"allowedNfTypes"`
+	AllowedNfDomains  []string `yaml:"allowedNfDomains"`
 	Capacity          int      `yaml:"capacity"`
 	Priority          int      `yaml:"priority"`
 	SupportedFeatures string   `yaml:"supportedFeatures"`
@@ -60,11 +62,17 @@ func LoadProfileFromYAML(path string) (*YAMLProfile, error) {
 // BuildNFProfile converts YAML configuration to a 3GPP-compliant NFProfile.
 // Spec: TS 29.510 §6.1.6.2.2
 func BuildNFProfile(yamlProfile *YAMLProfile, heartbeatTimer int) *NFProfile {
+	// Use heartbeatTimer from YAML if specified; otherwise fall back to parameter.
+	hbTimer := yamlProfile.HeartbeatTimer
+	if hbTimer == 0 {
+		hbTimer = heartbeatTimer
+	}
+
 	profile := &NFProfile{
 		NFInstanceID:   yamlProfile.InstanceID,
 		NFType:         NFTypeNSSAAF,
 		NFStatus:       NFStatusRegistered,
-		HeartBeatTimer: heartbeatTimer,
+		HeartBeatTimer: hbTimer,
 		InstanceName:   yamlProfile.InstanceName,
 		FQDN:           yamlProfile.FQDN,
 		Locality:       yamlProfile.Locality,
@@ -87,6 +95,7 @@ func BuildNFProfile(yamlProfile *YAMLProfile, heartbeatTimer int) *NFProfile {
 			Priority:          svc.Priority,
 			SupportedFeatures: svc.SupportedFeatures,
 			AllowedNfTypes:    svc.AllowedNfTypes,
+			AllowedNfDomains:  svc.AllowedNfDomains,
 		}
 
 		for _, addr := range yamlProfile.IPv4Addresses {

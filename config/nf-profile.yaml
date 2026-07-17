@@ -1,12 +1,17 @@
 # Example NFProfile configuration for NSSAAF deployment.
 # Copy to your deployment config directory and customize.
 # Schema is consumed by internal/nrf/profile.go (LoadProfileFromYAML).
+# Spec: TS 29.510 §6.1.6.2.2 (NFProfile), §6.1.6.2.3 (NFService), §6.1.6.2.104 (NssaafInfo)
 
 instanceId: "550e8400-e29b-41d4-a716-446655440000"
 instanceName: "nssAAF-gw-001"
 fqdn: "nssAAF.operator.com"
 locality: "dc-1"
 nfSetId: "nssAAF-set-001"
+
+# Heartbeat interval in seconds. Negotiated with NRF at registration.
+# If 0, uses the value from NRF config.
+heartBeatTimer: 30
 
 ipv4Addresses:
   - "10.0.1.50"
@@ -33,12 +38,14 @@ nfServices:
     serviceInstanceId: "nnssaaf-nssaa-001"
     apiPrefix: "/nnssaaf-nssaa/v1"
     allowedNfTypes: ["AMF"]
+    allowedNfDomains: ["operator.com"]
     capacity: 1000
     priority: 100
   nnssaaf-aiw:
     serviceInstanceId: "nnssaaf-aiw-001"
     apiPrefix: "/nnssaaf-aiw/v1"
     allowedNfTypes: ["AUSF"]
+    allowedNfDomains: ["operator.com"]
     capacity: 1000
     priority: 100
 
