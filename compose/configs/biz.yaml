@@ -44,39 +44,6 @@ rateLimit:
   perAmfPerSec: 100
   globalPerSec: 1000
 
-# S-NSSAI routing configuration for AAA protocol selection.
-# The snssai section determines which AAA protocol (RADIUS or DIAMETER) to use
-# for each slice. Protocol selection is done by the Biz Pod based on S-NSSAI.
-# 3-level lookup: exact (sst+sd), sst-only (sst, sd=*), default (sst=*, sd=*).
-#
-# Protocol options:
-#   - RADIUS: Use RADIUS Access-Request/Accept/Reject (TS 29.561 §16)
-#   - DIAMETER: Use Diameter DER/DEA (TS 29.561 §17)
-#
-snssai:
-  # Default: use RADIUS for all slices (AAA Gateway forwards to AAA-S)
-  default:
-    protocol: RADIUS
-    host: "172.0.3.15"
-    port: 9090
-    sharedSecret: "testing123"
-    timeout: "10s"
-  # Example: SST-only config (uncomment to use)
-  # sst:
-  #   - sst: 2
-  #     protocol: DIAMETER
-  #     host: "172.0.3.15"
-  #     port: 9090
-  #     timeout: "10s"
-  # Example: Exact config (uncomment to use)
-  # exact:
-  #   - sst: 1
-  #     sd: "000001"
-  #     protocol: DIAMETER
-  #     host: "172.0.3.15"
-  #     port: 9090
-  #     timeout: "10s"
-
 logging:
   level: "info"
   format: "json"
@@ -110,6 +77,38 @@ biz:
   tlsCert: "/certs/biz-to-aaa.crt"
   tlsKey: "/certs/biz-to-aaa.key"
   tlsCa: "/certs/aaa-ca.crt"
+
+  # S-NSSAI routing configuration for AAA protocol selection.
+  # The snssai section determines which AAA protocol (RADIUS or DIAMETER) to use
+  # for each slice. Protocol selection is done by the Biz Pod based on S-NSSAI.
+  # 3-level lookup: exact (sst+sd), sst-only (sst, sd=*), default (sst=*, sd=*).
+  #
+  # Protocol options:
+  #   - RADIUS: Use RADIUS Access-Request/Accept/Reject (TS 29.561 §16)
+  #   - DIAMETER: Use Diameter DER/DEA (TS 29.561 §17)
+  snssai:
+    # Default: use DIAMETER for all slices (AAA Gateway forwards to AAA-S)
+    default:
+      protocol: DIAMETER
+      host: "172.0.3.15"
+      port: 9090
+      sharedSecret: "testing123"
+      timeout: "10s"
+    # Example: SST-only config (uncomment to use)
+    # sst:
+    #   - sst: 2
+    #     protocol: RADIUS
+    #     host: "172.0.3.15"
+    #     port: 9090
+    #     timeout: "10s"
+    # Example: Exact config (uncomment to use)
+    # exact:
+    #   - sst: 1
+    #     sd: "000001"
+    #     protocol: RADIUS
+    #     host: "172.0.3.15"
+    #     port: 9090
+    #     timeout: "10s"
 
 # Cryptographic key management (Phase 5)
 # Modes: soft (default), softhsm (PKCS#11), vault (HashiCorp Vault transit)
