@@ -17,6 +17,18 @@ redis:
 aaaGateway:
   bizServiceUrl: "${BIZ_URL:-http://172.0.3.16:8080}"
   listenRadius: ":1812"
+
+  # Protocol selection is determined by the Biz Pod based on S-NSSAI.
+  # The Biz Pod's biz.snssai config specifies which protocol (RADIUS or DIAMETER)
+  # to use for each slice. The transportType is passed to AAA Gateway via HTTP.
+  #
+  # AAA Gateway supports both RADIUS and Diameter for forwarding to AAA-S:
+  #   - RADIUS: Access-Request/Accept/Reject (TS 29.561 §16)
+  #   - DIAMETER: DER/DEA (TS 29.561 §17)
+  #
+  # Both protocols are configured below; the actual protocol used depends on
+  # the transportType field in the AaaForwardRequest from Biz Pod.
+
   # Diameter client-initiated config (see PLAN §2.3.5):
   # Required for DER/DEA forwarding to AAA-S. Without these, DIAMETER transport silently fails.
   diameterServerAddress: "172.0.3.14:3868"  # AAA-S address (static IP per spec §4.1)

@@ -336,6 +336,7 @@ func (f *bizPodFactory) Build(ctx context.Context) (*BizPod, func(), error) {
 		f.podID,
 		f.cfg.Version,
 		commCfg,
+		&f.cfg.Biz.Snssai,
 		f.logger,
 		dbg,
 	)

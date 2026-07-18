@@ -22,19 +22,22 @@ type httpAAAClient struct {
 	version string
 	dbg     *dbg.Debug
 	logger  *slog.Logger
+	// snssaiConfig determines the AAA protocol (RADIUS or DIAMETER) for each S-NSSAI.
+	snssaiCfg *config.SnssaiRoutingConfig
 }
 
 // newHTTPAAAClient creates a new HTTP AAA client.
 // It embeds httpclient.NativeAAAClient for ForwardEAP with retry + circuit breaker.
 // The d parameter is nil-safe: Emit short-circuits when nil or disabled.
-func newHTTPAAAClient(aaaGatewayURL, podID, version string, cfg config.InternalCommConfig, logger *slog.Logger, d *dbg.Debug) *httpAAAClient {
+func newHTTPAAAClient(aaaGatewayURL, podID, version string, cfg config.InternalCommConfig, snssaiCfg *config.SnssaiRoutingConfig, logger *slog.Logger, d *dbg.Debug) *httpAAAClient {
 	native := httpclient.NewNativeAAAClient(aaaGatewayURL, cfg.Native, logger)
 	return &httpAAAClient{
 		NativeAAAClient: native,
-		podID:           podID,
-		version:         version,
-		dbg:             d,
-		logger:          logger,
+		podID:          podID,
+		version:        version,
+		dbg:            d,
+		logger:         logger,
+		snssaiCfg:     snssaiCfg,
 	}
 }
 
@@ -43,21 +46,67 @@ func newHTTPAAAClientForTest(aaaGatewayURL, podID, version string, cfg config.In
 	native := httpclient.NewNativeAAAClient(aaaGatewayURL, cfg.Native, slog.Default())
 	return &httpAAAClient{
 		NativeAAAClient: native,
-		podID:           podID,
-		version:         version,
-		logger:          slog.Default(),
+		podID:          podID,
+		version:        version,
+		logger:         slog.Default(),
 	}
+}
+
+// resolveTransportType determines the AAA transport protocol based on S-NSSAI.
+// 3-level lookup: exact (sst+sd), sst-only (sst, sd=*), default (sst=*, sd=*).
+func (c *httpAAAClient) resolveTransportType(sst uint8, sd string) proto.TransportType {
+	if c.snssaiCfg == nil {
+		return proto.TransportRADIUS // Default to RADIUS if no config
+	}
+
+	// 3-level lookup
+	var entry *config.SnssaiRouteEntry
+
+	// 1. Exact match (sst, sd)
+	for _, e := range c.snssaiCfg.Exact {
+		if e.SST == sst && e.SD == sd {
+			entry = e
+			break
+		}
+	}
+
+	// 2. SST-only match
+	if entry == nil {
+		for _, e := range c.snssaiCfg.SST {
+			if e.SST == sst {
+				entry = e
+				break
+			}
+		}
+	}
+
+	// 3. Default fallback
+	if entry == nil && c.snssaiCfg.Default != nil {
+		entry = c.snssaiCfg.Default
+	}
+
+	if entry == nil {
+		return proto.TransportRADIUS
+	}
+
+	if entry.Protocol == "DIAMETER" {
+		return proto.TransportDIAMETER
+	}
+	return proto.TransportRADIUS
 }
 
 // SendEAP satisfies eap.AAARouter.
 // Spec: PHASE §1.1 pattern
 func (c *httpAAAClient) SendEAP(ctx context.Context, session *eap.Session, routing eap.RoutingContext, eapPayload []byte) ([]byte, error) {
+	sst, sd := session.DecodeSnssaiKey()
+	transportType := c.resolveTransportType(sst, sd)
+
 	req := &proto.AaaForwardRequest{
 		Version:       c.version,
 		SessionID:     fmt.Sprintf("nssAAF;%d;%s", time.Now().UnixNano(), session.AuthCtxID),
 		AuthCtxID:     session.AuthCtxID,
 		GPSI:          session.Gpsi,
-		TransportType: proto.TransportRADIUS, // Default to RADIUS; Biz Router determines actual type
+		TransportType: transportType,
 		Direction:     proto.DirectionClientInitiated,
 		Payload:       eapPayload,
 	}
@@ -65,6 +114,7 @@ func (c *httpAAAClient) SendEAP(ctx context.Context, session *eap.Session, routi
 	c.logger.Info("SENDEAP_calling_ForwardEAP",
 		"authCtxID", session.AuthCtxID,
 		"gpsi", session.Gpsi,
+		"transport", transportType,
 		"payloadLen", len(eapPayload))
 
 	// Spec: debug tracing verification spec §3, hop "biz" — emit http.request.out

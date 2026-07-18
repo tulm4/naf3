@@ -108,6 +108,33 @@ type BizConfig struct {
 	TLSKey        string     `yaml:"tlsKey"`
 	TLSCA         string     `yaml:"tlsCa"`
 	TLS           *TLSConfig `yaml:"tls,omitempty"`
+
+	// SnssaiConfig specifies the AAA protocol (RADIUS or DIAMETER) for each S-NSSAI.
+	// This enables per-slice protocol selection without redeployment.
+	// 3-level lookup: exact (sst+sd), sst-only (sst, sd=*), default (sst=*, sd=*).
+	// Spec: TS 29.561 §16 (RADIUS), §17 (Diameter)
+	Snssai SnssaiRoutingConfig `yaml:"snssai"`
+}
+
+// SnssaiRoutingConfig holds S-NSSAI to AAA protocol routing configuration.
+type SnssaiRoutingConfig struct {
+	// Default is the global fallback for any S-NSSAI not matched by exact or sst.
+	Default *SnssaiRouteEntry `yaml:"default,omitempty"`
+	// SST is a list of SST-only routes (sd is wildcarded).
+	SST []*SnssaiRouteEntry `yaml:"sst,omitempty"`
+	// Exact is a list of exact (sst, sd) routes.
+	Exact []*SnssaiRouteEntry `yaml:"exact,omitempty"`
+}
+
+// SnssaiRouteEntry defines routing for a specific S-NSSAI configuration.
+type SnssaiRouteEntry struct {
+	SST          uint8   `yaml:"sst"`           // Slice/Service Type (0-255)
+	SD           string  `yaml:"sd,omitempty"`  // Slice Differentiator (6 hex chars); omit for SST-only
+	Protocol     string  `yaml:"protocol"`      // "RADIUS" or "DIAMETER"
+	Host         string  `yaml:"host"`          // AAA Gateway host
+	Port         int     `yaml:"port"`          // AAA Gateway port
+	SharedSecret string  `yaml:"sharedSecret"`  // For RADIUS (used by AAA Gateway)
+	Timeout      *string `yaml:"timeout"`       // Optional, e.g. "10s"
 }
 
 // AAAgwConfig holds AAA Gateway configuration.
