@@ -238,8 +238,9 @@ func (h *Handler) CreateSliceAuthenticationContext(w http.ResponseWriter, r *htt
 		return
 	}
 
-	// Validate that eapIdRsp is valid base64-encoded data.
-	if _, err := base64.StdEncoding.DecodeString(*body.EapIdRsp); err != nil {
+	// Validate and decode eapIdRsp (base64-encoded).
+	eapPayload, err := base64.StdEncoding.DecodeString(*body.EapIdRsp)
+	if err != nil {
 		common.WriteProblem(w, common.ValidationProblem("eapIdRsp", "eapIdRsp must be valid base64-encoded data"))
 		return
 	}
@@ -267,7 +268,7 @@ func (h *Handler) CreateSliceAuthenticationContext(w http.ResponseWriter, r *htt
 		AmfInstance: amfInstance,
 		ReauthURI:   reauthURI,
 		RevocURI:    revocURI,
-		EapPayload:  []byte(*body.EapIdRsp),
+		EapPayload:  eapPayload,
 	}
 
 	// Convert API type to domain type before saving.
@@ -385,13 +386,16 @@ func (h *Handler) ConfirmSliceAuthentication(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Validate that eapMessage is valid base64-encoded data.
-	if _, err := base64.StdEncoding.DecodeString(*body.EapMessage); err != nil {
+	// Validate and decode eapMessage (base64-encoded).
+	var eapPayload []byte
+	eapPayload, err = base64.StdEncoding.DecodeString(*body.EapMessage)
+	if err != nil {
 		common.WriteProblem(w, common.ValidationProblem("eapMessage", "eapMessage must be valid base64-encoded data"))
 		return
 	}
 
-	domSession, err := h.store.Load(r.Context(), authCtxId)
+	var domSession *storage.NssaaSession
+	domSession, err = h.store.Load(r.Context(), authCtxId)
 	if err != nil {
 		if errors.Is(err, storage.ErrSessionNotFound) {
 			common.WriteProblem(w, common.NotFoundProblem(
@@ -416,8 +420,6 @@ func (h *Handler) ConfirmSliceAuthentication(w http.ResponseWriter, r *http.Requ
 			"S-NSSAI does not match the original session"))
 		return
 	}
-
-	eapPayload := []byte(*body.EapMessage)
 
 	// Phase 2: forward to AAA-S and get next EAP challenge.
 	// Build the EAP session for the AAA call.
