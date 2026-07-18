@@ -400,7 +400,7 @@ func (df *diamForwarder) buildDERMessage(conn diam.Conn, hopByHop uint32, sessio
 // Forward encodes raw EAP payload into a DER message, sends it to AAA-S,
 // and waits for the DEA response.
 // Spec: RFC 4072 (Diameter EAP), RFC 6733 §8.8, TS 29.561 §17
-func (df *diamForwarder) Forward(ctx context.Context, eapPayload []byte, sessionID string, sst uint8, sd string) ([]byte, error) {
+func (df *diamForwarder) Forward(ctx context.Context, eapPayload []byte, sessionID string, sst uint8, sd string, gpsi string) ([]byte, error) {
 	conn, err := df.getConn()
 	if err != nil {
 		return nil, fmt.Errorf("diameter_forward: no connection: %w", err)
@@ -478,6 +478,24 @@ func (df *diamForwarder) Forward(ctx context.Context, eapPayload []byte, session
 		if resp == nil {
 			return nil, fmt.Errorf("diameter_forward: connection lost")
 		}
+
+		// Emit DEA received event for per-UE debug tracing.
+		// Spec: debug tracing verification spec §3, hop "aaa-gw" —
+		// emit "aaa.diameter.recv" so an operator can see the response
+		// before it is processed by the EAP engine.
+		df.debug.Emit(ctx, debug.Event{
+			Op:     "aaa.diameter.recv",
+			Kind:   debug.KindProtocol,
+			AuthID: sessionID,
+			GPSI:   gpsi,
+			Detail: map[string]any{
+				"command_code": 257, // DEA (Diameter-EAP-Answer) per RFC 4072
+				"transport":    "DIAMETER",
+				"message_type": "DEA",
+			},
+			Status: "ok",
+		})
+
 		data, err := resp.Serialize()
 		if err != nil {
 			return nil, fmt.Errorf("diameter_forward: failed to serialize DEA: %w", err)

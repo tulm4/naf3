@@ -307,7 +307,7 @@ func (g *Gateway) ForwardEAP(ctx context.Context, req *proto.AaaForwardRequest) 
 	case proto.TransportRADIUS:
 		response, err = g.radiusForwarder.Forward(ctx, req.Payload, req.SessionID, req.Sst, req.Sd, req.GPSI)
 	case proto.TransportDIAMETER:
-		response, err = g.diamForwarder.Forward(ctx, req.Payload, req.SessionID, req.Sst, req.Sd)
+		response, err = g.diamForwarder.Forward(ctx, req.Payload, req.SessionID, req.Sst, req.Sd, req.GPSI)
 	default:
 		return nil, fmt.Errorf("aaa-gateway: unknown transport type: %s", req.TransportType)
 	}
