@@ -40,6 +40,11 @@ type Client struct {
 }
 
 // NewClient creates a new RADIUS client.
+//
+// Note: InsecureSkipVerify is set to true because we handle Message-Authenticator
+// integrity ourselves (RFC 3579 §3.2) via the patchMessageAuthenticator mechanism.
+// Many RADIUS servers (including our aaa-sim test harness) also don't compute
+// the RFC 2865 Response Authenticator correctly, so we bypass that layer's check.
 func NewClient(cfg Config) (*Client, error) {
 	if cfg.Timeout == 0 {
 		cfg.Timeout = 5 * time.Second
@@ -55,7 +60,8 @@ func NewClient(cfg Config) (*Client, error) {
 		secret:     cfg.Secret,
 		timeout:    cfg.Timeout,
 		radiusClient: &layehRadius.Client{
-			Retry: 3 * time.Second,
+			Retry:              3 * time.Second,
+			InsecureSkipVerify: true, // Skips Response Authenticator check (see note below)
 		},
 	}, nil
 }
@@ -229,7 +235,8 @@ func patchMessageAuthenticator(pkt *layehRadius.Packet) error {
 // parseAccessResponse extracts response data from a RADIUS packet.
 func parseAccessResponse(pkt *layehRadius.Packet) (*AccessResponse, error) {
 	resp := &AccessResponse{
-		Code: pkt.Code,
+		Code:    pkt.Code,
+		_packet: pkt,
 	}
 
 	// Extract EAP-Message

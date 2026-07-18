@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/operator/nssAAF/internal/radius"
@@ -67,7 +68,10 @@ type ClientConfig struct {
 func NewClient(cfg ClientConfig) (radius.ClientInterface, Backend, error) {
 	switch getBackend() {
 	case BackendLayeh:
-		addr := fmt.Sprintf("%s:%d", cfg.ServerAddress, cfg.ServerPort)
+		addr := cfg.ServerAddress
+		if !strings.Contains(addr, ":") {
+			addr = fmt.Sprintf("%s:%d", addr, cfg.ServerPort)
+		}
 		l, err := layeh.NewClient(layeh.Config{
 			ServerAddr: addr,
 			Secret:     []byte(cfg.SharedSecret),
