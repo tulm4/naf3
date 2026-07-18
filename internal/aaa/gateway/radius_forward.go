@@ -11,6 +11,7 @@ import (
 
 	"github.com/operator/nssAAF/internal/debug"
 	"github.com/operator/nssAAF/internal/radius"
+	"github.com/operator/nssAAF/internal/radiusfactory"
 )
 
 // RadiusForwarderConfig holds configuration for the RADIUS forwarder.
@@ -24,10 +25,10 @@ type RadiusForwarderConfig struct {
 }
 
 // radiusForwarder manages a RADIUS client for the AAA Gateway.
-// It handles EAP forwarding to AAA-S via RADIUS Access-Request/Accept/Reject/Challen
+// It handles EAP forwarding to AAA-S via RADIUS Access-Request/Accept/Reject/Challenge.
 // Spec: RFC 2865, RFC 3579, TS 29.561 Ch.16
 type radiusForwarder struct {
-	client *radius.Client
+	client radius.ClientInterface
 	config RadiusForwarderConfig
 	logger *slog.Logger
 	debug  *debug.Debug // optional; nil-safe — see internal/debug hooks
@@ -38,10 +39,17 @@ func (rf *radiusForwarder) Config() RadiusForwarderConfig {
 	return rf.config
 }
 
-// newRadiusForwarder creates a RADIUS forwarder using the existing radius.Client.
+// newRadiusForwarder creates a RADIUS forwarder using the factory.
+// The backend is selected by the RADIUS_BACKEND environment variable:
+//   - RADIUS_BACKEND=layeh  → uses layeh.com/radius backend
+//   - RADIUS_BACKEND=legacy → uses legacy custom codec (default)
 // The *debug.Debug parameter is nil-safe: Emit/Wrap* short-circuit when nil or
 // disabled (see internal/debug/hooks.go).
 func newRadiusForwarder(cfg RadiusForwarderConfig, logger *slog.Logger, d *debug.Debug) *radiusForwarder {
+	// Nil-safe logger — use default if none provided.
+	if logger == nil {
+		logger = slog.Default()
+	}
 	r := &radiusForwarder{
 		config: cfg,
 		logger: logger,
@@ -51,19 +59,30 @@ func newRadiusForwarder(cfg RadiusForwarderConfig, logger *slog.Logger, d *debug
 		return r
 	}
 
-	client, err := radius.NewRadiusClient(radius.Config{
-		ServerAddress:  cfg.ServerAddress,
-		ServerPort:     cfg.ServerPort,
-		SharedSecret:   cfg.SharedSecret,
-		Timeout:        cfg.Timeout,
-		MaxRetries:     cfg.MaxRetries,
-		ResponseWindow: cfg.ResponseWindow,
-		Transport:      "UDP",
-	}, logger)
+	factoryCfg := factory.ClientConfig{
+		ServerAddress: cfg.ServerAddress,
+		ServerPort:    cfg.ServerPort,
+		SharedSecret:  cfg.SharedSecret,
+		Timeout:       cfg.Timeout,
+		MaxRetries:    cfg.MaxRetries,
+		Logger:        logger,
+	}
+
+	client, backend, err := factory.NewClient(factoryCfg)
 	if err != nil {
-		logger.Error("radius_forward: failed to create client", "error", err, "server", cfg.ServerAddress)
+		logger.Error("radius_forward: failed to create client",
+			"error", err,
+			"server", cfg.ServerAddress,
+			"backend", backend,
+		)
 		return r
 	}
+
+	logger.Info("radius_forward: client initialized",
+		"server", cfg.ServerAddress,
+		"backend", backend,
+	)
+
 	r.client = client
 	return r
 }

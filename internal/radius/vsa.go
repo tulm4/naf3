@@ -128,9 +128,17 @@ func DecodeSnssaiVSA(data []byte) (sst uint8, sd string, err error) {
 }
 
 // Make3GPPSNSSAIAttribute creates a 3GPP-S-NSSAI VSA attribute.
+// If sd is non-empty, it is encoded as the 3-byte Slice Differentiator.
+// If sd is empty or invalid, SD is set to zeros (SST-only form).
 func Make3GPPSNSSAIAttribute(sst uint8, sd string) Attribute {
 	vsaData := EncodeSnssaiVSA(sst, sd)
 	return EncodeVSA(VendorID3GPP, VendorTypeSNSSAI, vsaData)
+}
+
+// Make3GPPSNSSAIAttributeWithSD is an alias for Make3GPPSNSSAIAttribute.
+// The sd parameter is always encoded; empty sd results in zero SD bytes.
+func Make3GPPSNSSAIAttributeWithSD(sst uint8, sd string) Attribute {
+	return Make3GPPSNSSAIAttribute(sst, sd)
 }
 
 // Is3GPPSNSSAI checks if the VSA is a 3GPP-S-NSSAI attribute.

@@ -1,4 +1,4 @@
-// Package layeh provides a RADIUS client built on top of layeh.com/radius.
+// Package layeh provides a RADIUS client built on top of layeh.com/layehRadius.
 //
 // Spec: 3GPP TS 29.561 §16, RFC 2865, RFC 3579.
 package layeh
@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/operator/nssAAF/internal/radius/layeh/gen"
-	"layeh.com/radius"
+	layehRadius "layeh.com/radius"
 )
 
 // ErrMAUnset is returned when Message-Authenticator could not be computed.
@@ -31,12 +31,12 @@ type Config struct {
 	Timeout time.Duration
 }
 
-// Client is a RADIUS client using layeh.com/radius.
+// Client is a RADIUS client using layeh.com/layehRadius.
 type Client struct {
 	serverAddr   *net.UDPAddr
 	secret       []byte
 	timeout      time.Duration
-	radiusClient *radius.Client
+	radiusClient *layehRadius.Client
 }
 
 // NewClient creates a new RADIUS client.
@@ -54,7 +54,7 @@ func NewClient(cfg Config) (*Client, error) {
 		serverAddr: addr,
 		secret:     cfg.Secret,
 		timeout:    cfg.Timeout,
-		radiusClient: &radius.Client{
+		radiusClient: &layehRadius.Client{
 			Retry: 3 * time.Second,
 		},
 	}, nil
@@ -84,7 +84,7 @@ type AccessRequest struct {
 // AccessResponse represents the server response.
 type AccessResponse struct {
 	// Code is the RADIUS response code.
-	Code radius.Code
+	Code layehRadius.Code
 
 	// EAPMessage is the EAP payload from the response (if any).
 	EAPMessage []byte
@@ -97,12 +97,20 @@ type AccessResponse struct {
 
 	// Message is the Reply-Message from the response (if any).
 	Message string
+
+	// _packet is the raw layeh packet for re-encoding to legacy []byte format.
+	_packet *layehRadius.Packet
+}
+
+// Packet returns the underlying layeh packet for re-encoding to legacy format.
+func (r *AccessResponse) Packet() *layehRadius.Packet {
+	return r._packet
 }
 
 // AccessRequest sends an Access-Request and returns the response.
 func (c *Client) AccessRequest(ctx context.Context, req *AccessRequest) (*AccessResponse, error) {
 	// Create packet
-	pkt := radius.New(radius.CodeAccessRequest, c.secret)
+	pkt := layehRadius.New(layehRadius.CodeAccessRequest, c.secret)
 
 	// Add User-Name
 	if err := gen.UserName_AddString(pkt, req.UserName); err != nil {
@@ -171,7 +179,7 @@ func (c *Client) AccessRequest(ctx context.Context, req *AccessRequest) (*Access
 // encoded bytes (with the MA value zeroed), and stores the HMAC back into the
 // in-memory packet. Subsequent calls to pkt.Encode() will emit the patched
 // value because layeh's Encode() does not modify the MA attribute.
-func patchMessageAuthenticator(pkt *radius.Packet) error {
+func patchMessageAuthenticator(pkt *layehRadius.Packet) error {
 	attr, ok := pkt.Attributes.Lookup(gen.MessageAuthenticator_Type)
 	if !ok {
 		return ErrMAUnset
@@ -185,7 +193,7 @@ func patchMessageAuthenticator(pkt *radius.Packet) error {
 	}
 
 	// Find the MA attribute in the wire bytes and zero its value.
-	// gen.MessageAuthenticator_Type is radius.Type (int) — compare as an integer
+	// gen.MessageAuthenticator_Type is layehRadius.Type (int) — compare as an integer
 	// constant because wire bytes are []byte (uint8).
 	maOffset := -1
 	for i := 20; i+1 < len(wire); {
@@ -219,7 +227,7 @@ func patchMessageAuthenticator(pkt *radius.Packet) error {
 }
 
 // parseAccessResponse extracts response data from a RADIUS packet.
-func parseAccessResponse(pkt *radius.Packet) (*AccessResponse, error) {
+func parseAccessResponse(pkt *layehRadius.Packet) (*AccessResponse, error) {
 	resp := &AccessResponse{
 		Code: pkt.Code,
 	}
