@@ -32,7 +32,7 @@ func TestE2E_Revocation_HappyPath(t *testing.T) {
 	body := map[string]interface{}{
 		"gpsi":     "520804600000001",
 		"snssai":   map[string]interface{}{"sst": 1, "sd": "000001"},
-		"eapIdRsp": "dGVzdA==",
+		"eapIdRsp": "AgAACwF0ZXN0ZXI=",
 	}
 	payloadBytes, _ := json.Marshal(body)
 	req, _ := http.NewRequest(http.MethodPost, h.HTTPGWURL()+"/nnssaaf-nssaa/v1/slice-authentications", strings.NewReader(string(payloadBytes)))

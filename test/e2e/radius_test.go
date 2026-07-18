@@ -39,8 +39,10 @@ const (
 // User-Name=testuser, EAP-Message=EAP-Response/Identity, and a Message-Authenticator
 // (RFC 3579) computed over (header || attrs) using secret.
 func buildRadiusAccessRequest(secret string) []byte {
-	// EAP-Response/Identity: Code=2, Id=0, Length=5, Type=1
-	eap := []byte{0x02, 0x00, 0x00, 0x05, 0x01}
+	// EAP-Response/Identity (RFC 3748 §4.1):
+	//   Code=2 (Response), Id=0, Length=11 (4 header + 1 type + 6 "tester")
+	//   Type=1 (Identity), Identity="tester"
+	eap := []byte{0x02, 0x00, 0x00, 0x0b, 0x01, 't', 'e', 's', 't', 'e', 'r'}
 
 	var attrs bytes.Buffer
 	// User-Name = "testuser"

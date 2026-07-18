@@ -62,7 +62,7 @@ func TestDebugFullFlow_RADIUS_Forward(t *testing.T) {
 	// The HTTP Gateway is the public entry point (matches the harness.postNSSAA
 	// pattern used in n58_flow_test.go and others). HTTP Gateway then calls biz,
 	// which calls aaa-gw, which forwards to aaa-sim over RADIUS.
-	body := fmt.Sprintf(`{"gpsi":"%s","snssai":{"sst":1,"sd":"000001"},"eapIdRsp":"dGVzdA=="}`, gpsi)
+	body := fmt.Sprintf(`{"gpsi":"%s","snssai":{"sst":1,"sd":"000001"},"eapIdRsp":"AgAACwF0ZXN0ZXI="}`, gpsi)
 	postNSSAAAuth(t, body)
 
 	// Poll Redis with 100ms backoff up to 5s.
@@ -142,7 +142,7 @@ func TestDebugFullFlow_DIAMETER_Forward(t *testing.T) {
 	rdb := h.Redis()
 	require.NoError(t, rdb.Del(context.Background(), streamKey).Err())
 
-	body := fmt.Sprintf(`{"gpsi":"%s","snssai":{"sst":1,"sd":"000001"},"eapIdRsp":"dGVzdA=="}`, gpsi)
+	body := fmt.Sprintf(`{"gpsi":"%s","snssai":{"sst":1,"sd":"000001"},"eapIdRsp":"AgAACwF0ZXN0ZXI="}`, gpsi)
 	postNSSAAAuth(t, body)
 
 	required := []string{

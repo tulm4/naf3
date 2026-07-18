@@ -479,7 +479,7 @@ func (h *Harness) postNSSAA(t *testing.T, gpsi string, sst uint8, sd string) *ht
 	body := map[string]interface{}{
 		"gpsi":     gpsi,
 		"snssai":   map[string]interface{}{"sst": sst, "sd": sd},
-		"eapIdRsp": "dGVzdA==", // base64 "test"
+		"eapIdRsp": "AgAACwF0ZXN0ZXI=", // EAP-Response/Identity "tester"
 	}
 	payloadBytes, _ := json.Marshal(body)
 	req, err := http.NewRequest(http.MethodPost, h.HTTPGWURL()+"/nnssaaf-nssaa/v1/slice-authentications", strings.NewReader(string(payloadBytes)))

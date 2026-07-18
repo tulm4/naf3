@@ -186,7 +186,7 @@ func TestE2E_01_NSSAA_CreateSession_viaHTTPGW(t *testing.T) {
 	body := map[string]interface{}{
 		"gpsi":     "520804600000001",
 		"snssai":   map[string]interface{}{"sst": 1, "sd": "000001"},
-		"eapIdRsp": "dGVzdA==",
+		"eapIdRsp": "AgAACwF0ZXN0ZXI=",
 	}
 
 	resp := doRequest(t, http.MethodPost, "https://localhost:8443/nnssaaf-nssaa/v1/slice-authentications", body)
@@ -302,7 +302,7 @@ func TestE2E_03_NSSAA_InvalidGPSI(t *testing.T) {
 	body := map[string]interface{}{
 		"gpsi":     "",
 		"snssai":   map[string]interface{}{"sst": 1},
-		"eapIdRsp": "dGVzdA==",
+		"eapIdRsp": "AgAACwF0ZXN0ZXI=",
 	}
 
 	resp := doRequest(t, http.MethodPost, "http://localhost:8080/nnssaaf-nssaa/v1/slice-authentications", body)
@@ -338,7 +338,7 @@ func TestE2E_04_NSSAA_InvalidSnssai(t *testing.T) {
 			body := map[string]interface{}{
 				"gpsi":     "520804600000003",
 				"snssai":   tc.snssai,
-				"eapIdRsp": "dGVzdA==",
+				"eapIdRsp": "AgAACwF0ZXN0ZXI=",
 			}
 			resp := doRequest(t, http.MethodPost, "http://localhost:8080/nnssaaf-nssaa/v1/slice-authentications", body)
 			if resp == nil {
@@ -365,7 +365,7 @@ func TestE2E_05_AIW_CreateSession(t *testing.T) {
 
 	body := map[string]interface{}{
 		"supi":     "imsi-208046000000001",
-		"eapIdRsp": "dGVzdA==",
+		"eapIdRsp": "AgAACwF0ZXN0ZXI=",
 	}
 
 	resp := doRequest(t, http.MethodPost, "http://localhost:8080/nnssaaf-aiw/v1/authentications", body)
@@ -404,7 +404,7 @@ func TestE2E_06_AIW_InvalidSupi(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			body := map[string]interface{}{
 				"supi":     tc.supi,
-				"eapIdRsp": "dGVzdA==",
+				"eapIdRsp": "AgAACwF0ZXN0ZXI=",
 			}
 			resp := doRequest(t, http.MethodPost, "http://localhost:8080/nnssaaf-aiw/v1/authentications", body)
 			if resp == nil {
@@ -489,7 +489,7 @@ func TestE2E_09_ConcurrentSessions(t *testing.T) {
 			payload := map[string]interface{}{
 				"gpsi":     gpsi,
 				"snssai":   map[string]interface{}{"sst": 1, "sd": "000001"},
-				"eapIdRsp": "dGVzdA==",
+				"eapIdRsp": "AgAACwF0ZXN0ZXI=",
 			}
 			payloadBytes, _ := json.Marshal(payload)
 			req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost,

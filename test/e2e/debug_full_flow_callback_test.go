@@ -51,7 +51,7 @@ func TestDebugFullFlow_AMFCallback(t *testing.T) {
 	require.NoError(t, rdb.Del(context.Background(), gpsiStream).Err())
 
 	// Seed a forward session.
-	body := fmt.Sprintf(`{"gpsi":"%s","snssai":{"sst":1,"sd":"000001"},"eapIdRsp":"dGVzdA=="}`, callbackGPSI)
+	body := fmt.Sprintf(`{"gpsi":"%s","snssai":{"sst":1,"sd":"000001"},"eapIdRsp":"AgAACwF0ZXN0ZXI="}`, callbackGPSI)
 	postNSSAAAuth(t, body)
 
 	// Verify session correlation entry was created with GPSI.

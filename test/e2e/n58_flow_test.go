@@ -33,7 +33,7 @@ func TestE2E_NSSAA_HappyPath(t *testing.T) {
 	body := map[string]interface{}{
 		"gpsi":     "520804600000001",
 		"snssai":   map[string]interface{}{"sst": 1, "sd": "000001"},
-		"eapIdRsp": "dGVzdA==", // base64 "test"
+		"eapIdRsp": "AgAACwF0ZXN0ZXI=", // EAP-Response/Identity "tester"
 	}
 
 	payloadBytes, _ := json.Marshal(body)
@@ -121,7 +121,7 @@ func TestE2E_NSSAA_AuthFailure(t *testing.T) {
 	body := map[string]interface{}{
 		"gpsi":     "520804600000001",
 		"snssai":   map[string]interface{}{"sst": 1, "sd": "000001"},
-		"eapIdRsp": "dGVzdA==",
+		"eapIdRsp": "AgAACwF0ZXN0ZXI=",
 	}
 	payloadBytes, _ := json.Marshal(body)
 	req, _ := http.NewRequest(http.MethodPost, h.HTTPGWURL()+"/nnssaaf-nssaa/v1/slice-authentications", strings.NewReader(string(payloadBytes)))
@@ -178,7 +178,7 @@ func TestE2E_NSSAA_AuthChallenge(t *testing.T) {
 	body := map[string]interface{}{
 		"gpsi":     "520804600000001",
 		"snssai":   map[string]interface{}{"sst": 1, "sd": "000001"},
-		"eapIdRsp": "dGVzdA==",
+		"eapIdRsp": "AgAACwF0ZXN0ZXI=",
 	}
 	payloadBytes, _ := json.Marshal(body)
 	req, _ := http.NewRequest(http.MethodPost, h.HTTPGWURL()+"/nnssaaf-nssaa/v1/slice-authentications", strings.NewReader(string(payloadBytes)))
@@ -244,7 +244,7 @@ func TestE2E_NSSAA_InvalidGPSI(t *testing.T) {
 	body := map[string]interface{}{
 		"gpsi":     "",
 		"snssai":   map[string]interface{}{"sst": 1},
-		"eapIdRsp": "dGVzdA==",
+		"eapIdRsp": "AgAACwF0ZXN0ZXI=",
 	}
 	payloadBytes, _ := json.Marshal(body)
 	req, _ := http.NewRequest(http.MethodPost, h.HTTPGWURL()+"/nnssaaf-nssaa/v1/slice-authentications", strings.NewReader(string(payloadBytes)))
@@ -287,7 +287,7 @@ func TestE2E_NSSAA_InvalidSnssai(t *testing.T) {
 			body := map[string]interface{}{
 				"gpsi":     "520804600000001",
 				"snssai":   tc.snssai,
-				"eapIdRsp": "dGVzdA==",
+				"eapIdRsp": "AgAACwF0ZXN0ZXI=",
 			}
 			payloadBytes, _ := json.Marshal(body)
 			req, _ := http.NewRequest(http.MethodPost, h.HTTPGWURL()+"/nnssaaf-nssaa/v1/slice-authentications", strings.NewReader(string(payloadBytes)))
@@ -352,7 +352,7 @@ func TestE2E_NSSAA_AaaServerDown(t *testing.T) {
 	body := map[string]interface{}{
 		"gpsi":     "invalid-aaa-route-test",
 		"snssai":   map[string]interface{}{"sst": 1, "sd": "000001"},
-		"eapIdRsp": "dGVzdA==",
+		"eapIdRsp": "AgAACwF0ZXN0ZXI=",
 	}
 	payloadBytes, _ := json.Marshal(body)
 	req2, _ := http.NewRequest(http.MethodPost, h.HTTPGWURL()+"/nnssaaf-nssaa/v1/slice-authentications", strings.NewReader(string(payloadBytes)))

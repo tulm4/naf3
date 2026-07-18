@@ -32,7 +32,7 @@ func TestE2E_AIW_BasicFlow(t *testing.T) {
 	// 1. Create authentication context via HTTP GW (N60 API).
 	body := map[string]interface{}{
 		"supi":     "imsi-208046000000001",
-		"eapIdRsp": "dGVzdA==",
+		"eapIdRsp": "AgAACwF0ZXN0ZXI=",
 	}
 	payloadBytes, _ := json.Marshal(body)
 	req, _ := http.NewRequest(http.MethodPost, h.HTTPGWURL()+"/nnssaaf-aiw/v1/authentications", strings.NewReader(string(payloadBytes)))
@@ -134,7 +134,7 @@ func TestE2E_AIW_EAPFailure(t *testing.T) {
 	// 1. Create session.
 	body := map[string]interface{}{
 		"supi":     "imsi-208046000000001",
-		"eapIdRsp": "dGVzdA==",
+		"eapIdRsp": "AgAACwF0ZXN0ZXI=",
 	}
 	payloadBytes, _ := json.Marshal(body)
 	req, _ := http.NewRequest(http.MethodPost, h.HTTPGWURL()+"/nnssaaf-aiw/v1/authentications", strings.NewReader(string(payloadBytes)))
@@ -206,7 +206,7 @@ func TestE2E_AIW_InvalidSupi(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			body := map[string]interface{}{
 				"supi":     tc.supi,
-				"eapIdRsp": "dGVzdA==",
+				"eapIdRsp": "AgAACwF0ZXN0ZXI=",
 			}
 			payloadBytes, _ := json.Marshal(body)
 			req, _ := http.NewRequest(http.MethodPost, h.HTTPGWURL()+"/nnssaaf-aiw/v1/authentications", strings.NewReader(string(payloadBytes)))
@@ -260,7 +260,7 @@ func TestE2E_AIW_TTLS(t *testing.T) {
 	// Use ttlsInnerMethodContainer field.
 	body := map[string]interface{}{
 		"supi":                     "imsi-208046000000001",
-		"eapIdRsp":                 "dGVzdA==",
+		"eapIdRsp":                 "AgAACwF0ZXN0ZXI=",
 		"ttlsInnerMethodContainer": "aGVsbG8=", // base64 "hello" (PAP username/password placeholder)
 	}
 	payloadBytes, _ := json.Marshal(body)
