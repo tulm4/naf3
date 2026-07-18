@@ -14,6 +14,12 @@ SST="${2:-1}"
 SD="${3:-000001}"
 BASE_URL="${NSSAAF_URL:-https://localhost:8443}"
 
+# EAP-Response/Identity (RFC 3748):
+#   Code=2 (Response), Id=0, Length=9 (4 header + 1 type + 4 "test"), Type=1 (Identity), Identity="test"
+# Hex: 02 00 00 09 01 74 65 73 74
+# base64: AgAACQF0ZXN0
+EAP_IDENTITY_RESPONSE="AgAACQF0ZXN0"
+
 echo "=== NSSAA Full Flow Trigger ==="
 echo "GPSI: $GPSI"
 echo "Snssai: sst=$SST, sd=$SD"
@@ -25,7 +31,7 @@ echo ">>> Step 1: Create (POST /slice-authentications)"
 RESPONSE=$(curl -sk -X POST "$BASE_URL/nnssaaf-nssaa/v1/slice-authentications" \
   -H "Content-Type: application/json" \
   -H "X-Request-ID: test-full-flow-$(date +%s)" \
-  -d "{\"gpsi\":\"$GPSI\",\"snssai\":{\"sst\":$SST,\"sd\":\"$SD\"},\"eapIdRsp\":\"dGVzdA==\"}")
+  -d "{\"gpsi\":\"$GPSI\",\"snssai\":{\"sst\":$SST,\"sd\":\"$SD\"},\"eapIdRsp\":\"$EAP_IDENTITY_RESPONSE\"}")
 
 echo "Create Response: $RESPONSE"
 
