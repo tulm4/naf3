@@ -5,323 +5,129 @@ package radius
 import (
 	"crypto/hmac"
 	"crypto/md5"
-	"crypto/subtle"
-	"encoding/binary"
-	"errors"
-	"fmt"
-	"log/slog"
 )
 
-// ErrInvalidMessageAuth is returned when Message-Authenticator verification fails.
-var ErrInvalidMessageAuth = errors.New("radius: invalid Message-Authenticator")
-
-// ErrInvalidResponseAuth is returned when Response Authenticator validation fails.
-var ErrInvalidResponseAuth = errors.New("radius: invalid Response Authenticator")
-
-// MessageAuthenticatorSize is the length of the HMAC-MD5 output in bytes.
-const MessageAuthenticatorSize = 16
-
-// ComputeMessageAuthenticator computes the HMAC-MD5 Message-Authenticator for a RADIUS packet.
-// Spec: RFC 3579 §3.2
-//
-// The Message-Authenticator is computed as:
-//
-//	HMAC-MD5(Code + ID + Length + Request Authenticator + Attributes + Shared Secret)
-//
-// where:
-//   - Code, ID, Length, Request Authenticator are from the original Access-Request
-//   - Attributes do NOT include the Message-Authenticator attribute itself
-//   - Shared Secret is a shared secret between NSSAAF and AAA-S
-//
-// RFC 3579 §3.2:
-//
-//	The Message-Authenticator attribute is set to the HMAC-MD5 hash of the entire
-//	Access-Request packet, including the User-Password attribute (encrypted),
-//	but with the Message-Authenticator field set to 16 zero octets.
-func ComputeMessageAuthenticator(packet []byte, secret string) []byte {
-	// Create a mutable copy of the packet.
-	p := make([]byte, len(packet))
-	copy(p, packet)
-
-	// Zero out the Message-Authenticator attribute value.
-	// We need to find the Message-Authenticator attribute and zero its value.
-	p = ZeroMessageAuthenticator(p)
-
-	// Append the shared secret.
-	// The HMAC is computed over: packet + secret
-	auth := hmac.New(md5.New, []byte(secret))
-	auth.Write(p)
-	return auth.Sum(nil)
-}
-
-// VerifyMessageAuthenticator verifies a Message-Authenticator in a RADIUS packet.
-// Spec: RFC 3579 §3.2
-//
-// For Access-Accept/Access-Reject/Access-Challenge responses:
-//
-//	Expected = HMAC-MD5(ResponseCode + ResponseID + ResponseLength + ResponseVector + Attributes + Secret)
-//
-// where ResponseVector is the Request Authenticator from the original Access-Request
-// (for Access-Challenge) or a specially computed one (for Access-Accept/Reject).
-func VerifyMessageAuthenticator(packet []byte, secret string) bool {
-	// Find Message-Authenticator in the packet.
-	offset := FindMessageAuthenticator(packet)
-	if offset < 0 {
-		return false
-	}
-
-	// Guard against truncated packets: MA attribute must have at least 18 bytes (type+len+16-byte value).
-	if offset+2+MessageAuthenticatorSize > len(packet) {
-		return false
-	}
-
-	// Extract the received MA (skip Type and Length bytes).
-	received := packet[offset+2 : offset+2+MessageAuthenticatorSize]
-	expected := ComputeMessageAuthenticator(packet, secret)
-
-	// Constant-time comparison.
-	return hmac.Equal(received, expected)
-}
-
-// ZeroMessageAuthenticator finds the Message-Authenticator attribute in a RADIUS packet
-// and zeros its value (16 bytes after the Type and Length).
-func ZeroMessageAuthenticator(packet []byte) []byte {
-	offset := FindMessageAuthenticator(packet)
-	if offset < 0 {
-		return packet
-	}
-
-	// Zero out the 16-byte value field.
-	for i := 0; i < 16; i++ {
-		packet[offset+2+i] = 0
-	}
-	return packet
-}
-
-// FindMessageAuthenticator returns the byte offset of the Message-Authenticator attribute
-// value within the packet, or -1 if not found.
+// FindMessageAuthenticator finds the offset of the Message-Authenticator attribute in a packet.
+// Returns -1 if not found.
 func FindMessageAuthenticator(packet []byte) int {
-	if len(packet) < 20 {
-		return -1
-	}
-
-	attrOffset := 20 // Start of attributes
-	for attrOffset+1 < len(packet) {
-		attrType := packet[attrOffset]
-		attrLen := int(packet[attrOffset+1])
-
-		if attrType == AttrMessageAuthenticator && attrLen == 18 {
-			return attrOffset
+	offset := 20 // Skip RADIUS header
+	for offset+1 < len(packet) {
+		attrType := packet[offset]
+		attrLen := int(packet[offset+1])
+		if attrLen < 2 {
+			break
 		}
-
-		attrOffset += attrLen
+		if attrType == AttrMessageAuthenticator {
+			return offset
+		}
+		offset += attrLen
 	}
-
 	return -1
 }
 
-// ComputeResponseAuthenticator computes the Response Authenticator for an Access-Accept/Reject.
-// Spec: RFC 2865 §3.3
-//
-// ResponseAuth = MD5(Code+ID+Length+RequestAuth+Attributes+Secret)
-//
-// For Access-Accept/Reject responses, the Response Authenticator is:
-//
-//	MD5(Code + ID + Length + Request Authenticator + Attributes + Secret)
-//
-// For Access-Challenge, the Request Authenticator from the original request is used.
-func ComputeResponseAuthenticator(code, id uint8, length uint16, requestAuth [16]byte, attrs []byte, secret string) [16]byte {
-	// Build: Code(1) + ID(1) + Length(2) + RequestAuth(16) + Attributes
-	buf := make([]byte, 0, 20+len(attrs))
-	buf = append(buf, code, id)
-	buf = append(buf, byte(length>>8), byte(length&0xFF))
-	buf = append(buf, requestAuth[:]...)
-	buf = append(buf, attrs...)
+// HasMessageAuthenticator checks if a packet contains a Message-Authenticator attribute.
+func HasMessageAuthenticator(packet []byte) bool {
+	return FindMessageAuthenticator(packet) >= 0
+}
 
-	// MD5 with secret appended.
-	h := md5.New()
-	h.Write(buf)
-	h.Write([]byte(secret))
-	var result [16]byte
-	copy(result[:], h.Sum(nil))
+// ZeroMessageAuthenticator sets the Message-Authenticator value to zeros without changing the packet length.
+func ZeroMessageAuthenticator(packet []byte) []byte {
+	result := make([]byte, len(packet))
+	copy(result, packet)
+	offset := FindMessageAuthenticator(packet)
+	if offset < 0 {
+		return result
+	}
+	// Zero out the MA value bytes (type+length at offset, value starts at offset+2)
+	for i := offset + 2; i < offset+18 && i < len(result); i++ {
+		result[i] = 0
+	}
 	return result
 }
 
-// VerifyResponseAuthenticator validates the Response Authenticator field in Access-Accept/Reject/Challenge packets.
-func VerifyResponseAuthenticator(response []byte, requestAuth [16]byte, secret string) bool {
-	if len(response) < 20 {
+// ComputeMessageAuthenticator computes the Message-Authenticator value for a packet.
+// The packet must include the MA attribute with a zeroed-out value field (16 bytes).
+// RFC 3579 §3.2: MA = HMAC-MD5(packet, secret)
+func ComputeMessageAuthenticator(packet []byte, secret string) []byte {
+	// Zero the MA field first
+	zeroed := ZeroMessageAuthenticator(packet)
+	h := hmac.New(md5.New, []byte(secret))
+	h.Write(zeroed)
+	return h.Sum(nil)
+}
+
+// VerifyMessageAuthenticator verifies the Message-Authenticator in a packet.
+// It uses the Request Authenticator from the packet as-is (doesn't modify the packet).
+func VerifyMessageAuthenticator(packet []byte, secret string) bool {
+	offset := FindMessageAuthenticator(packet)
+	if offset < 0 {
 		return false
 	}
-	return VerifyResponseAuthenticatorWithAttrs(response, requestAuth, response[20:], secret)
-}
-
-// Debug logger for troubleshooting Response Authenticator issues.
-// Set to slog.Default() or pass a custom logger to enable debug output.
-var debugLogger *slog.Logger
-
-// SetDebugLogger configures debug logging for RADIUS message auth.
-func SetDebugLogger(logger *slog.Logger) {
-	debugLogger = logger
-}
-
-// debugLog writes to the debugLogger if it's set.
-func debugLog(msg string, args ...any) {
-	if debugLogger != nil {
-		debugLogger.Info(msg, args...)
-	}
-}
-
-// VerifyResponseAuthenticatorWithAttrs validates the Response Authenticator using explicit request attributes.
-// Spec: RFC 2865 §3
-//
-// The Response Authenticator is computed as:
-//
-//	MD5(Code + ID + Length + Request Authenticator + Original Request Attributes + Secret)
-//
-// This differs from Message-Authenticator which uses HMAC-MD5.
-func VerifyResponseAuthenticatorWithAttrs(response []byte, requestAuth [16]byte, requestAttrs []byte, secret string) bool {
-	if debugLogger != nil {
-		debugLog("VERIFY_RESP_AUTH_DEBUG",
-			"response_len", len(response),
-			"request_attrs_len", len(requestAttrs),
-			"secret_len", len(secret),
-			"secret_val", secret,
-		)
-	}
-
-	if len(response) < 20 {
+	// Must have at least type(1) + length(1) + value(16) = 18 bytes from offset
+	if offset+18 > len(packet) {
 		return false
 	}
-
-	respAuth := response[4:20]
-	code := response[0]
-	id := response[1]
-	length := binary.BigEndian.Uint16(response[2:4])
-
-	// Build: Code(1) + ID(1) + Length(2) + RequestAuth(16) + Attributes
-	h := md5.New()
-	h.Write([]byte{code, id})
-	h.Write(response[2:4])
-	h.Write(requestAuth[:])
-	h.Write(requestAttrs)
-	h.Write([]byte(secret))
-
-	computed := h.Sum(nil)
-
-	cmpResult := subtle.ConstantTimeCompare(respAuth, computed)
-
-	// Debug: log mismatch details for troubleshooting
-	debugLog("VERIFY_RESP_AUTH_RESULT",
-		"code", code,
-		"id", id,
-		"length", length,
-		"req_attrs_len", len(requestAttrs),
-		"req_auth", fmt.Sprintf("%x", requestAuth),
-		"req_attrs_hex", fmt.Sprintf("%x", requestAttrs),
-		"secret", secret,
-		"cmp_result", cmpResult,
-		"resp_auth", fmt.Sprintf("%x", respAuth),
-		"computed", fmt.Sprintf("%x", computed),
-	)
-
-	return cmpResult == 1
+	// Extract the stored MA value
+	storedMA := packet[offset+2 : offset+18]
+	// Compute expected MA using a copy with MA value zeroed
+	zeroed := make([]byte, len(packet))
+	copy(zeroed, packet)
+	// Zero out the MA value in the zeroed copy
+	for i := 0; i < 16; i++ {
+		zeroed[offset+2+i] = 0
+	}
+	// Compute expected MA - the packet's Request Authenticator is preserved as-is
+	h := hmac.New(md5.New, []byte(secret))
+	h.Write(zeroed)
+	expectedMA := h.Sum(nil)
+	// Compare
+	for i := 0; i < 16; i++ {
+		if storedMA[i] != expectedMA[i] {
+			return false
+		}
+	}
+	return true
 }
 
-// AddMessageAuthenticator adds a Message-Authenticator attribute to a RADIUS packet.
-// Returns the modified packet.
+// AddMessageAuthenticator adds or replaces the Message-Authenticator in a packet.
 func AddMessageAuthenticator(packet []byte, secret string) []byte {
-	// Find existing MA and remove it first (to avoid duplicate).
-	packet = RemoveMessageAuthenticator(packet)
-
-	// Append MA attribute: Type(1) + Length(1) + Value(16) = 18 bytes.
-	maAttr := make([]byte, 18)
-	maAttr[0] = AttrMessageAuthenticator
-	maAttr[1] = 18
-	// Value (bytes 2-17) set to zero, will be filled by ComputeMessageAuthenticator.
-
-	// Append MA attribute to packet.
-	packet = append(packet, maAttr...)
-
-	// Update packet length.
-	newLen := uint16(len(packet))
-	binary.BigEndian.PutUint16(packet[2:4], newLen)
-
-	// Compute and set the actual MA.
-	ma := ComputeMessageAuthenticator(packet, secret)
-	copy(packet[len(packet)-16:], ma)
-
-	return packet
+	offset := FindMessageAuthenticator(packet)
+	if offset >= 0 {
+		// Replace existing MA - compute on a copy with MA zeroed
+		result := make([]byte, len(packet))
+		copy(result, packet)
+		// Zero out the existing MA value
+		for i := 0; i < 16; i++ {
+			result[offset+2+i] = 0
+		}
+		// Compute expected MA
+		h := hmac.New(md5.New, []byte(secret))
+		h.Write(result)
+		ma := h.Sum(nil)
+		copy(result[offset+2:offset+18], ma)
+		return result
+	}
+	// Append new MA attribute: type(1) + length(1) + value(16) = 18 bytes
+	newAttr := make([]byte, 18)
+	newAttr[0] = AttrMessageAuthenticator
+	newAttr[1] = 18
+	// Compute MA over packet WITHOUT the new attribute
+	h := hmac.New(md5.New, []byte(secret))
+	h.Write(packet)
+	ma := h.Sum(nil)
+	copy(newAttr[2:], ma)
+	return append(packet, newAttr...)
 }
 
 // RemoveMessageAuthenticator removes the Message-Authenticator attribute from a packet.
 func RemoveMessageAuthenticator(packet []byte) []byte {
-	if len(packet) < 20 {
+	offset := FindMessageAuthenticator(packet)
+	if offset < 0 {
 		return packet
 	}
-
-	result := packet[:20] // Header
-	attrOffset := 20
-
-	for attrOffset+1 < len(packet) {
-		attrType := packet[attrOffset]
-		attrLen := int(packet[attrOffset+1])
-
-		if attrType == AttrMessageAuthenticator && attrLen == 18 {
-			// Skip this attribute.
-			attrOffset += attrLen
-			continue
-		}
-
-		// Copy the attribute.
-		if attrOffset+attrLen <= len(packet) {
-			result = append(result, packet[attrOffset:attrOffset+attrLen]...)
-		}
-		attrOffset += attrLen
-	}
-
-	// Update length.
-	if len(result) >= 4 {
-		binary.BigEndian.PutUint16(result[2:4], uint16(len(result)))
-	}
-
+	attrLen := int(packet[offset+1])
+	result := make([]byte, len(packet)-attrLen)
+	copy(result[:offset], packet[:offset])
+	copy(result[offset:], packet[offset+attrLen:])
 	return result
-}
-
-// ValidateAccessChallenge validates an Access-Challenge packet.
-// Returns the State attribute if valid, or an error.
-func ValidateAccessChallenge(packet []byte, requestAuth [16]byte, secret string) ([]byte, error) {
-	if len(packet) < 20 {
-		return nil, fmt.Errorf("radius: packet too short")
-	}
-
-	code := packet[0]
-	if code != CodeAccessChallenge {
-		return nil, fmt.Errorf("radius: expected Access-Challenge (11), got %d", code)
-	}
-
-	// Verify Message-Authenticator if present.
-	if !VerifyMessageAuthenticator(packet, secret) {
-		return nil, ErrInvalidMessageAuth
-	}
-
-	// Extract State attribute.
-	state := GetAttributeBytes(packet, AttrState)
-	return state, nil
-}
-
-// GetAttributeBytes returns the raw bytes of the first attribute with the given type.
-func GetAttributeBytes(packet []byte, attrType uint8) []byte {
-	if len(packet) < 20 {
-		return nil
-	}
-
-	offset := 20
-	for offset+1 < len(packet) {
-		attrLen := int(packet[offset+1])
-		if packet[offset] == attrType && offset+attrLen <= len(packet) {
-			return packet[offset+2 : offset+attrLen]
-		}
-		offset += attrLen
-	}
-	return nil
 }

@@ -17,7 +17,6 @@ import (
 	"github.com/operator/nssAAF/internal/aaa/gateway"
 	"github.com/operator/nssAAF/internal/config"
 	"github.com/operator/nssAAF/internal/debug"
-	"github.com/operator/nssAAF/internal/radius"
 	"github.com/operator/nssAAF/internal/tracing"
 )
 
@@ -28,9 +27,6 @@ func main() {
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
-
-	// Enable RADIUS protocol debug logging for troubleshooting.
-	radius.SetDebugLogger(logger)
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {

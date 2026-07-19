@@ -120,7 +120,6 @@ services:
       REDIS_ADDR: "redis:6379"
       BIZ_URL: "http://172.0.3.16:8080"
       DIAMETER_TRANSPORT: "${DIAMETER_TRANSPORT:-tcp}"
-      RADIUS_BACKEND: "layeh"
     ports: ["9090:9090", "18121:1812/udp", "38681:3868"]
     networks:
       default:

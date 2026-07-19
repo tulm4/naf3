@@ -11,7 +11,8 @@ import (
 
 	"github.com/operator/nssAAF/internal/debug"
 	"github.com/operator/nssAAF/internal/radius"
-	"github.com/operator/nssAAF/internal/radiusfactory"
+	"github.com/operator/nssAAF/internal/radius/adapter"
+	"github.com/operator/nssAAF/internal/radius/layeh"
 )
 
 // RadiusForwarderConfig holds configuration for the RADIUS forwarder.
@@ -39,10 +40,7 @@ func (rf *radiusForwarder) Config() RadiusForwarderConfig {
 	return rf.config
 }
 
-// newRadiusForwarder creates a RADIUS forwarder using the factory.
-// The backend is selected by the RADIUS_BACKEND environment variable:
-//   - RADIUS_BACKEND=layeh  → uses layeh.com/radius backend
-//   - RADIUS_BACKEND=legacy → uses legacy custom codec (default)
+// newRadiusForwarder creates a RADIUS forwarder using the layeh backend.
 // The *debug.Debug parameter is nil-safe: Emit/Wrap* short-circuit when nil or
 // disabled (see internal/debug/hooks.go).
 func newRadiusForwarder(cfg RadiusForwarderConfig, logger *slog.Logger, d *debug.Debug) *radiusForwarder {
@@ -59,65 +57,85 @@ func newRadiusForwarder(cfg RadiusForwarderConfig, logger *slog.Logger, d *debug
 		return r
 	}
 
-	factoryCfg := factory.ClientConfig{
-		ServerAddress: cfg.ServerAddress,
-		ServerPort:    cfg.ServerPort,
-		SharedSecret:  cfg.SharedSecret,
-		Timeout:       cfg.Timeout,
-		MaxRetries:    cfg.MaxRetries,
-		Logger:        logger,
+	// Build server address with port if not present.
+	serverAddr := cfg.ServerAddress
+	if cfg.ServerPort > 0 && !containsPort(serverAddr) {
+		serverAddr = fmt.Sprintf("%s:%d", serverAddr, cfg.ServerPort)
 	}
 
-	client, backend, err := factory.NewClient(factoryCfg)
+	// Create layeh client directly.
+	layehClient, err := layeh.NewClient(layeh.Config{
+		ServerAddr: serverAddr,
+		Secret:     []byte(cfg.SharedSecret),
+		Timeout:    cfg.Timeout,
+	})
 	if err != nil {
-		logger.Error("radius_forward: failed to create client",
+		logger.Error("radius_forward: failed to create layeh client",
 			"error", err,
-			"server", cfg.ServerAddress,
-			"backend", backend,
+			"server", serverAddr,
 		)
 		return r
 	}
 
+	// Wrap layeh client to expose radius.ClientInterface.
+	r.client = adapter.NewClient(layehClient)
+
 	logger.Info("radius_forward: client initialized",
-		"server", cfg.ServerAddress,
-		"backend", backend,
+		"server", serverAddr,
+		"backend", "layeh",
 	)
 
-	r.client = client
 	return r
+}
+
+// containsPort checks if the address already contains a port number.
+func containsPort(addr string) bool {
+	for i := len(addr) - 1; i >= 0; i-- {
+		if addr[i] == ':' {
+			return true
+		}
+		if addr[i] < '0' || addr[i] > '9' {
+			return false
+		}
+	}
+	return false
+}
+
+// extractAuthID extracts the authCtxID portion from a sessionID for debug tracing.
+// sessionID format: "nssAAF;{unixnano};{authCtxID}"
+// Returns sessionID if no separator found.
+func extractAuthID(sessionID string) string {
+	if len(sessionID) == 0 {
+		return ""
+	}
+	for i := len(sessionID) - 1; i >= 0; i-- {
+		if sessionID[i] == ';' {
+			if i < len(sessionID)-1 {
+				return sessionID[i+1:]
+			}
+			return ""
+		}
+	}
+	return sessionID
 }
 
 // Forward sends a raw EAP payload to AAA-S via RADIUS Access-Request and returns the response.
 // Spec: RFC 2865 §3, RFC 3579 §3.2 (EAP-Message + Message-Authenticator)
 // The eapPayload is wrapped in EAP-Message attributes and sent as an Access-Request.
-// User-Name is derived from the sessionID (format: "nssAAF;{nano};{authCtxID}").
+// User-Name is set to the GPSI per TS 29.561 §16.3.1.
 func (rf *radiusForwarder) Forward(ctx context.Context, eapPayload []byte, sessionID string, sst uint8, sd string, gpsi string) ([]byte, error) {
 	if rf.client == nil {
 		return nil, fmt.Errorf("radius_forward: client not configured")
 	}
 
-	// Extract userName from sessionID.
+	// Extract authID from sessionID for debug tracing.
 	// sessionID format: "nssAAF;{unixnano};{authCtxID}"
-	// Use authCtxID portion as User-Name.
-	userName := sessionID
-	if len(sessionID) > 0 {
-		// Try to extract the last segment (authCtxID) after the last semicolon.
-		if idx := -1; true {
-			for i := len(sessionID) - 1; i >= 0; i-- {
-				if sessionID[i] == ';' {
-					idx = i
-					break
-				}
-			}
-			if idx >= 0 && idx < len(sessionID)-1 {
-				userName = sessionID[idx+1:]
-			}
-		}
-	}
+	// Use authCtxID portion as AuthID for debugging.
+	authID := extractAuthID(sessionID)
 
 	attrs := []radius.Attribute{
-		radius.MakeStringAttribute(radius.AttrUserName, userName),
-		radius.MakeStringAttribute(radius.AttrCallingStationID, userName),
+		radius.MakeStringAttribute(radius.AttrUserName, gpsi),
+		radius.MakeStringAttribute(radius.AttrCallingStationID, gpsi),
 		radius.MakeIntegerAttribute(radius.AttrServiceType, radius.ServiceTypeAuthenticateOnly),
 		radius.MakeIntegerAttribute(radius.AttrNASPortType, radius.NASPortTypeVirtual),
 		radius.Make3GPPSNSSAIAttribute(sst, sd),
@@ -131,7 +149,8 @@ func (rf *radiusForwarder) Forward(ctx context.Context, eapPayload []byte, sessi
 
 	rf.logger.Info("radius_forward_request",
 		"session_id", sessionID,
-		"user_name", userName,
+		"auth_id", authID,
+		"user_name", gpsi,
 		"eap_len", len(eapPayload),
 		"fragments", len(eapFrags),
 		"gpsi", gpsi,
@@ -139,13 +158,11 @@ func (rf *radiusForwarder) Forward(ctx context.Context, eapPayload []byte, sessi
 
 	// Protocol-kind debug event: surfaces RADIUS Access-Request send + outcome.
 	// Detail includes RADIUS code (1 = Access-Request per RFC 2865 §3.1) and
-	// the resolved AAA-S peer address. The actual underlying send call is
-	// wrapped with WrapProtocol in Task 14 — this Emit is the higher-level
-	// "we are about to call RADIUS" signal with request metadata.
+	// the resolved AAA-S peer address. AuthID is the extracted authCtxID for tracing.
 	rf.debug.Emit(ctx, debug.Event{
 		Op:     "aaa.radius.forward",
 		Kind:   debug.KindProtocol,
-		AuthID: userName,
+		AuthID: authID,
 		GPSI:   gpsi,
 		Detail: map[string]any{
 			"code":       radius.CodeAccessRequest,
@@ -190,14 +207,14 @@ func (rf *radiusForwarder) Forward(ctx context.Context, eapPayload []byte, sessi
 			rf.debug.Emit(ctx, debug.Event{
 				Op:     "aaa.radius.response_received",
 				Kind:   debug.KindProtocol,
-				AuthID: userName,
+				AuthID: authID,
 				GPSI:   gpsi,
 				Detail: map[string]any{
-					"code":        respCode,
-					"status":      respStatus,
-					"peer":        rf.config.ServerAddress,
-					"eap_len":     len(response),
-					"session_id":  sessionID,
+					"code":       respCode,
+					"status":     respStatus,
+					"peer":       rf.config.ServerAddress,
+					"eap_len":    len(response),
+					"session_id": sessionID,
 				},
 				Status: respStatus,
 			})

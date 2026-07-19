@@ -65,6 +65,25 @@ const (
 	NASPortTypeEPS         = 16
 )
 
+// RADIUS packet codes as defined in RFC 2865.
+// Spec: RFC 2865 §3
+const (
+	CodeAccessRequest     uint8 = 1
+	CodeAccessAccept     uint8 = 2
+	CodeAccessReject     uint8 = 3
+	CodeAccessChallenge  uint8 = 11
+	CodeDisconnectRequest uint8 = 40
+	CodeDisconnectACK     uint8 = 41
+	CodeDisconnectNAK     uint8 = 42
+)
+
+// Attribute represents a RADIUS attribute (TLV format).
+// Spec: RFC 2865 §5
+type Attribute struct {
+	Type  uint8
+	Value []byte
+}
+
 // Attribute types for NSSAA.
 const (
 	Attr3GPPSNSSAI = 200 // 3GPP Vendor-Specific: S-NSSAI
@@ -186,4 +205,33 @@ func GetIPv4(attr *Attribute) []byte {
 		return nil
 	}
 	return attr.Value[:4]
+}
+
+// FragmentEAPMessage fragments an EAP message into chunks suitable for RADIUS.
+// RFC 3579 §3.2: Multiple EAP-Message attributes may be used.
+func FragmentEAPMessage(payload []byte, maxSize int) [][]byte {
+	if len(payload) <= maxSize {
+		return [][]byte{payload}
+	}
+
+	frags := make([][]byte, 0, (len(payload)+maxSize-1)/maxSize)
+	for i := 0; i < len(payload); i += maxSize {
+		end := i + maxSize
+		if end > len(payload) {
+			end = len(payload)
+		}
+		frags = append(frags, payload[i:end])
+	}
+	return frags
+}
+
+// AssembleEAPMessage reassembles EAP fragments from RADIUS attributes.
+func AssembleEAPMessage(attrs []Attribute) []byte {
+	var payload []byte
+	for _, attr := range attrs {
+		if attr.Type == AttrEAPMessage {
+			payload = append(payload, attr.Value...)
+		}
+	}
+	return payload
 }

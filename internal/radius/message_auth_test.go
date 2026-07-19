@@ -3,254 +3,60 @@
 package radius
 
 import (
-	"crypto/md5"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
-// ============================================================================
-// Response Authenticator (RFC 2865 §3)
-// ============================================================================
-
-func TestVerifyResponseAuthenticator_Valid(t *testing.T) {
-	secret := "testing123"
-	reqAuth := [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
-
-	// Build a response with correct authenticator
-	// Response header: Code(1) + ID(1) + Length(2) + Vector(16)
-	resp := make([]byte, 20)
-	resp[0] = CodeAccessAccept
-	resp[1] = 1
-	resp[2] = 0
-	resp[3] = 20 // length = 20 (header only, no attributes)
-
-	// Compute correct Response Authenticator per RFC 2865 §3
-	// ResponseAuth = MD5(Code+ID+Length+RequestAuth+Attributes+Secret)
-	h := md5.New()
-	h.Write(resp[0:4])       // Code + ID + Length
-	h.Write(reqAuth[:])      // Request Authenticator
-	h.Write([]byte{})        // Attributes (empty)
-	h.Write([]byte(secret))  // Secret
-	correctAuth := h.Sum(nil)
-	copy(resp[4:20], correctAuth)
-
-	// Verify should pass
-	valid := VerifyResponseAuthenticator(resp, reqAuth, secret)
-	assert.True(t, valid, "expected valid response authenticator")
-}
-
-func TestVerifyResponseAuthenticator_Invalid(t *testing.T) {
-	secret := "testing123"
-	reqAuth := [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
-
-	// Response with wrong authenticator (all zeros instead of correct value)
-	resp := make([]byte, 20)
-	resp[0] = CodeAccessAccept
-	resp[1] = 1
-	resp[2] = 0
-	resp[3] = 20
-
-	valid := VerifyResponseAuthenticator(resp, reqAuth, secret)
-	assert.False(t, valid, "expected invalid response authenticator")
-}
-
-func TestVerifyResponseAuthenticator_Tampered(t *testing.T) {
-	secret := "testing123"
-	reqAuth := [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
-
-	// Build valid response
-	resp := make([]byte, 20)
-	resp[0] = CodeAccessAccept
-	resp[1] = 1
-	resp[2] = 0
-	resp[3] = 20
-
-	// Compute correct authenticator
-	h := md5.New()
-	h.Write(resp[0:4])
-	h.Write(reqAuth[:])
-	h.Write([]byte{})
-	h.Write([]byte(secret))
-	correctAuth := h.Sum(nil)
-	copy(resp[4:20], correctAuth)
-
-	// Verify valid
-	assert.True(t, VerifyResponseAuthenticator(resp, reqAuth, secret), "expected valid")
-
-	// Tamper with response code
-	resp[0] = CodeAccessReject
-
-	// Verify tampered
-	assert.False(t, VerifyResponseAuthenticator(resp, reqAuth, secret), "expected invalid after tampering")
-}
-
-func TestVerifyResponseAuthenticator_TamperedAttributes(t *testing.T) {
-	secret := "testing123"
-	reqAuth := [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
-
-	// Build response with attributes
-	resp := make([]byte, 30)
-	resp[0] = CodeAccessAccept
-	resp[1] = 1
-	resp[2] = 0
-	resp[3] = 30 // length includes attributes
-	resp[20] = 1 // User-Name attribute
-	resp[21] = 5
-	resp[22] = 'a'
-	resp[23] = 'l'
-	resp[24] = 'i'
-	resp[25] = 'c'
-	resp[26] = 'e'
-	// 4 bytes of padding (27-30)
-
-	// Compute correct authenticator with attributes
-	h := md5.New()
-	h.Write(resp[0:4])
-	h.Write(reqAuth[:])
-	h.Write(resp[20:30])
-	h.Write([]byte(secret))
-	correctAuth := h.Sum(nil)
-	copy(resp[4:20], correctAuth)
-
-	// Verify valid
-	assert.True(t, VerifyResponseAuthenticator(resp, reqAuth, secret), "expected valid")
-
-	// Tamper with attribute
-	resp[22] = 'b' // Change 'a' to 'b'
-
-	// Verify tampered
-	assert.False(t, VerifyResponseAuthenticator(resp, reqAuth, secret), "expected invalid after attribute tampering")
-}
-
-func TestVerifyResponseAuthenticator_WrongSecret(t *testing.T) {
-	secret := "testing123"
-	wrongSecret := "wrongsecret"
-	reqAuth := [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
-
-	// Build response with correct secret
-	resp := make([]byte, 20)
-	resp[0] = CodeAccessAccept
-	resp[1] = 1
-	resp[2] = 0
-	resp[3] = 20
-
-	h := md5.New()
-	h.Write(resp[0:4])
-	h.Write(reqAuth[:])
-	h.Write([]byte{})
-	h.Write([]byte(secret))
-	correctAuth := h.Sum(nil)
-	copy(resp[4:20], correctAuth)
-
-	// Verify with wrong secret should fail
-	assert.False(t, VerifyResponseAuthenticator(resp, reqAuth, wrongSecret), "expected invalid with wrong secret")
-}
-
-func TestVerifyResponseAuthenticator_TooShort(t *testing.T) {
-	secret := "testing123"
-	reqAuth := [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
-
-	// Packet too short (less than 20 bytes)
-	shortResp := []byte{1, 2, 3}
-	assert.False(t, VerifyResponseAuthenticator(shortResp, reqAuth, secret), "expected invalid for short packet")
-
-	// Exactly 20 bytes is valid header
-	resp := make([]byte, 20)
-	resp[0] = CodeAccessAccept
-	resp[1] = 1
-	resp[2] = 0
-	resp[3] = 20
-	// Leave authenticator as zeros
-	assert.False(t, VerifyResponseAuthenticator(resp, reqAuth, secret), "zero authenticator should fail")
-}
-
-func TestVerifyResponseAuthenticator_LengthMismatch(t *testing.T) {
-	secret := "testing123"
-	reqAuth := [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
-
-	// Response claims longer than it is
-	resp := make([]byte, 20)
-	resp[0] = CodeAccessAccept
-	resp[1] = 1
-	resp[2] = 0
-	resp[3] = 50 // Claims 50 bytes
-	// But actually only 20 bytes
-
-	assert.False(t, VerifyResponseAuthenticator(resp, reqAuth, secret), "expected invalid for length mismatch")
-}
-
-func TestVerifyResponseAuthenticator_AccessReject(t *testing.T) {
-	secret := "testing123"
-	reqAuth := [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
-
-	// Build Access-Reject with correct authenticator
-	resp := make([]byte, 20)
-	resp[0] = CodeAccessReject
-	resp[1] = 1
-	resp[2] = 0
-	resp[3] = 20
-
-	h := md5.New()
-	h.Write(resp[0:4])
-	h.Write(reqAuth[:])
-	h.Write([]byte{})
-	h.Write([]byte(secret))
-	correctAuth := h.Sum(nil)
-	copy(resp[4:20], correctAuth)
-
-	// Verify should pass for Access-Reject too
-	assert.True(t, VerifyResponseAuthenticator(resp, reqAuth, secret), "expected valid for Access-Reject")
-}
-
-func TestVerifyResponseAuthenticator_AccessChallenge(t *testing.T) {
-	secret := "testing123"
-	reqAuth := [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
-
-	// Build Access-Challenge with correct authenticator
-	resp := make([]byte, 20)
-	resp[0] = CodeAccessChallenge
-	resp[1] = 1
-	resp[2] = 0
-	resp[3] = 20
-
-	h := md5.New()
-	h.Write(resp[0:4])
-	h.Write(reqAuth[:])
-	h.Write([]byte{})
-	h.Write([]byte(secret))
-	correctAuth := h.Sum(nil)
-	copy(resp[4:20], correctAuth)
-
-	// Verify should pass for Access-Challenge too
-	assert.True(t, VerifyResponseAuthenticator(resp, reqAuth, secret), "expected valid for Access-Challenge")
-}
-
-// ============================================================================
-// ComputeResponseAuthenticator (round-trip tests)
-// ============================================================================
-
-func TestComputeResponseAuthenticatorRoundTrip(t *testing.T) {
-	secret := "testing123"
-	reqAuth := [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
-
-	// Build a response packet
-	code := CodeAccessAccept
-	id := uint8(1)
-	length := uint16(20)
-	attrs := []byte{}
-
-	// Compute the Response Authenticator
-	respAuth := ComputeResponseAuthenticator(code, id, length, reqAuth, attrs, secret)
-
-	// Build the response packet with the computed authenticator
-	resp := make([]byte, 20)
-	resp[0] = code
-	resp[1] = id
-	resp[2] = byte(length >> 8)
-	resp[3] = byte(length & 0xFF)
-	copy(resp[4:20], respAuth[:])
-
-	// Verify the response authenticator
-	assert.True(t, VerifyResponseAuthenticator(resp, reqAuth, secret), "expected valid round-trip")
+// TestMessageAuthenticatorFunctions tests the core MA functions.
+func TestMessageAuthenticatorFunctions(t *testing.T) {
+	// Build a minimal packet with State attribute
+	stateAttr := []byte{24, 9, 's', 't', 'a', 't', 'e', '1', '2'}
+	
+	// Build packet without MA first to compute correct length
+	totalLen := 20 + len(stateAttr) + 18
+	pkt := make([]byte, totalLen)
+	pkt[0] = 43 // CoA-Request
+	pkt[1] = 12 // ID
+	pkt[2] = byte(totalLen >> 8)
+	pkt[3] = byte(totalLen)
+	
+	// Zero the Request Authenticator (bytes 4-19) for CoA/DM per RFC 5176 §3.2
+	for i := 4; i < 20; i++ {
+		pkt[i] = 0
+	}
+	
+	// Copy State attribute
+	copy(pkt[20:], stateAttr)
+	
+	// Write Message-Authenticator attribute header: type=80, length=18
+	maOffset := 20 + len(stateAttr)
+	pkt[maOffset] = 80   // Message-Authenticator type
+	pkt[maOffset+1] = 18 // Length
+	
+	// Verify HasMessageAuthenticator works
+	assert.True(t, HasMessageAuthenticator(pkt), "should find MA")
+	
+	// Verify FindMessageAuthenticator returns correct offset
+	idx := FindMessageAuthenticator(pkt)
+	assert.Equal(t, maOffset, idx, "MA should be at offset %d", maOffset)
+	
+	// Compute MA (with zeroed Request Authenticator)
+	ma := ComputeMessageAuthenticator(pkt, "secret")
+	assert.Len(t, ma, 16, "MA should be 16 bytes")
+	
+	// Write MA to packet
+	copy(pkt[maOffset+2:], ma)
+	
+	// Verify
+	result := VerifyMessageAuthenticator(pkt, "secret")
+	t.Logf("Verify result: %v", result)
+	assert.True(t, result, "MA should verify with correct secret")
+	assert.False(t, VerifyMessageAuthenticator(pkt, "wrong"), "MA should not verify with wrong secret")
+	
+	// Test that tampering with the packet fails verification
+	pktCopy := make([]byte, len(pkt))
+	copy(pktCopy, pkt)
+	pktCopy[maOffset+2] ^= 0xFF // Flip all bits in first byte of MA
+	assert.False(t, VerifyMessageAuthenticator(pktCopy, "secret"), "tampered MA should not verify")
 }
