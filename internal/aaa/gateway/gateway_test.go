@@ -158,8 +158,17 @@ func TestGateway_HandleForward_WithDebug_PreservesBehavior(t *testing.T) {
 		Logger: slog.New(slog.NewTextHandler(os.Stdout, nil)),
 		Debug:  &debug.Debug{}, // zero-value: disabled, all Emit paths short-circuit
 		// RadiusServerAddress must be non-empty for radiusForwarder to be created.
-		// The connection will fail (no server listening), producing the expected 500.
+		// Set short timeouts to avoid slow tests when no server is listening.
 		RadiusServerAddress: "localhost:9999",
+		InternalComm: config.InternalCommConfig{
+			Native: config.NativeCommConfig{
+				Radius: config.RadiusConfig{
+					Timeout:        100 * time.Millisecond,
+					MaxRetries:     1,
+					ResponseWindow: 100 * time.Millisecond,
+				},
+			},
+		},
 	})
 
 	body := []byte(`{

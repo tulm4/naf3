@@ -15,33 +15,32 @@ import (
 // VendorID3GPP is the 3GPP vendor ID (10415).
 const VendorID3GPP uint32 = 10415
 
-// EncodeSnssaiAVP encodes a 3GPP-S-NSSAI as a grouped AVP.
-// Spec: TS 29.571 §5.4.4.60, TS 29.561 §17
+// EncodeSnssaiAVP encodes a 3GPP-S-NSSAI as a vendor-specific AVP.
+// Spec: TS 29.571 §5.4.4.60, TS 29.561 §17.4.1
 //
-// Format:
+// Format: SST(1 octet) + SD(3 octets, optional)
+// The wire format is raw octets, NOT a grouped AVP.
 //
-//	3GPP-S-NSSAI ::= <AVP Header: 310, Vendor: 10415>
-//	                 { Slice/Service Type }
-//	                 [ Slice Differentiator ]
-//
-// AVP Code 310, Vendor 10415, M-bit and V-bit set.
+// AVP Code 200, Vendor 10415, M-bit and V-bit set.
 // Returns an error if sd is not a valid 6-character hex string.
 func EncodeSnssaiAVP(sst uint8, sd string) (*diam.AVP, error) {
-	sstAVP := diam.NewAVP(259, avp.Mbit|avp.Vbit, VendorID3GPP, datatype.Unsigned32(sst))
-
-	group := &diam.GroupedAVP{AVP: []*diam.AVP{sstAVP}}
+	var data []byte
+	data = append(data, sst)
 
 	if sd != "" {
 		sdBytes, err := parseSDToBytes(sd)
 		if err != nil {
 			return nil, fmt.Errorf("diameter: invalid SNSSAI SD %q: %w", sd, err)
 		}
-		sdAVP := diam.NewAVP(260, avp.Mbit|avp.Vbit, VendorID3GPP, datatype.OctetString(sdBytes))
-		group.AVP = append(group.AVP, sdAVP)
+		data = append(data, sdBytes...)
 	}
 
-	return diam.NewAVP(310, avp.Mbit|avp.Vbit, VendorID3GPP, group), nil
+	return diam.NewAVP(AVP3GPP_S_NSSAI, avp.Mbit|avp.Vbit, VendorID3GPP, datatype.OctetString(data)), nil
 }
+
+// AVP3GPP_S_NSSAI is the 3GPP-S-NSSAI AVP code per TS 29.561 Table 17.4-1.
+// Spec: TS 29.561 §17.4.1
+const AVP3GPP_S_NSSAI = 200
 
 // EncodeEapPayloadAVP encodes an EAP payload as a Diameter AVP.
 // Spec: RFC 4072, TS 29.561 §17

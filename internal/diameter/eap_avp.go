@@ -10,7 +10,7 @@ import (
 )
 
 // AVP codes used by NSSAAF.
-// Spec: RFC 4072, RFC 6733, TS 29.571
+// Spec: RFC 4072, RFC 6733, TS 29.561 §17.4.1
 const (
 	// AVP code for EAP-Payload (RFC 4072).
 	AVPCodeEAPPayload uint32 = 209
@@ -18,12 +18,9 @@ const (
 	AVPCodeResultCode uint32 = 268
 	// AVP code for Auth-Application-Id (RFC 6733).
 	AVPCodeAuthApplicationID uint32 = 258
-	// AVP code for 3GPP-S-NSSAI (TS 29.571 §5.4.4.60).
-	AVPCodeSNSSAI uint32 = 310
-	// AVP code for Slice/Service Type (child of SNSSAI).
-	AVPCodeSliceServiceType uint32 = 259
-	// AVP code for Slice Differentiator (child of SNSSAI).
-	AVPCodeSliceDifferentiator uint32 = 260
+	// AVP code for 3GPP-S-NSSAI (TS 29.561 Table 17.4-1).
+	// Format: SST(1 octet) + SD(3 octets, optional) as raw OctetString.
+	AVPCodeSNSSAI uint32 = 200
 )
 
 // DecodeEapPayloadAVP decodes an EAP-Payload AVP from a Diameter message.
@@ -44,9 +41,11 @@ func DecodeEapPayloadAVP(m *diam.Message) ([]byte, error) {
 	return nil, nil
 }
 
-// DecodeSnssaiAVP decodes a 3GPP-S-NSSAI AVP (code 310) from a message.
+// DecodeSnssaiAVP decodes a 3GPP-S-NSSAI AVP (code 200) from a message.
 // Returns SST and SD; SD may be empty string if not present.
-// Spec: TS 29.571 §5.4.4.60
+// Spec: TS 29.571 §5.4.4.60, TS 29.561 §17.4.1
+//
+// Format: SST(1 octet) + SD(3 octets, optional) as raw OctetString.
 func DecodeSnssaiAVP(m *diam.Message) (sst uint8, sd string, err error) {
 	avps, err := m.FindAVPs(AVPCodeSNSSAI, VendorID3GPP)
 	if err != nil {
@@ -56,28 +55,22 @@ func DecodeSnssaiAVP(m *diam.Message) (sst uint8, sd string, err error) {
 		return 0, "", nil // not found — not an error
 	}
 
-	// 3GPP-S-NSSAI is a grouped AVP.
-	g, ok := avps[0].Data.(*diam.GroupedAVP)
+	// 3GPP-S-NSSAI is a raw OctetString: SST(1 octet) + SD(3 octets, optional).
+	os, ok := avps[0].Data.(datatype.OctetString)
 	if !ok {
-		// Fallback: try as raw octet string (SST only).
-		if os, ok := avps[0].Data.(datatype.OctetString); ok && len(os) >= 1 {
-			return os[0], "", nil
-		}
 		return 0, "", fmt.Errorf("diameter: 3GPP-S-NSSAI AVP has unexpected type %T", avps[0].Data)
 	}
 
-	for _, child := range g.AVP {
-		switch child.Code {
-		case AVPCodeSliceServiceType:
-			if ui, ok := child.Data.(datatype.Unsigned32); ok {
-				sst = uint8(ui)
-			}
-		case AVPCodeSliceDifferentiator:
-			if os, ok := child.Data.(datatype.OctetString); ok && len(os) >= 3 {
-				sd = encodeHex([]byte(os))
-			}
-		}
+	if len(os) < 1 {
+		return 0, "", fmt.Errorf("diameter: 3GPP-S-NSSAI AVP too short: need at least 1 byte for SST")
 	}
+
+	sst = os[0]
+
+	if len(os) >= 4 {
+		sd = encodeHex([]byte(os[1:4]))
+	}
+
 	return sst, sd, nil
 }
 

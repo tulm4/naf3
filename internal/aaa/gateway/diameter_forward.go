@@ -345,7 +345,7 @@ func (df *diamForwarder) Close() error {
 
 // buildDERMessage constructs a Diameter-EAP-Request message with all required AVPs.
 // Spec: RFC 4072, RFC 6733 §8.8, TS 29.561 §17
-func (df *diamForwarder) buildDERMessage(conn diam.Conn, hopByHop uint32, sessionID string, eapPayload []byte, sst uint8, sd string) (*diam.Message, error) {
+func (df *diamForwarder) buildDERMessage(conn diam.Conn, hopByHop uint32, sessionID string, eapPayload []byte, sst uint8, sd string, gpsi string) (*diam.Message, error) {
 	m := diam.NewRequest(268, df.cfg.AuthApplicationID, conn.Dictionary())
 	m.Header.HopByHopID = hopByHop
 
@@ -381,7 +381,8 @@ func (df *diamForwarder) buildDERMessage(conn diam.Conn, hopByHop uint32, sessio
 	if avpErr := addAVP(avp.DestinationRealm, avp.Mbit, 0, datatype.DiameterIdentity(df.destRealm)); avpErr != nil {
 		return nil, avpErr
 	}
-	if avpErr := addAVP(avp.UserName, avp.Mbit, 0, datatype.UTF8String(sessionID)); avpErr != nil {
+	// User-Name carries the GPSI (UE identifier) per TS 29.561 §17.
+	if avpErr := addAVP(avp.UserName, avp.Mbit, 0, datatype.UTF8String(gpsi)); avpErr != nil {
 		return nil, avpErr
 	}
 	if avpErr := addAVP(209, avp.Mbit, 0, datatype.OctetString(eapPayload)); avpErr != nil {
@@ -411,7 +412,7 @@ func (df *diamForwarder) Forward(ctx context.Context, eapPayload []byte, session
 	df.addPending(hopByHop, respCh)
 	defer df.removePending(hopByHop)
 
-	m, err := df.buildDERMessage(conn, hopByHop, sessionID, eapPayload, sst, sd)
+	m, err := df.buildDERMessage(conn, hopByHop, sessionID, eapPayload, sst, sd, gpsi)
 	if err != nil {
 		return nil, err
 	}
@@ -656,53 +657,13 @@ func (df *diamForwarder) handleDWA() diam.HandlerFunc {
 	}
 }
 
-// encodeSnssaiAVP encodes S-NSSAI as a grouped AVP (code 310, 3GPP vendor).
-// Spec: TS 29.061; same logic as internal/diameter.EncodeSnssaiAVP.
+// encodeSnssaiAVP encodes S-NSSAI as a vendor-specific AVP (code 200, 3GPP vendor).
+// Spec: TS 29.571 §5.4.4.60, TS 29.561 §17.4.1
+//
+// Format: SST(1 octet) + SD(3 octets, optional)
+// The wire format is raw octets, NOT a grouped AVP.
 func encodeSnssaiAVP(sst uint8, sd string) (*diam.AVP, error) {
-	sstAVP := diam.NewAVP(259, avp.Mbit|avp.Vbit, VendorID3GPP, datatype.Unsigned32(sst))
-
-	var group *diam.GroupedAVP
-	if sd != "" && sd != "FFFFFF" {
-		sdBytes, err := parseSD(sd)
-		if err != nil {
-			return nil, err
-		}
-		sdAVP := diam.NewAVP(260, avp.Mbit|avp.Vbit, VendorID3GPP, datatype.OctetString(sdBytes))
-		group = &diam.GroupedAVP{AVP: []*diam.AVP{sstAVP, sdAVP}}
-	} else {
-		group = &diam.GroupedAVP{AVP: []*diam.AVP{sstAVP}}
-	}
-
-	return diam.NewAVP(310, avp.Mbit|avp.Vbit, VendorID3GPP, group), nil
-}
-
-// parseSD converts a 6-character hex string to 3 bytes.
-// Returns error if sd is not exactly 6 hex characters or contains invalid chars.
-func parseSD(sd string) ([]byte, error) {
-	if len(sd) != 6 {
-		return nil, fmt.Errorf("invalid SNSSAI SD length: %q (expected 6 hex chars)", sd)
-	}
-	var result [3]byte
-	for i := 0; i < 6; i++ {
-		var val byte
-		c := sd[i]
-		switch {
-		case c >= '0' && c <= '9':
-			val = c - '0'
-		case c >= 'A' && c <= 'F':
-			val = c - 'A' + 10
-		case c >= 'a' && c <= 'f':
-			val = c - 'a' + 10
-		default:
-			return nil, fmt.Errorf("invalid SNSSAI SD: %q contains non-hex char %c", sd, c)
-		}
-		if i%2 == 0 {
-			result[i/2] = val << 4
-		} else {
-			result[i/2] |= val
-		}
-	}
-	return result[:], nil
+	return diameter.EncodeSnssaiAVP(sst, sd)
 }
 
 // handleASR handles Abort-Session-Request from AAA-S (server-initiated).

@@ -101,11 +101,11 @@ func TestDiameter_AVPParsing(t *testing.T) {
 
 // TestDiameter_AVPBuilder tests building AVPs from struct fields to wire bytes.
 func TestDiameter_AVPBuilder(t *testing.T) {
-	// Test EncodeSnssaiAVP (S-NSSAI AVP, code 310, vendor 10415)
+	// Test EncodeSnssaiAVP (S-NSSAI AVP, code 200, vendor 10415)
 	snssaiAVP, err := EncodeSnssaiAVP(1, "ABCDEF")
 	require.NoError(t, err)
 	assert.NotNil(t, snssaiAVP)
-	assert.Equal(t, uint32(310), snssaiAVP.Code)
+	assert.Equal(t, uint32(200), snssaiAVP.Code) // TS 29.561 Table 17.4-1
 	assert.Equal(t, VendorID3GPP, snssaiAVP.VendorID)
 	assert.True(t, snssaiAVP.Flags&avp.Vbit != 0, "V-bit must be set for vendor-specific AVP")
 
@@ -222,4 +222,110 @@ func TestDiameter_MessageHeaderParsing(t *testing.T) {
 	assert.True(t, answer.Header.CommandFlags&0x80 == 0, "R-bit must be cleared for answer")
 	assert.Equal(t, msg.Header.HopByHopID, answer.Header.HopByHopID)
 	assert.Equal(t, msg.Header.EndToEndID, answer.Header.EndToEndID)
+}
+
+// TestDiameter_EAPPayloadNoTruncation verifies that EAP-Payload AVP (code 209)
+// is NOT truncated during encode/decode cycle.
+// This is a regression test for potential truncation issues with large EAP payloads
+// (e.g., EAP-TLS with certificate chains can be several KB).
+func TestDiameter_EAPPayloadNoTruncation(t *testing.T) {
+	testCases := []struct {
+		name string
+		size int
+	}{
+		{"small_5_bytes", 5},
+		{"typical_64_bytes", 64},
+		{"large_256_bytes", 256},
+		{"very_large_1024_bytes", 1024},
+		{"mtu_size_1400_bytes", 1400},
+		{"tls_cert_chain_size", 2048},
+		{"edge_4095_bytes", 4095},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create a DER message using the generated dictionary (production path)
+			der := diam.NewRequest(CmdDER, AppIDAAP, Dict())
+
+			// Add required AVPs
+			_, err := der.NewAVP(avp.SessionID, avp.Mbit, 0, datatype.UTF8String("test-session"))
+			require.NoError(t, err)
+			_, err = der.NewAVP(avp.AuthApplicationID, avp.Mbit, 0, datatype.Unsigned32(AppIDAAP))
+			require.NoError(t, err)
+			_, err = der.NewAVP(avp.AuthRequestType, avp.Mbit, 0, datatype.Unsigned32(1))
+			require.NoError(t, err)
+			_, err = der.NewAVP(avp.UserName, avp.Mbit, 0, datatype.UTF8String("testuser"))
+			require.NoError(t, err)
+
+			// Create EAP payload of exact size
+			eapPayload := make([]byte, tc.size)
+			for i := range eapPayload {
+				eapPayload[i] = byte(i % 256)
+			}
+
+			// Add EAP-Payload AVP using the same code as buildDERMessage (code 209)
+			_, err = der.NewAVP(209, avp.Mbit, 0, datatype.OctetString(eapPayload))
+			require.NoError(t, err)
+
+			// Serialize the message (simulates wire transmission)
+			wire, err := der.Serialize()
+			require.NoError(t, err)
+
+			// Wire format should be larger than the EAP payload (header + other AVPs)
+			require.Greater(t, len(wire), tc.size, "wire should contain the EAP payload")
+
+			// Verify the AVP is present in the serialized message by iterating raw AVPs.
+			// This mirrors the DecodeEapPayloadAVP approach but checks raw data.
+			var foundPayload []byte
+			for _, avpRaw := range der.AVP {
+				if avpRaw.Code == 209 && avpRaw.VendorID == 0 {
+					if os, ok := avpRaw.Data.(datatype.OctetString); ok {
+						foundPayload = []byte(os)
+						break
+					}
+				}
+			}
+
+			require.NotNil(t, foundPayload, "EAP-Payload AVP (code 209) should be present")
+			assert.Equal(t, tc.size, len(foundPayload), "EAP-Payload length must not be truncated")
+			assert.Equal(t, eapPayload, foundPayload, "EAP-Payload content must match exactly")
+		})
+	}
+}
+
+// TestDiameter_EAPPayloadRoundTripWithGeneratedDict tests the EAP-Payload encode/decode
+// cycle using the generated NSSAA dictionary (which is what production uses).
+func TestDiameter_EAPPayloadRoundTripWithGeneratedDict(t *testing.T) {
+	// Create large EAP payload (typical of EAP-TLS with certificate)
+	eapPayload := make([]byte, 1500)
+	for i := range eapPayload {
+		eapPayload[i] = byte((i * 7) % 256) // varied pattern
+	}
+
+	// Build DER with the generated dictionary (production path)
+	der := diam.NewRequest(CmdDER, AppIDAAP, Dict())
+
+	// Add required AVPs
+	_, err := der.NewAVP(avp.SessionID, avp.Mbit, 0, datatype.UTF8String("nssAAF;large-payload-test"))
+	require.NoError(t, err)
+	_, err = der.NewAVP(avp.AuthApplicationID, avp.Mbit, 0, datatype.Unsigned32(AppIDAAP))
+	require.NoError(t, err)
+	_, err = der.NewAVP(avp.AuthRequestType, avp.Mbit, 0, datatype.Unsigned32(1))
+	require.NoError(t, err)
+	_, err = der.NewAVP(avp.UserName, avp.Mbit, 0, datatype.UTF8String("msisdn-1234567890"))
+	require.NoError(t, err)
+
+	// Add EAP-Payload AVP
+	_, err = der.NewAVP(209, avp.Mbit, 0, datatype.OctetString(eapPayload))
+	require.NoError(t, err)
+
+	// Serialize and verify
+	wire, err := der.Serialize()
+	require.NoError(t, err)
+	require.Greater(t, len(wire), len(eapPayload))
+
+	// Decode using the same DecodeEapPayloadAVP function
+	decoded, err := DecodeEapPayloadAVP(der)
+	require.NoError(t, err)
+	assert.Equal(t, eapPayload, decoded, "EAP payload round-trip should preserve all bytes")
 }

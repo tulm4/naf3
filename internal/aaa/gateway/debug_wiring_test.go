@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"testing"
@@ -174,17 +175,20 @@ func findOpInStream(t *testing.T, mr *miniredis.Miniredis, wantOp string) (map[s
 // the op would not be emitted and the assertion fails.
 func TestRadiusForwarder_Forward_EmitsProtocolEventWithOp(t *testing.T) {
 	dbg, mr, ctx := newDebugWithSpan(t)
-	// Use the constructor so rf.client is wired (real radius.Client). The
-	// ServerAddress doesn't have to be reachable — we only need to exercise
-	// the Emit/WrapProtocol call site, not the underlying UDP transport.
-	rf := newRadiusForwarder(RadiusForwarderConfig{
-		ServerAddress:  "127.0.0.1:9999",
-		Timeout:        50 * time.Millisecond,
-		MaxRetries:     0,
-		ResponseWindow: 50 * time.Millisecond,
-	}, slog.New(slog.NewTextHandler(os.Stdout, nil)), dbg)
-	if rf.client == nil {
-		t.Fatal("radius client should be wired via newRadiusForwarder")
+
+	// Create forwarder WITHOUT the factory so we can inject a fast mock client.
+	rf := &radiusForwarder{
+		config: RadiusForwarderConfig{
+			ServerAddress: "127.0.0.1:9999",
+		},
+		logger: slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		debug:  dbg,
+	}
+
+	// Inject a mock client that fails immediately (no retries).
+	// This exercises the Emit/WrapProtocol call sites without waiting for timeouts.
+	rf.client = &mockRadiusClient{
+		sendErr: fmt.Errorf("mock: no server"),
 	}
 
 	// Use a background ctx so Emit inside WrapProtocol can flush its XAdd
@@ -200,6 +204,23 @@ func TestRadiusForwarder_Forward_EmitsProtocolEventWithOp(t *testing.T) {
 	if _, ok := findOpInStream(t, mr, "radius.eap.forward"); !ok {
 		t.Fatal("expected radius.eap.forward event in debug stream; Task 14 WrapProtocol not wired")
 	}
+}
+
+// mockRadiusClient is a fast-failing mock for radius.ClientInterface.
+type mockRadiusClient struct {
+	sendErr error
+}
+
+func (m *mockRadiusClient) SendAccessRequest(_ context.Context, _ []radius.Attribute) ([]byte, error) {
+	return nil, m.sendErr
+}
+
+func (m *mockRadiusClient) SendEAP(_ context.Context, _ string, _ []byte, _ uint8, _ string) ([]byte, error) {
+	return nil, m.sendErr
+}
+
+func (m *mockRadiusClient) Close() error {
+	return nil
 }
 
 // TestDiamForwarder_Forward_EmitsProtocolEventWithOp proves Task 14: the
@@ -233,7 +254,7 @@ func TestDiamForwarder_Forward_EmitsProtocolEventWithOp(t *testing.T) {
 	callCtx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
 	defer cancel()
 
-	_, _ = df.Forward(callCtx, []byte{1, 2, 3}, "sess-1", 1, "FFFFFF")
+	_, _ = df.Forward(callCtx, []byte{1, 2, 3}, "sess-1", 1, "FFFFFF", "msisdn-12345")
 
 	if _, ok := findOpInStream(t, mr, "aaa.diameter.forward"); !ok {
 		t.Fatal("expected aaa.diameter.forward event in debug stream; Task 13 Emit not wired")

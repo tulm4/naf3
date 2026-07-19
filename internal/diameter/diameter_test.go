@@ -46,7 +46,7 @@ func TestEncodeSnssaiAVPWithSD(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.NotNil(t, avp)
-	assert.Equal(t, uint32(310), avp.Code)
+	assert.Equal(t, uint32(200), avp.Code) // TS 29.561 Table 17.4-1
 	assert.Equal(t, VendorID3GPP, avp.VendorID)
 }
 
@@ -55,7 +55,7 @@ func TestEncodeSnssaiAVPWithoutSD(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.NotNil(t, avp)
-	assert.Equal(t, uint32(310), avp.Code)
+	assert.Equal(t, uint32(200), avp.Code) // TS 29.561 Table 17.4-1
 	assert.Equal(t, VendorID3GPP, avp.VendorID)
 }
 

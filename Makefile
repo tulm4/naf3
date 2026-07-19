@@ -571,6 +571,12 @@ gen-radius-dict: $(RADIUS_DICT_GEN) ## Generate RADIUS dictionary code from dict
 		-package gen composite.dict
 	@echo "Done: internal/radius/layeh/gen/dict.go"
 
+.PHONY: gen-dict
+gen-dict: ## Generate Diameter dictionary Go code from XML
+	@echo "$(YELLOW)Generating Diameter dictionary code...$(NC)"
+	./dict/autogen.sh
+	@echo "$(GREEN)Diameter dictionary code generated: internal/diameter/generated/$(NC)"
+
 # =============================================================================
 # Dependency targets
 # =============================================================================

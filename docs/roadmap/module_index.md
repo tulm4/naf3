@@ -19,6 +19,7 @@
 | `internal/eap/` | `docs/design/06_eap_engine.md` | 2 | READY |
 | `internal/radius/` | `docs/design/07_radius_client.md` | 2 | READY |
 | `internal/diameter/` | `docs/design/08_diameter_client.md` | 2 | READY |
+| `internal/diameter/messages/` | `docs/design/11_diameter_messages_refactor.md` | 2 | READY |
 | `internal/aaa/` | `docs/design/09_aaa_proxy.md` | 2 | READY |
 | `internal/storage/postgres/` | `docs/design/11_database_ha.md` | 3 | READY |
 | `internal/cache/redis/` | `docs/design/12_redis_ha.md` | 3 | READY |
